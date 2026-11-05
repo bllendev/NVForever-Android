@@ -2,7 +2,10 @@
 # compile Bevy (docs/adr/0001-bevy-viewer.md, docs/design/layer3.md §2.2).
 [workspace]
 resolver = "2"
-members = ["nvf-assets", "nvf-play", "nvf-viewer", "nvforever", "nvf-shader-tests"]
+members = ["nvf-assets", "nvf-play", "nvf-viewer", "nvforever", "nvf-shader-tests", "nvf-android", "nvf-android-input"]
+# The Android crates only build for an Android target, so the checks' plain `cargo test`
+# and `cargo clippy` in this folder must not reach them (docs/android.md).
+default-members = ["nvf-assets", "nvf-play", "nvf-viewer", "nvforever", "nvf-shader-tests"]
 exclude = ["vendor/wgpu-ffx", "vendor/wgpu-ffx/wgpu-ffx", "vendor/wgpu-ffx/wgpu-ffx-shaders-spv"]
 
 [workspace.package]
@@ -79,3 +82,6 @@ bevy_render = { path = "vendor/bevy_render" }
 bevy_shader = { path = "vendor/bevy_shader" }
 wgpu-hal = { path = "vendor/wgpu-hal" }
 naga = { path = "vendor/naga" }
+# Same version as crates.io (0.30.13); only the Android platform code differs, so desktop
+# builds are unchanged.
+winit = { path = "vendor/winit" }

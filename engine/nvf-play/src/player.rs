@@ -610,7 +610,8 @@ fn grab_cursor(
         info!("pointer: {}{why}", if wanted { "shown" } else { "hidden" });
         *wanted_before = Some((wanted, film));
     }
-    let grab = playing && !driven && !boxed && window.focused && !hud_cursor && !targeting;
+    // Android touch/controller input has no desktop pointer to capture.
+    let grab = !cfg!(target_os = "android") && playing && !driven && !boxed && window.focused && !hud_cursor && !targeting;
     // Windows cannot lock the cursor in place; confining it still gives raw motion.
     let mode = match (grab, cfg!(target_os = "windows")) {
         (false, _) => CursorGrabMode::None,
@@ -959,7 +960,8 @@ pub(crate) fn mouse_look(
     (tweaks, mut smooth): (Option<Res<crate::tweaks::TweakSettings>>, Local<Vec2>),
 ) {
     let dialogue = *state.get() == PlayState::Dialogue;
-    let grabbed = cursor.single().is_ok_and(|c| c.grab_mode != CursorGrabMode::None);
+    // Android has no desktop pointer to capture, so look input is never gated on a grab.
+    let grabbed = cfg!(target_os = "android") || cursor.single().is_ok_and(|c| c.grab_mode != CursorGrabMode::None);
     let playing = *state.get() == PlayState::Playing || look.is_some_and(|l| l.0);
     let mouse_delta = mouse_guard.filter(motion.delta, grabbed && playing, dialogue);
     // A zoomed conversation locks the view: the mouse moves only the cursor, even if the

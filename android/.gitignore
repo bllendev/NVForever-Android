@@ -1,0 +1,9 @@
+# Android Studio / Gradle
+.gradle/
+.idea/
+local.properties
+build/
+app/build/
+*.iml
+# The .so that cargo-ndk produces (rebuilt by the build; never committed)
+app/src/main/jniLibs/

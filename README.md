@@ -1,5 +1,9 @@
 # NVForever
 
+**Android / Retroid v0.6.0 fork:** build instructions, controls and device verification
+are in [docs/android.md](docs/android.md). The Android app uses the same updated engine
+as the desktop program, with a separate app ID to preserve the original Android build.
+
 An open-source, clean-room reimplementation of the **Fallout: New Vegas** engine, in the
 spirit of OpenMW. It runs on the data files of *your own copy* of the game; it ships no
 Bethesda content and contains no Bethesda or Gamebryo code.

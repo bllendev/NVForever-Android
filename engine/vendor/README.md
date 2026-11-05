@@ -698,6 +698,17 @@ for one); `cargo xtask vendor` downloads the whole AMD SDK and is not needed. No
 AMD's signed DLLs (FSR SDK 2.x), its frame-generation swapchain and DLLs, the SDK's samples
 and prebuilt binaries.
 
+## winit 0.30.13 (Apache-2.0)
+
+Android native input additions in `src/platform_impl/android/mod.rs` forward gamepad keys,
+joystick axes and focus reset into the internal std-only `nvf-android-input` queue. Joystick
+events are consumed before winit treats motion as touch. The queue preserves event
+transitions for Bevy's Android Gamepad adapter. Releasing pointer capture
+(`CursorGrabMode::None`) succeeds as a no-op; actual capture modes remain unsupported. Other
+platforms keep their existing event handling, and the version matches crates.io's, so the
+desktop build is unchanged. Original crate sources and licence are retained; the only added
+dependency is Android-only and internal.
+
 ## Dropped
 
 - bevy_pbr 0.19.1 (#903, PR #905): the bindless index-table comparator in

@@ -165,6 +165,7 @@ dependencies = [
  "ndk-context",
  "ndk-sys",
  "num_enum",
+ "simd_cesu8",
  "thiserror 2.0.21",
 ]
 
@@ -4643,6 +4644,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvf-android"
+version = "0.8.1"
+dependencies = [
+ "bevy",
+ "blake3",
+ "fnv-install",
+ "fnv-vfs",
+ "libc",
+ "nvf-android-input",
+ "nvf-play",
+ "nvforever",
+ "serde_json",
+]
+
+[[package]]
+name = "nvf-android-input"
+version = "0.1.0"
+
+[[package]]
 name = "nvf-assets"
 version = "0.8.1"
 dependencies = [
@@ -7788,8 +7808,6 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 [[package]]
 name = "winit"
 version = "0.30.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6755fa58a9f8350bd1e472d4c3fcc25f824ec358933bba33306d0b63df5978d"
 dependencies = [
  "ahash",
  "android-activity",
@@ -7808,6 +7826,7 @@ dependencies = [
  "libc",
  "memmap2",
  "ndk",
+ "nvf-android-input",
  "objc2 0.5.3",
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",

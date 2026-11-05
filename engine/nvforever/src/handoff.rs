@@ -65,7 +65,9 @@
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use bevy::winit::{UpdateMode, WinitSettings, WINIT_WINDOWS};
+use bevy::winit::{WinitSettings, WINIT_WINDOWS};
+#[cfg(not(target_os = "android"))]
+use bevy::winit::UpdateMode;
 use nvf_play::loading::{CoverRequest, Loading, Uncover};
 use nvf_play::save::{LoadRequest, Restoring, SaveWrites};
 use std::path::{Path, PathBuf};
@@ -107,10 +109,12 @@ const EXIT_AID: &str = "NVF_PLAY_TEST_HANDOFF_EXIT";
 
 /// How often the old run updates while it waits [engineering choice: often enough to see
 /// the new run's file soon, rarely enough to leave the computer to the new run].
+#[cfg_attr(target_os = "android", allow(dead_code))]
 const WAIT_TICK: Duration = Duration::from_millis(50);
 
 /// Where the old window is, for the new run's arguments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub struct Placement {
     /// The window's outer top-left corner on the desktop.
     pub at: Option<IVec2>,
@@ -119,6 +123,7 @@ pub struct Placement {
     pub maximized: bool,
 }
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 impl Placement {
     /// The arguments that open the new run's window the same way.
     pub fn args(&self) -> Vec<String> {
@@ -198,9 +203,12 @@ enum Leaving {
     Asked(Option<LoadRequest>),
     /// The screen is up since this many frames.
     Covered(Option<LoadRequest>, u32),
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     Waiting(Successor),
     /// The new run is up: this one ends after this frame's `Last` ([`EndNow`]).
     HandedOver,
+    #[cfg(target_os = "android")]
+    AndroidWaiting(Instant),
 }
 
 /// What this run is doing, and why the load it was started for was refused
@@ -210,6 +218,7 @@ pub struct Handoff(Leaving, Option<String>);
 
 /// The new run's arguments: this run's without those the save or the window decide
 /// (`keep`), and what to open.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub fn new_run_args(keep: &[String], what: Option<&LoadRequest>, placement: Option<Placement>, file: &Path) -> Vec<String> {
     let mut args = keep.to_vec();
     match what {
@@ -242,6 +251,7 @@ fn destination_of(r: &LoadRequest, here: nvf_play::Location) -> Option<fnv_world
     })
 }
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn placement(window: &Window, entity: Entity) -> Placement {
     let size = UVec2::new(window.resolution.physical_width(), window.resolution.physical_height());
     WINIT_WINDOWS.with_borrow(|windows| match windows.get_window(entity) {
@@ -274,6 +284,7 @@ fn tell_player(why: &str) {
 }
 
 /// A file name no other handoff uses.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn ready_file() -> PathBuf {
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
     std::env::temp_dir().join(format!("nvforever-handoff-{}-{nanos}.ready", std::process::id()))
@@ -293,6 +304,9 @@ pub fn leave(
     mut winit: ResMut<WinitSettings>,
     _main_thread: NonSendMarker,
 ) {
+    // Android restarts through the Java activity, so it never reads the window's placement.
+    #[cfg(target_os = "android")]
+    let _ = &window;
     let handoff = &mut *handoff;
     let why = refused.read().last().map(|r| r.0.clone());
     let request = asked.read().last().cloned().map(Some).or(to_menu.read().last().map(|_| None)).or(why.is_some().then_some(None));
@@ -307,12 +321,47 @@ pub fn leave(
     match std::mem::take(h) {
         Leaving::No => {}
         Leaving::HandedOver => *h = Leaving::HandedOver,
+        #[cfg(target_os = "android")]
+        Leaving::AndroidWaiting(started) => {
+            if started.elapsed() > Duration::from_secs(10) {
+                if let Some(root) = fnv_install::EngineHome::default_root() {
+                    let _ = std::fs::remove_file(root.join("android-restart.json"));
+                }
+                warn!("load: Android activity did not restart; staying");
+                uncover.write(Uncover);
+            } else { *h = Leaving::AndroidWaiting(started); }
+        }
         Leaving::Asked(r) if writes.busy() => *h = Leaving::Asked(r),
         Leaving::Asked(r) => {
             cover.write(CoverRequest { to: r.as_ref().and_then(|r| destination_of(r, *location)) });
             *h = Leaving::Covered(r, 0);
         }
         Leaving::Covered(r, n) if n < COVER_FRAMES => *h = Leaving::Covered(r, n + 1),
+        #[cfg(target_os = "android")]
+        Leaving::Covered(r, _) => {
+            // NativeActivity cannot spawn another copy of app_process. Ask the
+            // Java activity to re-enter through the launcher in a fresh process.
+            let result = (|| -> Result<(), String> {
+                let root = fnv_install::EngineHome::default_root().ok_or("no engine home")?;
+                let mut args = crate::restart_args(&crate::command_line());
+                match &r {
+                    Some(r) => args.extend(["--load".to_string(), r.path.display().to_string()]),
+                    None => args.push("--menu".into()),
+                }
+                let packet = serde_json::json!({"pid": std::process::id(), "args": args});
+                let file = root.join("android-restart.json");
+                fnv_install::guard_write(&file, None).map_err(|e| e.to_string())?;
+                let temp = file.with_extension("tmp");
+                std::fs::write(&temp, packet.to_string()).map_err(|e| e.to_string())?;
+                std::fs::rename(temp, file).map_err(|e| e.to_string())?;
+                Ok(())
+            })();
+            match result {
+                Ok(()) => { info!("load: requested fresh Android activity"); *h = Leaving::AndroidWaiting(Instant::now()); }
+                Err(e) => { warn!("load: cannot restart Android activity: {e}"); uncover.write(Uncover); }
+            }
+        }
+        #[cfg(not(target_os = "android"))]
         Leaving::Covered(r, _) => {
             let file = ready_file();
             let _ = std::fs::remove_file(&file);
