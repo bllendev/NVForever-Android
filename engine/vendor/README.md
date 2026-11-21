@@ -237,6 +237,15 @@ As for the sun visibility, a meshlet view must not get the component.
 
 ## bevy_render 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
+Counters for the GPU flight recorder (`engine/nvforever/src/gpu_recorder/`, the Odin 3's
+`DeviceLost`). New module `src/gpu_counters.rs`: four atomics the recorder reads once a
+frame. `src/renderer/mod.rs` gains inherent `RenderQueue::write_buffer` and
+`write_texture` with `wgpu::Queue`'s own signatures, which take precedence over the
+`Deref` to the queue, so every existing call site counts its bytes with no change and the
+same behaviour (two relaxed atomic adds). `src/gpu_readback.rs` counts readbacks in flight
+around `map_async`. The recorder cannot be a dependency of this crate, which is why the
+counters live here. Drop this patch if Bevy gains an upload/readback diagnostic of its own.
+
 [documented: `src/render_resource/pipeline_cache.rs::create_pipeline_task`, #2317]
 `RENDER_DEVICE_API_GATE` gates pipeline creation on task threads (and synchronous creation).
 Each compilation holds its read side. NVForever's device poll thread shares it;

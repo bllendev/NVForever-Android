@@ -105,6 +105,7 @@ mod limbs;
 mod lips;
 mod memory_budget;
 mod gpu_poll;
+mod gpu_recorder;
 mod pipeline_gate;
 mod pipeline_disk_cache;
 mod pipeline_prewarm;
@@ -1626,6 +1627,9 @@ pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     // Asks for VK_AMD_anti_lag or VK_NV_low_latency2 when Bevy creates the device: before
     // DefaultPlugins (anti_lag.rs, nv_low_latency.rs).
     app.add_plugins(anti_lag::AntiLagInitPlugin);
+    // Asks for VK_EXT_device_fault the same way, so a lost device can say what faulted
+    // (gpu_recorder/fault.rs). Nothing is enabled on a driver without it.
+    gpu_recorder::fault::ask_for_extension(&mut app.world_mut().get_resource_or_init::<bevy::render::renderer::raw_vulkan_init::RawVulkanInitSettings>());
     // The upscaler this run starts with, before the renderer exists: Streamline must be loaded
     // and initialised before the Vulkan instance is made (dlss/, #2198), so the settings' INI is
     // read here by the rows' own rules and precedence, as `apply_stored` applies them at
@@ -1810,6 +1814,9 @@ pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     // wgpu's clean-up of finished GPU work on a thread of its own, not the render thread's
     // queue submit (gpu_poll.rs, #1427).
     .add_plugins(gpu_poll::GpuPollPlugin)
+    // The bounded GPU flight recorder, written only when the device is lost
+    // (gpu_recorder/, the Odin 3's DeviceLost).
+    .add_plugins(gpu_recorder::GpuRecorderPlugin)
     .insert_resource(StartPose {
         position: start,
         heading: args.heading,

@@ -804,6 +804,7 @@ fn update_terrain_shadows(
     mut images: ResMut<Assets<Image>>,
 ) {
     let now = time.elapsed_secs();
+    crate::gpu_recorder::mark(crate::gpu_recorder::ring::feature::TERRAIN_SHADOWS);
     let producer = &mut *producer;
     // T0 started over (another worldspace, an interior, switched off and on): a published
     // map or a job in flight of the earlier heights describes other terrain. Drop both and
@@ -959,6 +960,7 @@ fn produce_terrain_shadows(
     if job.id <= pipe.last_dispatched {
         return;
     }
+    crate::gpu_recorder::mark(crate::gpu_recorder::ring::feature::TERRAIN_SHADOWS_GPU);
     let id = match pipe.id {
         Some(id) => id,
         None => {

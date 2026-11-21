@@ -103,6 +103,7 @@ fn update(
         cam.is_active = false;
         return;
     };
+    crate::gpu_recorder::mark(crate::gpu_recorder::ring::feature::MINIMAP);
     let (place, view) = camera_for(&r);
     *t = place;
     *gt = GlobalTransform::from(place);

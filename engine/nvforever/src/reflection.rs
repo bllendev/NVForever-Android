@@ -200,6 +200,7 @@ fn read_water_pixels(mut commands: Commands, cache: Res<WaterCache>, mut px: Res
     }
     let Some(counter) = cache.seen_counter() else { return };
     px.started = Some(time.elapsed_secs());
+    crate::gpu_recorder::mark(crate::gpu_recorder::ring::feature::WATER_PIXELS_READBACK);
     commands.spawn((Name::new("Water pixel readback"), Readback::buffer(counter.clone()), ReadbackDiagnosticLabel("water-pixels"))).observe(
         |ev: On<ReadbackComplete>, mut px: ResMut<WaterPixels>| {
             if ev.data.len() >= 4 {
@@ -452,6 +453,9 @@ fn update_reflection(
         None => Vec4::new(0.0, 0.0, ssr, 0.0),
     };
     cache.set_reflection_plane(&mut materials, plane);
+    if height.is_some() {
+        crate::gpu_recorder::mark(crate::gpu_recorder::ring::feature::WATER_REFLECTION);
+    }
     if camera.is_active != height.is_some() {
         camera.is_active = height.is_some();
         match (height, seen) {

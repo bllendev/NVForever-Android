@@ -421,7 +421,15 @@ fn map_buffers(mut readbacks: ResMut<GpuReadbacks>) {
         let diagnostic_label = readback.diagnostic_label;
         let buffer = readback.buffer.clone();
         let tx = readback.tx.clone();
+        // NVForever patch (`engine/vendor/README.md`): readbacks in flight, for the GPU
+        // flight recorder (`crate::gpu_counters`). Two relaxed atomic adds a readback.
+        {
+            use core::sync::atomic::Ordering::Relaxed;
+            crate::gpu_counters::READBACKS_IN_FLIGHT.fetch_add(1, Relaxed);
+            crate::gpu_counters::READBACKS_STARTED.fetch_add(1, Relaxed);
+        }
         slice.map_async(wgpu::MapMode::Read, move |res| {
+            crate::gpu_counters::READBACKS_IN_FLIGHT.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
             map_diagnostic::expect_mapped(res, diagnostic_label, buffer.size());
             let buffer_slice = buffer.slice(..);
             let data = buffer_slice.get_mapped_range().unwrap();
