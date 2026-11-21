@@ -53,7 +53,7 @@ use bevy::light::SimulationLightSystems;
 use bevy::math::reflection_matrix;
 use bevy::pbr::DistanceFog;
 use bevy::prelude::*;
-use bevy::render::gpu_readback::{Readback, ReadbackComplete};
+use bevy::render::gpu_readback::{Readback, ReadbackComplete, ReadbackDiagnosticLabel};
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat, TextureUsages};
 use bevy::transform::TransformSystems;
 use bevy::window::{PrimaryWindow, WindowResized};
@@ -201,7 +201,7 @@ fn read_water_pixels(mut commands: Commands, cache: Res<WaterCache>, mut px: Res
     }
     let Some(counter) = cache.seen_counter() else { return };
     px.started = Some(time.elapsed_secs());
-    commands.spawn((Name::new("Water pixel readback"), Readback::buffer(counter.clone()))).observe(
+    commands.spawn((Name::new("Water pixel readback"), Readback::buffer(counter.clone()), ReadbackDiagnosticLabel("water-pixels"))).observe(
         |ev: On<ReadbackComplete>, mut px: ResMut<WaterPixels>| {
             if ev.data.len() >= 4 {
                 px.read(u32::from_le_bytes([ev.data[0], ev.data[1], ev.data[2], ev.data[3]]));
