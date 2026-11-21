@@ -85,15 +85,47 @@ public class LauncherActivity extends Activity {
         controllerSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
         touchSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
 
-        permissionButton = addButton(root, "1. Conceder acesso a todos os arquivos", v -> requestFilesAccess());
-        pickButton = addButton(root, "2. Escolher a pasta Data do Fallout", v -> pickFolder());
-        defaultButton = addButton(root, "Ou criar a pasta padrao (NVForever/Data)", v -> createDefaultFolder());
-        startButton = addButton(root, "3. Iniciar o jogo", v -> startGame());
+        permissionButton = addButton(root, "1. Grant all-files access", v -> requestFilesAccess());
+        pickButton = addButton(root, "2. Choose Fallout Data folder", v -> pickFolder());
+        defaultButton = addButton(root, "Or create the default folder (NVForever/Data)", v -> createDefaultFolder());
+        startButton = addButton(root, "3. Start game", v -> startGame());
+        addButton(root, "Copy debug summary", v -> copyDebugSummary());
 
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(Color.rgb(30, 31, 34));
         scroll.addView(root);
         setContentView(scroll);
+    }
+
+    private void copyDebugSummary() {
+        String summary = "NVForever Odin Debug " + BuildConfig.VERSION_NAME
+                + "\nAndroid " + Build.VERSION.RELEASE + " / " + Build.MODEL;
+        File[] logs = new File(getFilesDir(), "NVForever/logs").listFiles(
+                (directory, name) -> name.startsWith("nvforever-") && name.endsWith(".log"));
+        File newest = null;
+        if (logs != null) {
+            for (File log : logs) {
+                if (log.isFile() && (newest == null || log.lastModified() > newest.lastModified())) newest = log;
+            }
+        }
+        if (newest != null) {
+            try (java.io.RandomAccessFile input = new java.io.RandomAccessFile(newest, "r")) {
+                int count = (int) Math.min(input.length(), 8192L);
+                byte[] tail = new byte[count];
+                input.seek(input.length() - count);
+                input.readFully(tail);
+                summary += "\n\nLatest log tail (review before sharing):\n"
+                        + new String(tail, StandardCharsets.UTF_8);
+            } catch (IOException ignored) {
+                summary += "\nLatest run log could not be read.";
+            }
+        } else {
+            summary += "\nNo engine run log yet.";
+        }
+        android.content.ClipboardManager clipboard = getSystemService(android.content.ClipboardManager.class);
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("NVForever debug summary", summary));
+        android.widget.Toast.makeText(this, "Debug summary copied. Review before sharing.",
+                android.widget.Toast.LENGTH_SHORT).show();
     }
 
     private Button addButton(LinearLayout parent, String label, View.OnClickListener listener) {
@@ -390,7 +422,7 @@ public class LauncherActivity extends Activity {
         pickButton.setEnabled(access);
         defaultButton.setEnabled(access);
         startButton.setEnabled(access && !isClosedFolder(data));
-        startButton.setText(ready ? "3. Iniciar o jogo" : "3. Iniciar mesmo assim (diagnostico)");
+        startButton.setText(ready ? "3. Start game" : "3. Start anyway (diagnostics)");
     }
 
     private void startGame() {
