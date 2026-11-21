@@ -1066,6 +1066,10 @@ pub fn run(line: Vec<String>) -> AppExit {
 /// [`run`], letting the platform shell add its own plugins to the configured game before it
 /// starts: Android's touch and controller input (`engine/nvf-android/src/lib.rs`). `extend`
 /// runs last, after every plugin and system this function adds, and just before `App::run`.
+/// Set (any value) to skip the Pip-Boy's hidden warm-up while a load is covered: a crash
+/// test the Android launcher offers, not a test aid (`pipboy_arm`).
+pub const NO_PIPBOY_WARM_ENV: &str = "NVF_NO_PIPBOY_WARM";
+
 pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     // Started as this run's exit watcher (exit_watch.rs): wait for the game's process, no game.
     if exit_watch::run_if_watcher() {
