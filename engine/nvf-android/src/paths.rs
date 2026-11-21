@@ -15,7 +15,7 @@
 //! (`fnv_install::check_separation`), and `Data/` sits directly in the external files dir,
 //! so the home lives in the internal one. Saves and logs are reachable from a PC with
 //! `adb exec-out run-as org.nvforever.android ...` while the app is a debug build
-//! (docs/android/milestone-2.md).
+//! (docs/android.md).
 
 use std::path::{Path, PathBuf};
 

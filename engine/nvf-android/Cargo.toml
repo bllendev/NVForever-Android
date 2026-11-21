@@ -1,6 +1,6 @@
 # NVForever on Android. Milestone 2: the whole game (the `nvforever` library, the same code
 # as the desktop program) starts in the Android activity, with touch controls, the Android
-# folders and the schemas packed inside the library. See docs/android/milestone-2.md.
+# folders and the schemas packed inside the library. See docs/android.md.
 [package]
 name = "nvf-android"
 description = "NVForever on Android: the cdylib the APK loads (Milestone 2: the full game)"

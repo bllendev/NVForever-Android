@@ -10,7 +10,7 @@
 //! 4. [`diag`]: when the game cannot start (no game folder, an incomplete copy), a screen that
 //!    says why, instead of an app that closes by itself (this was all of Milestone 1).
 //!
-//! Plan, build steps and the on-device checklist: `docs/android/milestone-2.md`.
+//! Plan, build steps and the on-device checklist: `docs/android.md`.
 
 mod controller;
 mod diag;

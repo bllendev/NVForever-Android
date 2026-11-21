@@ -1,4 +1,8 @@
-//! nvforever — the NVForever game binary. Started with no argument that chooses a world or
+//! nvforever — the NVForever game. [`run`] is the whole program, so the desktop binary
+//! (`src/main.rs`) and the Android activity (`engine/nvf-android`, docs/android.md) start the
+//! same code; [`run_with`] lets a platform shell add its own input plugins.
+//!
+//! Started with no argument that chooses a world or
 //! a mode (`MODE_ARGS`; e.g. double-clicked, or with `--data` and window or sound switches
 //! only) it is the game on its main menu, as `--play --menu`. `--explore`, or `--cell`,
 //! `--pos` and the other world arguments without `--play`, open the free-camera explorer:
