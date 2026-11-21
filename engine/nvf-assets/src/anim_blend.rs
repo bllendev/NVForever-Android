@@ -318,22 +318,26 @@ fn decay(v: Vec3, r: Vec3, omega: f32, dt: f32) -> (Vec3, Vec3) {
     ((v + b * dt) * k, (b - omega * (v + b * dt)) * k)
 }
 
-/// An offset's rate at a jump, kept only as far as it takes the offset `x` back towards
-/// zero and never past it (a critically damped spring at `omega` crosses zero when the
-/// rate towards it is over `omega` × the offset): what moves it away, or across, is
-/// dropped. Without this a clip that starts with a sharp move (a lever-action rifle's
-/// shot, `2hrattack5is.kf`) handed its whole speed to an offset of almost nothing, and the
-/// spring flung the arm out and back: the left hand left the Trail Carbine for a quarter
-/// of a second at each shot (the trace `movement-inertia-trace-lever-sights`, 9.5 units
-/// against the clip's own 4.6) [design: inertialization's overshoot clamp, David Bollo,
-/// GDC 2018 "Inertialization: High-Performance Animation Transitions in Gears of War"].
-fn toward_rest(x: Vec3, rate: Vec3, omega: f32) -> Vec3 {
-    let len = x.length();
-    if len < 1e-6 {
-        return Vec3::ZERO;
-    }
-    let d = x / len;
-    d * rate.dot(d).clamp(-omega * len, 0.0)
+/// How much of each node's offset is left `t` seconds after a jump: one curve for every
+/// node, a critically damped spring at `omega` let go from rest, `(1 + ωt)·e^(−ωt)`.
+///
+/// At a jump ([`Animator::smooth_jump`]) the offsets take no rate: the pose eases from where
+/// it was onto the new clip as one blend of the two, every node by the same share, as a
+/// cross-fade does. Nodes that hang from each other then keep their places on each other:
+/// the hands stay on the gun. Each offset keeping a part of its own rate (until
+/// 2026-11-19: only as far as it took the offset back towards zero) gave each node its own
+/// curve, and the arms and the `Weapon` node eased apart: down the sights, a lever or bolt
+/// worked between quick shots took the right hand 16.7 units off the Cowboy Repeater's
+/// grip against the clip's own 10.5, and the left hand 4.7 units off the fore-end against
+/// 0.6 (the smoke trace `sights-fire-hands-rapid`, its `rgrip`/`lgrip` columns, against
+/// `sights-fire-hands-rapid-original`) [observed: the owner's video, 2026-11-19, "Right
+/// hand flies off the handle while firing"]. Keeping the whole rate was worse still: a
+/// clip that starts with a sharp move (`2hrattack5is.kf`) handed its speed to an offset
+/// of almost nothing and the spring flung the arm out and back (the left hand left the
+/// Trail Carbine at each shot, the trace `movement-inertia-trace-lever-sights`).
+#[cfg(test)]
+fn jump_share(t: f32, omega: f32) -> f32 {
+    (1.0 + omega * t) * (-omega * t).exp()
 }
 
 /// The rotation taking `b` to `a`, as a scaled axis (the shorter way).
@@ -380,10 +384,10 @@ impl Seams {
                     self.off_t[i].1 = self.vel_t[i] - rt;
                     self.off_r[i].1 = self.vel_r[i] - rr;
                     // A jump (a clip started again): the clip's own motion from its start
-                    // shows whole; the offset only dies away (`toward_rest`).
+                    // shows whole; every offset dies away on the one curve (`jump_share`).
                     if self.jump {
-                        self.off_t[i].1 = toward_rest(self.off_t[i].0, self.off_t[i].1, self.omega);
-                        self.off_r[i].1 = toward_rest(self.off_r[i].0, self.off_r[i].1, self.omega);
+                        self.off_t[i].1 = Vec3::ZERO;
+                        self.off_r[i].1 = Vec3::ZERO;
                     }
                 }
                 self.off_t[i] = decay(self.off_t[i].0, self.off_t[i].1, self.omega, dt);
@@ -1188,6 +1192,39 @@ mod tests {
             lowest = lowest.min(a.locals[2].translation.x);
         }
         assert!(lowest > -0.02, "flung below the held pose to {lowest}");
+    }
+
+    #[test]
+    fn a_jump_eases_every_node_by_the_same_share() {
+        // Two nodes moving their own ways when the clips' pose jumps: A coming back towards
+        // the new pose, B going away from it. Eased across the jump, both must be the same
+        // share of the way onto the clips' pose at every frame, so nodes that hang from each
+        // other (the arms and the gun in the hand) keep their places on each other.
+        let omega = 10.0;
+        let dt = 1.0 / 60.0;
+        let at = |a: f32, b: f32| [Transform::from_xyz(a, 0.0, 0.0), Transform::from_xyz(b, 0.0, 0.0)];
+        let mut s = Seams { omega, ..Seams::default() };
+        let (mut a, mut b) = (1.3, -0.7);
+        for _ in 0..10 {
+            (a, b) = (a - 2.0 * dt, b - 1.0 * dt);
+            s.smooth(&mut at(a, b), false, false, dt);
+        }
+        // The jump: the clips' pose goes to 0, then A moves on at +0.5/s and B stands still.
+        let mut raw = at(0.0, 0.0);
+        s.smooth(&mut raw, true, true, dt);
+        let (a0, b0) = (raw[0].translation.x, raw[1].translation.x);
+        assert!(a0 > 0.5 && b0 < -0.5, "offsets at the jump: {a0}, {b0}");
+        for frame in 1..40 {
+            let t = frame as f32 * dt;
+            let clip_a = 0.5 * t;
+            let mut raw = at(clip_a, 0.0);
+            s.smooth(&mut raw, false, false, dt);
+            let (share_a, share_b) = ((raw[0].translation.x - clip_a) / a0, raw[1].translation.x / b0);
+            assert!((share_a - share_b).abs() < 1e-4, "frame {frame}: A {share_a} of its offset left, B {share_b}");
+            // The shared curve of a spring let go from rest.
+            let expected = jump_share(t, omega);
+            assert!((share_a - expected).abs() < 1e-3, "frame {frame}: {share_a} against {expected}");
+        }
     }
 
     #[test]

@@ -21,6 +21,7 @@ license = "GPL-3.0-or-later"
 bevy = { version = "=0.20.1", features = ["pbr_specular_textures", "debug", "raw_vulkan_init"] }
 fnv-nif = { path = "../crates/fnv-nif" }
 fnv-dds = { path = "../crates/fnv-dds" }
+fnv-pbr = { path = "../crates/fnv-pbr" }
 fnv-spt = { path = "../crates/fnv-spt" }
 fnv-font = { path = "../crates/fnv-font" }
 fnv-vfs = { path = "../crates/fnv-vfs" }
@@ -76,6 +77,7 @@ opt-level = 3
 [patch.crates-io]
 bevy_winit = { path = "vendor/bevy_winit" }
 gpu-allocator = { path = "vendor/gpu-allocator" }
+gilrs = { path = "vendor/gilrs" }
 bevy_pbr = { path = "vendor/bevy_pbr" }
 bevy_post_process = { path = "vendor/bevy_post_process" }
 bevy_render = { path = "vendor/bevy_render" }

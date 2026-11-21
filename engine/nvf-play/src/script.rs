@@ -522,6 +522,20 @@ fn source_compile_mode(unattended: bool) {
     }
 }
 
+/// The game INI text the script VM's INI functions read (`fnv_game::nvse_settings`),
+/// lowest precedence first. `--mo2` sets the profile's own INIs and `initweaks.ini`
+/// (#1526 phase 2b); empty otherwise, so a setting reads as missing.
+static INI_TEXTS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Give the script VM the game INI text to read (start-up, before the scripts load).
+pub fn set_ini_texts(texts: Vec<String>) {
+    *INI_TEXTS.lock().unwrap_or_else(|e| e.into_inner()) = texts;
+}
+
+fn ini_texts() -> Vec<String> {
+    INI_TEXTS.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 /// Build the script data on its own thread (decoding every unit takes about a second;
 /// render streaming and physics start meanwhile).
 fn start_loading(d: PlayData, refs: &'static RefTable) -> Receiver<Loaded> {
@@ -536,7 +550,12 @@ fn start_loading(d: PlayData, refs: &'static RefTable) -> Receiver<Loaded> {
             let step = Instant::now();
             let table = FunctionTable::load(&path).map_err(|e| e.to_string())?;
             info!("script build: function table: {:.0} ms", step.elapsed().as_secs_f64() * 1e3);
-            let data: &'static GameData = Box::leak(Box::new(GameData::build(d.lo, d.schema, table, &json, refs)));
+            let data: &'static GameData = Box::leak(Box::new({
+                let mut data = GameData::build(d.lo, d.schema, table, &json, refs);
+                // The game INI text the extender's INI functions read (`--mo2`'s profile).
+                data.ini_texts = ini_texts();
+                data
+            }));
             info!("script build: the whole thread: {:.0} ms", t.elapsed().as_secs_f64() * 1e3);
             Ok((data, t.elapsed().as_secs_f64()))
         })();
@@ -656,13 +675,22 @@ fn inventory_sources(_data: &GameData, sim: &SimState, game: &Game<'_>) -> std::
 }
 
 impl Runtime {
-    fn new(data: &'static GameData, sim: &mut SimState, new_game: bool, packages: bool) -> Runtime {
+    fn new(
+        data: &'static GameData,
+        sim: &mut SimState,
+        new_game: bool,
+        packages: bool,
+        tweaks: Option<&fnv_game::tweaks::Tweaks>,
+    ) -> Runtime {
         // Message boxes are menus until the player closes them (the default,
         // `GameConfig::modal_message_boxes`). With actors living by their packages, the
         // packages' scripts and idles run from the first frame (the residents ask for the
         // same interval when they start).
         let cfg = GameConfig { frame_seconds: 1.0 / 60.0, package_interval: packages.then_some(PACKAGE_INTERVAL), ..GameConfig::default() };
-        let game = Game::new(data, World::new(sim.forms, sim.refs, sim.world.config()), cfg);
+        let mut game = Game::new(data, World::new(sim.forms, sim.refs, sim.world.config()), cfg);
+        if let Some(tweaks) = tweaks {
+            game.bind_stewie_stat_settings(tweaks);
+        }
         // The simulation's world is the one played (`with_world`): its placed actors carry
         // their template's items too (template flag "Inventory"), each picked at the
         // level it reads leveled lists at, as `Game::new` picks them (not level 1).
@@ -729,13 +757,15 @@ impl Runtime {
         let changed: Vec<FormId> = s.sim.refs.keys().chain(s.fade_moves.keys()).copied().collect::<BTreeSet<_>>().into_iter().collect();
         let data = self.game.data;
         let cfg = self.game.cfg;
-        let session = self.game.take_session();
         // The game restores on the played world, so that what it does there stays (the
         // moves above), and hands it back for `sim`; it keeps a stand-in between turns
         // (`with_world`).
         let stand_in = World::new(sim.forms, sim.refs, world.config());
-        self.game = Game::restore(data, world, cfg, &s)?;
-        self.game.put_session(session);
+        // A refused snapshot must not drain the active game's session.
+        let mut restored = Game::restore(data, world, cfg, &s)?;
+        let session = self.game.take_session();
+        restored.put_session(session);
+        self.game = restored;
         // The engine's seats are not saved, so a load stands the player and every NPC up
         // (docs/design/save-load.md §3.4): `Game::restore` clears each saved furniture use,
         // or GetSitting and its kin go on reading the seat (#1573, #2797).
@@ -1971,9 +2001,16 @@ pub(crate) fn start_world_aids(
     }
 }
 
-/// The run's furniture, terminal and door messages, a refused load and the save's engine part
-/// still to put back (`crate::save::PendingEngine`).
-type UsesAndLoads<'w> = (MessageWriter<'w, crate::furniture::UseFurniture>, MessageWriter<'w, crate::terminal::OpenTerminal>, Option<ResMut<'w, crate::doors::Doors>>, MessageWriter<'w, crate::save::LoadRefused>, Option<Res<'w, crate::save::PendingEngine>>);
+/// Furniture, terminal and door messages, refused loads, the pending engine save
+/// state, and the application settings to bind before startup and restore scripts.
+type UsesAndLoads<'w> = (
+    MessageWriter<'w, crate::furniture::UseFurniture>,
+    MessageWriter<'w, crate::terminal::OpenTerminal>,
+    Option<ResMut<'w, crate::doors::Doors>>,
+    MessageWriter<'w, crate::save::LoadRefused>,
+    Option<Res<'w, crate::save::PendingEngine>>,
+    Option<Res<'w, crate::tweaks::TweakSettings>>,
+);
 
 /// [`run_scripts`]'s loading screen, keys, menu files, the pause menu's page and the
 /// count of MenuMode frames under its Mods page (`crate::tiles::mods`), and the main menu
@@ -2032,11 +2069,11 @@ pub(crate) fn run_scripts(
     mut hud: ResMut<ScriptHud>,
     mut corner: ResMut<crate::corner_messages::CornerMessages>,
     mut quest_lines: ResMut<crate::quest_messages::QuestMessages>,
-    (mut changed, mut fades, mut repose): (MessageWriter<RefChanged>, MessageWriter<crate::fade::RefFade>, MessageWriter<crate::RefRepose>),
+    (mut changed, mut fades, mut repose, mut script_sounds): (MessageWriter<RefChanged>, MessageWriter<crate::fade::RefFade>, MessageWriter<crate::RefRepose>, Option<ResMut<crate::sfx::ScriptSounds>>),
     mut travel: MessageWriter<TravelRequest>,
     mut open: MessageWriter<OpenContainer>,
     mut used: MessageReader<ItemUsed>,
-    (mut sit, mut terminals, mut doors, mut refused, pending_engine): UsesAndLoads,
+    (mut sit, mut terminals, mut doors, mut refused, pending_engine, tweak_settings): UsesAndLoads,
     paused: Res<crate::pause::Paused>,
     (mut screen, bindings, tiles, page, mut mods_ticks, menu_to_open): ScreenAndMenus,
 ) {
@@ -2060,7 +2097,8 @@ pub(crate) fn run_scripts(
             }
             Some(Ok((data, secs))) => {
                 st.loader = None;
-                let mut rt = Runtime::new(data, &mut sim, st.new_game, play.0.packages);
+                let tweaks = tweak_settings.as_deref().map(|settings| &settings.game);
+                let mut rt = Runtime::new(data, &mut sim, st.new_game, play.0.packages, tweaks);
                 // A save loaded later keeps the game's configuration (`Runtime::restore_save`).
                 rt.game.cfg.answer_ok_boxes = st.no_messages;
                 rt.start = st.start.clone();
@@ -2087,6 +2125,9 @@ pub(crate) fn run_scripts(
                         Ok(changed_refs) => {
                             info!("load: restored {}: {} changed references, {} quests, {} script instances", path.display(), changed_refs.len(), rt.game.quests.len(), rt.game.instances.len());
                             restored = true;
+                            if let Some(tweaks) = tweaks {
+                                rt.game.bind_stewie_stat_settings(tweaks);
+                            }
                             // SUP's GetSaveName and GetLoadedSaveSize read the last save
                             // loaded (`fnv_game::nvse_sup4`).
                             let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -2535,6 +2576,11 @@ pub(crate) fn run_scripts(
             ScriptEffect::OpenContainer(c) => {
                 open.write(OpenContainer { container: c });
             }
+            ScriptEffect::ItemAddedSound(item) => {
+                if let Some(s) = script_sounds.as_deref_mut() {
+                    s.items_added.push(item);
+                }
+            }
             ScriptEffect::Notify(mut note) => {
                 // The player string codes (`&PCName;`) as they read now; ShowMessage's
                 // text has them already, MessageEx's and the notes' not (`fnv_game::text_codes`).
@@ -2897,6 +2943,36 @@ mod restore_tests {
         assert!(!rt.restored_from_save);
     }
 
+    /// The session fields that `take_session` drains survive a `Game::restore` refusal.
+    #[test]
+    fn a_refused_restore_keeps_active_save_file_session_sentinels() {
+        use fnv_game::nvse_sup4::{SaveFile, SaveFiles};
+        let (mut rt, mut sim, good) = in_fade();
+        rt.game.save_files = SaveFiles {
+            saved: Some(SaveFile { name: "owned-active-save".into(), bytes: 41 }),
+            loaded: Some(SaveFile { name: "owned-active-load".into(), bytes: 73 }),
+        };
+        let before = rt.game.save_files.clone();
+        let played = sim.world.snapshot();
+        let stand_in = rt.game.world.snapshot();
+        let mut refused = good.clone();
+        refused.format = "fnv.game.state/unsupported-test".into();
+        // World restoration is valid: the refusal is in Game::restore, after the
+        // old ordering had already drained these active session fields.
+        fnv_sim::World::restore(sim.forms, sim.refs, &refused.sim).unwrap();
+        let error = rt.restore_save(&mut sim, refused).unwrap_err();
+        assert!(error.contains("unsupported snapshot format"), "{error}");
+        assert_eq!(rt.game.save_files, before, "a refused Game restore must not drain the active session");
+        assert_eq!(sim.world.snapshot(), played);
+        assert_eq!(rt.game.world.snapshot(), stand_in);
+        assert!(!rt.restored_from_save);
+        // The successful neighbor still transfers this same active session.
+        rt.restore_save(&mut sim, good).unwrap();
+        assert_eq!(rt.game.save_files, before);
+        assert!(rt.restored_from_save);
+        assert_eq!(sim.world.peek(ACTOR).unwrap().cell, Some(MARKER_CELL));
+    }
+
     #[test]
     fn a_loaded_game_rolls_at_the_players_level_before_any_tick() {
         let mut state = ScriptState::over_no_plugins();
@@ -2989,6 +3065,9 @@ mod runtime_start_tests {
         assert!(!runtime_waits(false, false), "the menu is open, paused, or was never asked for");
     }
 }
+
+#[cfg(test)]
+mod stewie_profile_tests;
 
 #[cfg(test)]
 mod clearance_tests;

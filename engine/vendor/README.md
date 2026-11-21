@@ -25,6 +25,27 @@ module retains `forbid`; the rest of the new cursor consumer inherits `deny`.
 Source: crates.io `bevy_winit` 0.20.1, archive SHA-256
 `397c685e6ab6d4d87b89fb4ce11993c223d0e3c7b34c415cb4b9f69f213d85b6`.
 
+## gilrs 0.11.2 (Apache-2.0 OR MIT, gilrs authors)
+
+Gamepad input under bevy_gilrs. One change (#3097), marked `NVForever patch` in
+`src/gamepad.rs` `Gilrs::next_event_priv`: a raw event for a pad id gilrs holds no data
+for (anything but the `Connected` that adds the next pad) is dropped, with one warning
+per pad id, and the next event is read instead.
+
+Why: gilrs looks every button and axis event's pad up with `Gilrs::gamepad`, which
+indexes `gamepads_data[id]`, and bevy_gilrs runs the `axis_dpad_to_button` filter on every
+event, which does the same. A second controller's input arriving before its `Connected`
+(or a `Connected` with an id past the next one, which upstream only logs as a platform
+error) panicked the game: crash signature `panic-f2bce0a1986452c8`, "index out of bounds:
+the len is 1 but the index is 1" at `gamepad.rs:474`. 0.11.2 is still the latest release.
+
+The crate ships no licence files of its own; its `Cargo.toml` names Apache-2.0/MIT. The
+bundled `SDL_GameControllerDB` keeps its LICENSE. `Cargo.lock` and `Cargo.toml.orig` from
+the archive are left out.
+
+Source: crates.io `gilrs` 0.11.2, archive SHA-256
+`902fb00d3f6398e635be22e5c837b303c501835cca7ac11a47bba138f7aafdd8`.
+
 ## gpu-allocator 0.28.0 (MIT OR Apache-2.0, Traverse-Research/gpu-allocator)
 
 Used by wgpu for Vulkan memory. Change, in `src/vulkan/mod.rs` `MemoryType::free`: an
@@ -81,6 +102,22 @@ by a comment starting `NVForever FSR integration`:
 
 Without the override both do what upstream does. This is a new patch for Bevy 0.20.1, not
 the dropped 0.19.1 one below.
+
+No directional shadows for one lighting call (the NIF shader's shade light,
+nvf_assets `nif_material.wesl` `with_shade_light`), each part marked `NVForever (no
+directional shadows)`:
+
+- `src/render/mesh_types.wesl`: `NVF_MESH_FLAGS_NO_DIRECTIONAL_SHADOWS_BIT` (bit 26 of a
+  `PbrInput`'s flags, which bevy_pbr leaves unused; set by shaders only, never by the CPU).
+- `src/render/pbr_functions.wesl` `apply_pbr_lighting`: the directional loop's shadow-map,
+  transmitted-lobe and contact-shadow conditions skip the light's shadow while the bit is
+  set; point and spot lights keep theirs. `with_shade_light` relit with the receiver bit
+  cleared before, which also dropped the lamps' shadows and changed the ambient occlusion's
+  factor on lamps; its extrapolation (by up to 1/share) turned that difference into a glow
+  on the first-person arms, weapon and Pip-Boy [observed 2026-11-19, Prospector Saloon at
+  22:00, lamp shadows Quality with ambient occlusion; gone after the change].
+
+Without the bit set the lighting is upstream's.
 
 Another change (one resolve, docs/design/frame-rate-audit.md §9), in `src/transmission/`,
 each part marked `NVForever one resolve`, with `ViewTarget::set_resolve_deferred` in
@@ -234,6 +271,28 @@ The shader that reads the bindings is nvforever's (`ssao_lighting.wesl`, patched
 component; without it the layouts and shader defs are upstream's, and the pipeline keys are
 the same keys numbered differently (the packed fields above the new bit moved up by one).
 As for the sun visibility, a meshlet view must not get the component.
+
+Another change (two-channel normal maps, #2981, docs/spec-notes/pbr-materials.md), in
+`src/render/pbr_functions.wesl` `apply_normal_mapping`, marked `NVForever two-channel normal
+clamp`: Z is rebuilt as `sqrt(max(1 - x² - y², 0))` instead of `sqrt(1 - x² - y²)`, so X and Y
+outside the unit disk (BC5 endpoints, filtering between texels) give Z 0 instead of a NaN.
+Only materials whose normal map is a two-channel format (`Bc5RgUnorm`, `Rg8Unorm`: Bevy's
+`TWO_COMPONENT_NORMAL_MAP` flag) reach the line; in NVForever those are the authored `_n`
+maps (nvf-assets `TextureUsage::NormalTwoChannel`), while the game's own normal maps are
+expanded to three channels on the CPU (docs/spec-notes/dds-bc5.md). Inside the disk the
+result is upstream's. Drop it when upstream clamps there.
+
+Another change (height maps, #2981 stage 4, docs/spec-notes/pbr-materials.md), in
+`src/render/parallax_mapping.wesl` `sample_depth_map`, marked `NVForever height maps`: the
+sample (bindless and ordinary binding alike) is returned as `1.0 - r` instead of `r`. The
+authored `_p` stores height (white = high); Bevy's march reads depth (white = deepest). The
+inversion sits after the two bindings' samples, so they cannot diverge; the march and both
+refinements read only through this function. It changes the convention for every
+`StandardMaterial::depth_map` in the engine: none was set in production before (terrain
+asserts landscape materials have none; the one positive assignment is a Pip-Boy test
+fixture), and the only maps set now are the authored `_p` (nvf-assets `authored.rs`). Keep it
+while NVForever's height maps are heights; drop it if they are ever converted to depth on the
+CPU instead.
 
 ## bevy_render 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 
@@ -460,7 +519,8 @@ each part marked by a comment starting `NVForever`:
 - `NVForever composed shaders`: `PipelineCache::set_composed_store` hands bevy_shader's store
   (below) to the shader cache.
 - `NVForever compile pool`: pipelines compile on a pool of their own (a quarter of the logical
-  cores, 2 to 8 threads; `NVF_PIPELINE_THREADS=<n>`, 0 for upstream's async compute pool),
+  cores, 2 to 8 threads; `NVF_PIPELINE_THREADS=<n>`, 0 for upstream's async compute pool
+  and no list pool),
   not on the async compute pool (at most 4 threads, shared with the game's loading). On a
   driver cache that has none of the pipelines (each 0.6-0.8 s), a Novac start's screen waited
   6.1 s for them on the async compute pool and 5.3 s on this pool.
@@ -485,8 +545,8 @@ each part marked by a comment starting `NVForever`:
   validation error scope. For the JSON of the recipes the crate depends on `serde` and
   `serde_json` and on `wgpu-types` with `serde` (all already in the build).
 
-Without the setters and with `NVF_PIPELINE_THREADS=0`, upstream's path runs, except that the
-modules are made outside the lock.
+Without the setters and with `NVF_PIPELINE_THREADS=0`, upstream's path runs (no list pool
+either), except that the modules are made outside the lock.
 
 ## bevy_shader 0.20.1 (MIT OR Apache-2.0, Bevy contributors)
 

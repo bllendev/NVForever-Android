@@ -3035,6 +3035,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fnv-pbr"
+version = "0.8.1"
+dependencies = [
+ "fnv-vfs",
+ "toml",
+]
+
+[[package]]
 name = "fnv-phys"
 version = "0.8.1"
 dependencies = [
@@ -3354,8 +3362,6 @@ dependencies = [
 [[package]]
 name = "gilrs"
 version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "902fb00d3f6398e635be22e5c837b303c501835cca7ac11a47bba138f7aafdd8"
 dependencies = [
  "fnv",
  "gilrs-core",
@@ -4669,6 +4675,7 @@ dependencies = [
  "bevy",
  "fnv-dds",
  "fnv-nif",
+ "fnv-pbr",
  "fnv-vfs",
  "fnv-world",
  "naga",
@@ -4785,6 +4792,7 @@ dependencies = [
  "nvf-dlss-files",
  "nvf-play",
  "png",
+ "rayon",
  "rfd",
  "serde_json",
  "sysinfo",

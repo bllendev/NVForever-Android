@@ -780,6 +780,9 @@ struct Rig {
     sight_relief: Option<f32>,
     /// Third person: the entities drawn for the body's parts.
     drawn: Vec<Drawn>,
+    /// The forms of the appearance's parts with at least one shape spawned (a part
+    /// whose model did not load has none), in the parts' order.
+    spawned_forms: Vec<FormId>,
     /// First person: whether the rig is shown (last applied).
     shown: Option<bool>,
     /// Third person: what of the rig the camera sees (last applied).
@@ -1003,6 +1006,9 @@ struct Body {
     scale: f32,
     third: Rig,
     first: Option<Rig>,
+    /// The armour addons (ARMO and WEAP BIPL members, by Editor ID) the first-person rig
+    /// wears and drew a shape of, for the log.
+    first_addons: Vec<String>,
 }
 
 /// State kept across body rebuilds (an outfit change rebuilds the body).
@@ -1287,7 +1293,7 @@ impl PlayerBody {
                 weapon_model: None, weapon_emitter: None, weapon_parts: Vec::new(),
                 idle_logged: false, sights_turned: None, muzzle: None, muzzle_entity: None,
                 casing: None, casing_entity: None, sighting: None, scope_eye: None, sight_relief: None,
-                use_lens: false, drawn: Vec::new(), shown: Some(false), seen: None,
+                use_lens: false, drawn: Vec::new(), spawned_forms: Vec::new(), shown: Some(false), seen: None,
                 furniture: None, since_attack: f32::INFINITY, attack_loop: None,
                 wound_up: None, wound_hit: None, sighting2: None, attack_eject: None, ejected: false, carry: None,
             }
@@ -1297,6 +1303,7 @@ impl PlayerBody {
                 worn: Vec::new(), look: None, change: fnv_actor::Change::default(),
                 female: false, scale: 1.0, third: rig(third, View::Third),
                 first: first.map(|r| rig(r, View::First)),
+                first_addons: Vec::new(),
             }),
             ..Self::default()
         }
@@ -1411,7 +1418,7 @@ impl MotionTrace {
                 match std::fs::File::create(&path) {
                     Ok(f) => {
                         let mut w = std::io::BufWriter::new(f);
-                        let _ = std::io::Write::write_all(&mut w, b"t,dt,heading,pitch,eye_x,eye_y,eye_z,hand_x,hand_y,hand_z,hand_rx,hand_ry,hand_rz,sway_x,sway_y,sway_z,sway_yaw,sway_pitch,sway_roll,sights,aiming,falling,sneaking,speed,drawn,feet_z,airborne,lhand_x,lhand_y,lhand_z,lens\n");
+                        let _ = std::io::Write::write_all(&mut w, b"t,dt,heading,pitch,eye_x,eye_y,eye_z,hand_x,hand_y,hand_z,hand_rx,hand_ry,hand_rz,sway_x,sway_y,sway_z,sway_yaw,sway_pitch,sway_roll,sights,aiming,falling,sneaking,speed,drawn,feet_z,airborne,lhand_x,lhand_y,lhand_z,lens,rgrip_x,rgrip_y,rgrip_z,rgrip_turn,lgrip_x,lgrip_y,lgrip_z\n");
                         info!("motion trace: writing {path}");
                         self.file = Some(w);
                         self.layers = std::fs::File::create(format!("{path}.layers")).ok().map(std::io::BufWriter::new);
@@ -1424,17 +1431,18 @@ impl MotionTrace {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn write(&mut self, t: f64, dt: f32, player: &Player, eye: Option<Vec3>, hand: Option<(Vec3, Vec3)>, sway: SwayPose, flags: (f32, bool, bool, bool, f32, bool), airborne: f32, left: Option<Vec3>, lens: f32) {
+    fn write(&mut self, t: f64, dt: f32, player: &Player, eye: Option<Vec3>, hand: Option<(Vec3, Vec3)>, sway: SwayPose, flags: (f32, bool, bool, bool, f32, bool), airborne: f32, left: Option<Vec3>, lens: f32, grips: Option<(Vec3, f32, Vec3)>) {
         let Some(w) = self.file.as_mut() else { return };
         let e = eye.unwrap_or(Vec3::NAN);
         let (h, r) = hand.unwrap_or((Vec3::NAN, Vec3::NAN));
         let l = left.unwrap_or(Vec3::NAN);
+        let (rg, rt, lg) = grips.unwrap_or((Vec3::NAN, f32::NAN, Vec3::NAN));
         let (yaw, pitch, roll) = sway.rotation.to_euler(EulerRot::ZXY);
         let (sights, aiming, falling, sneaking, speed, drawn) = flags;
         let b = |v: bool| u8::from(v);
         let line = format!(
-            "{t:.5},{dt:.5},{:.5},{:.5},{:.3},{:.3},{:.3},{:.4},{:.4},{:.4},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4},{yaw:.5},{pitch:.5},{roll:.5},{sights:.4},{},{},{},{speed:.1},{},{:.3},{airborne:.3},{:.4},{:.4},{:.4},{lens:.5}\n",
-            player.heading, player.pitch, e.x, e.y, e.z, h.x, h.y, h.z, r.x, r.y, r.z, sway.offset.x, sway.offset.y, sway.offset.z, b(aiming), b(falling), b(sneaking), b(drawn), player.feet[2], l.x, l.y, l.z
+            "{t:.5},{dt:.5},{:.5},{:.5},{:.3},{:.3},{:.3},{:.4},{:.4},{:.4},{:.6},{:.6},{:.6},{:.4},{:.4},{:.4},{yaw:.5},{pitch:.5},{roll:.5},{sights:.4},{},{},{},{speed:.1},{},{:.3},{airborne:.3},{:.4},{:.4},{:.4},{lens:.5},{:.3},{:.3},{:.3},{rt:.2},{:.3},{:.3},{:.3}\n",
+            player.heading, player.pitch, e.x, e.y, e.z, h.x, h.y, h.z, r.x, r.y, r.z, sway.offset.x, sway.offset.y, sway.offset.z, b(aiming), b(falling), b(sneaking), b(drawn), player.feet[2], l.x, l.y, l.z, rg.x, rg.y, rg.z, lg.x, lg.y, lg.z
         );
         let _ = std::io::Write::write_all(w, line.as_bytes());
     }
@@ -1667,7 +1675,8 @@ fn equipped(sim: &SimState, world: &ActorWorld) -> (Vec<FormId>, Option<FormId>,
     // A weapon with "Hide Backpack" goes with the armour: while it is equipped the body is
     // dressed without the pieces in the Backpack slot (`Resolver::resolve_wearing`).
     // So does one with armour addons of its own (WEAP BIPL: a hand-to-hand weapon's hand
-    // model, `Resolver::resolve_wearing`), for the third-person body ([`build`]).
+    // model, `Resolver::resolve_wearing`), for the third-person body and, when the weapon
+    // has no model of its own, the first-person arms ([`build`]).
     worn.extend(weapon.filter(|w| world.actors.weapons.get(w).is_some_and(|x| x.hide_backpack || !x.addons.is_empty())));
     (worn, weapon, weapon.map_or(0, |w| inv.equipped_mods(w)))
 }
@@ -1763,8 +1772,10 @@ fn ensure_body(
                     b.third.eye_local,
                     b.first.as_ref().map_or("missing".to_string(), |f| format!("{} nodes from {}", f.animator.nodes.len(), f.folder)),
                     worn.iter().map(|w| w.to_string()).collect::<Vec<_>>(),
-                    // Their biped model lists' armour addons (`fnv_actor::records::Armor::addons`).
-                    worn.iter().filter_map(|w| world.actors.armors.get(w)).flat_map(|a| a.addons.iter().map(|x| world.actors.armors.get(x).and_then(|x| x.edid.clone()).unwrap_or_else(|| x.to_string()))).collect::<Vec<_>>()
+                    // The armour addons of their biped model lists the first-person rig
+                    // wears (`fnv_actor::first_person::worn_addons`; a held fist weapon's
+                    // hand model among them, #3226).
+                    b.first_addons
                 );
                 state.body = Some(b);
                 rebuilt = true;
@@ -1955,10 +1966,12 @@ fn build(commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &mut 
     let scale = a.race_height as f32;
     let third = build_rig(commands, parent, world, ctx, &a, View::Third, None)?;
     let vfs = ctx.models.data.vfs.clone();
-    // The first-person arms keep the bare hand: a held weapon's own addons (the power
-    // fist's metal hand, `equipped`) are for the third-person body only [hypothesis: the
-    // first-person weapon models are drawn over the arms' hands as before].
-    let first_worn: Vec<FormId> = worn.iter().copied().filter(|w| world.actors.weapons.get(w).is_none_or(|x| x.addons.is_empty())).collect();
+    // A held weapon's own addons (WEAP BIPL, `equipped`) are worn by the first-person
+    // arms only when the weapon has no model of its own for that view: the Bladed
+    // Gauntlet's or the knuckles' hand model is all there is of them (#3226). The power
+    // fist's metal hand stays the third-person body's: its rigid model is drawn over the
+    // arms' bare hand (`first_person::wears_weapon_addons`).
+    let first_worn = first_person::first_person_worn(&world.actors, worn);
     let first_a = if first_worn.len() == worn.len() { None } else { Some(world.resolve_as(FormId::PLAYER_BASE.0, FormId::PLAYER_REF.0, Some(&first_worn), look)?) };
     let (fa, shows) = first_person::appearance(&world.actors, first_a.as_ref().unwrap_or(&a), |p| vfs.exists(p));
     let first = match build_rig(commands, parent, world, ctx, &fa, View::First, Some(&shows)) {
@@ -1968,7 +1981,15 @@ fn build(commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &mut 
             None
         }
     };
-    Ok(Body { worn: worn.to_vec(), look: look.cloned(), change: world.change(FormId::PLAYER_REF.0), female: a.female, scale, third, first })
+    // Of those, the ones the built rig drew a shape of (none without a rig).
+    let first_addons = first.as_ref().map_or_else(Vec::new, |r| {
+        first_person::worn_addons(&world.actors, &first_worn, &fa)
+            .into_iter()
+            .filter(|x| r.spawned_forms.contains(x))
+            .map(|x| world.actors.armors.get(&x).and_then(|x| x.edid.clone()).unwrap_or_else(|| x.to_string()))
+            .collect()
+    });
+    Ok(Body { worn: worn.to_vec(), look: look.cloned(), change: world.change(FormId::PLAYER_REF.0), female: a.female, scale, third, first, first_addons })
 }
 
 /// Spawn one rig of appearance `a` under `parent` (its transform set each frame).
@@ -2027,6 +2048,7 @@ fn build_rig(commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &
     let hide: Vec<bool> = uses.iter().map(|(i, _)| head_part(*i)).collect();
     // Third person: per part, how the first-person rig shows it.
     let arms: Vec<Option<Show>> = uses.iter().map(|(i, _)| (view == View::Third).then(|| first_person::show(&world.actors, &a.parts[*i])).flatten()).collect();
+    let part_index: Vec<usize> = uses.iter().map(|(i, _)| *i).collect();
     let mut uses: Vec<PartUse> = uses.into_iter().map(|(_, u)| u).collect();
     if view == View::First {
         // The arms take no shadow from the unseen body they are in the middle of.
@@ -2047,6 +2069,13 @@ fn build_rig(commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &
     let drawn = (spawned.drawn.iter().zip(&spawned.part_of).zip(&spawned.shape_of))
         .map(|((&entity, &p), &s)| Drawn { entity, head: hide[p], arm: shape_shows(arms[p], uses[p].part.shapes[s].name.as_deref()) })
         .collect();
+    let mut spawned_forms: Vec<FormId> = Vec::new();
+    for &p in &spawned.part_of {
+        let form = a.parts[part_index[p]].form;
+        if !spawned_forms.contains(&form) {
+            spawned_forms.push(form);
+        }
+    }
     if view == View::First {
         // The arms rig casts no shadow on the world: the third-person body casts the
         // player's.
@@ -2107,6 +2136,7 @@ fn build_rig(commands: &mut Commands, parent: Entity, world: &ActorWorld, ctx: &
         use_lens: false,
         sight_relief: None,
         drawn,
+        spawned_forms,
         shown: None,
         seen: None,
         furniture: None,
@@ -3896,7 +3926,15 @@ fn drive_body(
             let turn = rot(c).inverse() * rot(h);
             Some((Vec3::from(h.translation) - Vec3::from(c.translation), turn.to_scaled_axis()))
         });
-        trace.write(time.elapsed_secs_f64(), dt, &player, eye, hand, sway, (m.sights_share, control.aiming, m.falling, stance == Stance::Sneak, m.speed, m.hands.phase == WeaponPhase::Drawn), m.airborne, left, lens_k);
+        // Each hand in the weapon's frame (the `Weapon` node, model space): where it holds
+        // the gun, to see a hand leave its grip; the right hand with its turn there.
+        let grips = body.first.as_ref().filter(|_| m.hands.in_hand).and_then(|f| {
+            let gun = f.weapon_node_at(Transform::IDENTITY, &[])?.inverse();
+            let bone = |n: &str| f.animator.skel.by_name.get(n).map(|&b| gun * f.animator.model_space(b));
+            let (r, l) = (bone("Bip01 R Hand")?, bone("Bip01 L Hand")?);
+            Some((Vec3::from(r.translation), r.to_scale_rotation_translation().1.to_scaled_axis().length().to_degrees(), Vec3::from(l.translation)))
+        });
+        trace.write(time.elapsed_secs_f64(), dt, &player, eye, hand, sway, (m.sights_share, control.aiming, m.falling, stance == Stance::Sneak, m.speed, m.hands.phase == WeaponPhase::Drawn), m.airborne, left, lens_k, grips);
         trace.write_layers(time.elapsed_secs_f64(), &m.hands, body.first.as_ref().map(|f| &f.animator));
     }
     state.head_eye = third_eye.filter(|_| third_view).map(|e| e.to_array());

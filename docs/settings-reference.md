@@ -1026,9 +1026,15 @@ below cover them all.
 
 ### `ambient-occlusion`: Ambient occlusion
 
-- On the page: On: creases, corners and the ground under things are darkened by how enclosed
-  they are (screen-space, from the depth). Not in the original.
-- Command-line switches: `--graphics`
+- On the page: Creases, corners and the ground under things darken by how enclosed they are:
+  Off, Performance (cheaper, a little grainier) or Quality. Not in the original.
+- In full: Screen-space ambient occlusion from the depth, on the ambient light and the lamps
+  that cast no shadow: Off; Performance (one slice direction a pixel instead of two: half the
+  horizon march, the same denoise); or Quality (ground-truth ambient occlusion, 2 slices x 4
+  steps a side at half resolution, depth-aware denoise). Quality in the enhanced look.
+- Shown as a list since 2026-11-19; an INI written while it was an on/off switch (`1`/`0`,
+  true/false, on/off, yes/no) still loads as Quality or Off.
+- Command-line switches: `--graphics`, `--ambient-occlusion`
 - More: docs/design/graphics-enhanced.md
 - Registered in `engine/nvforever/src/settings.rs`
 
@@ -1149,6 +1155,41 @@ stretches drift downstream. Vanilla leaves the switch off. Enhanced turns it on.
 - Command-line switches: `--no-lod`
 - Registered in `engine/nvforever/src/settings.rs`
 
+### `full-detail`: Full-detail scenery
+
+- On the page: Draws buildings, rocks and cliffs out to 7 x 7 or 9 x 9 cells as full models,
+  not distant forms. Costs GPU time. Not in the original.
+- In full: [design, #2701] A list: Off, 7 x 7, 9 x 9; Off by default and in the vanilla
+  preset, 7 x 7 in the enhanced preset (maintainer decision 2026-11-21, #3048).
+  Outdoors, the full models of statics, static collections, moveable statics and trees,
+  and of every other reference flagged visible when distant, are drawn in the cells 3
+  (7 x 7) or 4 (9 x 9) grid steps from yours, with their landscape at full resolution,
+  where the distant LOD blocks stood. Draw-only: the game still loads the 5 x 5 cells it
+  always does, so scripts, AI, physics, triggers and saves see no difference. Switches in
+  play: cells out of the new reach fade out to the LOD, new ones stream in. Kept in the
+  INI as `Off`, `7 x 7` or `9 x 9`.
+- Command-line switches: `--graphics-only` (`--graphics-only full-detail-7x7`,
+  `full-detail-9x9`)
+- More: docs/design/graphics-enhanced.md §3.20
+- Registered in `engine/nvforever/src/settings.rs`
+
+### `distant-objects`: Distant objects
+
+- On the page: Draws the rocks, shacks, pylons and signs the distant LOD leaves out, up to
+  8 or 12 cells away. Costs GPU time. Not in the original.
+- In full: [design, #3014] A list: Off, 8 cells, 12 cells; Off by default and in both
+  presets. Outdoors, beyond the loaded cells and the full-detail scenery, statics and
+  static collections the distant LOD blocks do not hold are drawn out to 8 or 12 grid
+  steps from yours: from their own `_lod` model when the load order has one beside the
+  full model (as LOD resource packs supply), else from the full model when it is large
+  for its distance. References a block may hold (flagged visible when distant) are left
+  to it. Draw-only: no collision, scripts or AI. Greyed while Distant terrain and objects
+  is off. Switches in play. Kept in the INI as `Off`, `8 cells` or `12 cells`.
+- Command-line switches: `--graphics-only` (`--graphics-only distant-objects-8`,
+  `distant-objects-12`)
+- More: docs/design/graphics-enhanced.md §3.21
+- Registered in `engine/nvforever/src/settings.rs`
+
 ### `grass`: Grass
 
 - On the page: On: grass grows on the landscape; the cells around you get theirs over the
@@ -1162,6 +1203,29 @@ stretches drift downstream. Vanilla leaves the switch off. Enhanced turns it on.
   textures loaded from now on (the cells loaded next).
 - Command-line switches: `--graphics`
 - More: docs/design/graphics-enhanced.md
+- Registered in `engine/nvforever/src/settings.rs`
+
+### `authored-materials`: Authored materials
+
+- On the page: On: surfaces whose textures a texture pack gives material maps for
+  (textures\pbr\) are shaded from them. Off: every surface uses the game's own values.
+  Takes effect at the next start.
+- In full: [design, #2981] A texture pack may give a game texture a set of material maps
+  under `textures\pbr\` (occlusion, roughness and metallic in `_orm`, a normal map in `_n`,
+  scalars in a `.toml`); the shapes drawn with that texture then take their roughness,
+  highlight strength, occlusion and normal from the set (docs/spec-notes/pbr-materials.md).
+  Lit NIF shapes with texture coordinates take a set; unlit, additive, multiplied and
+  refracting shapes, particles, hair, skin and FaceGen heads, landscape LOD and the Pip-Boy's
+  and interface textures never do. A set without `_n` (or a shape whose drawn mesh has no
+  tangents) keeps the game's own normal map, its alpha no longer a highlight mask. On the
+  experimental height branch (#2981 stage 4) a set's height map (`_p`, also alone: a
+  height-only set) is drawn as parallax on opaque, single-sided, non-decal shapes, never on
+  cut-outs, blended or double-sided shapes. On in both looks: without a pack nothing
+  changes. Off: the material path reads no file under
+  `textures\pbr\` and every material is the game's own. Read once at the start, so a change
+  applies at the next start. Not in the original.
+- Command-line switches: `--graphics-only` (`--graphics-only no-authored-materials`)
+- More: docs/spec-notes/pbr-materials.md
 - Registered in `engine/nvforever/src/settings.rs`
 
 ### `terrain-height-blend`: Terrain height blending
@@ -1260,6 +1324,19 @@ stretches drift downstream. Vanilla leaves the switch off. Enhanced turns it on.
 
 - On the page: How far from you grass is drawn, as a part of the farthest grass distance and
   its fade range.
+- Registered in `engine/nvforever/src/settings.rs`
+
+### `tree-distance`: Tree distance
+
+- On the page: How far from you trees beyond the loaded cells are drawn as flat pictures, at
+  most as far as distant objects are drawn. Farther runs slower.
+- In full: Shown as a distance in game units, in steps of 2,500 up to how far distant object
+  blocks are drawn (125,000 units by default), so the billboards stop where the buildings and
+  rocks around them stop; distant land reaches farther (250,000 units). It starts at 40,000
+  units, as before the row.
+- Command line: `--tree-distance` sets where the slider starts (40,000 units by default, at
+  most `--lod-distance`; 0 draws no distant trees whatever the slider); `--lod-distance` sets
+  the slider's end
 - Registered in `engine/nvforever/src/settings.rs`
 
 ## Graphics › World and Animation
