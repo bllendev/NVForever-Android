@@ -89,12 +89,45 @@ public class LauncherActivity extends Activity {
         pickButton = addButton(root, "2. Choose Fallout Data folder", v -> pickFolder());
         defaultButton = addButton(root, "Or create the default folder (NVForever/Data)", v -> createDefaultFolder());
         startButton = addButton(root, "3. Start game", v -> startGame());
-        addButton(root, "Copy debug summary", v -> copyDebugSummary());
+        if (BuildConfig.DEBUG) {
+            addButton(root, "Export debug log", v -> chooseDebugLogDestination());
+            addButton(root, "Copy debug summary", v -> copyDebugSummary());
+        }
 
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(Color.rgb(30, 31, 34));
         scroll.addView(root);
         setContentView(scroll);
+    }
+
+    private static final int REQUEST_EXPORT_LOG = 3;
+
+    private void chooseDebugLogDestination() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_TITLE, "NVForever-debug-" + BuildConfig.VERSION_NAME + ".txt");
+        startActivityForResult(intent, REQUEST_EXPORT_LOG);
+    }
+
+    private void exportDebugLog(Uri destination) {
+        String header = "NVForever Odin Debug " + BuildConfig.VERSION_NAME
+                + "\nAndroid " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")"
+                + " / " + Build.MANUFACTURER + " " + Build.MODEL;
+        new Thread(() -> {
+            String result;
+            try (java.io.OutputStream stream = getContentResolver().openOutputStream(destination, "wt")) {
+                if (stream == null) throw new IOException("No writable destination");
+                try (java.io.Writer out = new java.io.OutputStreamWriter(stream, StandardCharsets.UTF_8)) {
+                    DebugReport.write(new File(getFilesDir(), "NVForever/logs"), header, out);
+                }
+                result = "Debug log saved. Review it before attaching in Discord.";
+            } catch (IOException | SecurityException e) {
+                result = "Could not save debug log. Try a writable folder.";
+            }
+            String message = result;
+            runOnUiThread(() -> android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show());
+        }, "nvf-log-export").start();
     }
 
     private void copyDebugSummary() {
@@ -362,6 +395,12 @@ public class LauncherActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_EXPORT_LOG) {
+            if (BuildConfig.DEBUG && resultCode == RESULT_OK && data != null && data.getData() != null) {
+                exportDebugLog(data.getData());
+            }
+            return;
+        }
         if (requestCode == REQUEST_TREE && resultCode == RESULT_OK && data != null && data.getData() != null) {
             File path = treeToPath(data.getData());
             if (path != null) {
