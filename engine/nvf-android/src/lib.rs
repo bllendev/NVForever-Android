@@ -41,8 +41,12 @@ pub fn main() {
     paths::set_environment(&home, &schemas);
     // Crash test from the launcher: no hidden Pip-Boy warm-up while a load is covered
     // (`nvforever::pipboy_arm`). Set before the engine starts any thread.
-    if controller::ControlsConfig::load().skip_pipboy_warmup {
+    let tests = controller::ControlsConfig::load();
+    if tests.skip_pipboy_warmup {
         std::env::set_var(nvforever::NO_PIPBOY_WARM_ENV, "1");
+    }
+    if tests.skip_vats_outline {
+        std::env::set_var(nvforever::NO_VATS_OUTLINE_ENV, "1");
     }
     let line = match paths::restart_line(&paths::internal_files()) {
         Ok(Some(line)) => line,

@@ -41,6 +41,7 @@ public class LauncherActivity extends Activity {
     private Switch controllerSwitch;
     private Switch touchSwitch;
     private Switch skipWarmSwitch;
+    private Switch skipVatsMaskSwitch;
     private boolean loadingControls;
     private Button permissionButton;
     private Button pickButton;
@@ -82,6 +83,10 @@ public class LauncherActivity extends Activity {
         skipWarmSwitch.setText("Crash test: skip Pip-Boy warm-up while loading");
         skipWarmSwitch.setTextColor(Color.WHITE);
         root.addView(skipWarmSwitch);
+        skipVatsMaskSwitch = new Switch(this);
+        skipVatsMaskSwitch.setText("Crash test: no V.A.T.S. target outline");
+        skipVatsMaskSwitch.setTextColor(Color.WHITE);
+        root.addView(skipVatsMaskSwitch);
         TextView controlsHint = new TextView(this);
         controlsHint.setText("Los cambios se aplican al iniciar el juego.\nMando: A usar/aceptar · B Pip-Boy/volver · X recargar · Y saltar\nLT apuntar · RT disparar · RB VATS · LB cámara · Start pausa");
         controlsHint.setTextColor(Color.LTGRAY);
@@ -90,6 +95,7 @@ public class LauncherActivity extends Activity {
         controllerSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
         touchSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
         skipWarmSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
+        skipVatsMaskSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
 
         permissionButton = addButton(root, "1. Grant all-files access", v -> requestFilesAccess());
         pickButton = addButton(root, "2. Choose Fallout Data folder", v -> pickFolder());
@@ -249,6 +255,7 @@ public class LauncherActivity extends Activity {
         boolean controller = false;
         boolean touch = true;
         boolean skipWarm = false;
+        boolean skipVatsMask = false;
         if (hasFilesAccess() && controlsFile().isFile()) {
             try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.FileReader(controlsFile()))) {
                 String line;
@@ -260,6 +267,7 @@ public class LauncherActivity extends Activity {
                     if (pair[0].equals("controller")) controller = on;
                     if (pair[0].equals("touch")) touch = on;
                     if (pair[0].equals("skip-pipboy-warmup")) skipWarm = on;
+                    if (pair[0].equals("skip-vats-outline")) skipVatsMask = on;
                 }
             } catch (IOException e) { android.util.Log.e("NVForever", "Reading controls", e); }
         }
@@ -267,6 +275,7 @@ public class LauncherActivity extends Activity {
         controllerSwitch.setChecked(controller);
         touchSwitch.setChecked(touch);
         skipWarmSwitch.setChecked(skipWarm);
+        skipVatsMaskSwitch.setChecked(skipVatsMask);
         loadingControls = false;
     }
 
@@ -280,7 +289,8 @@ public class LauncherActivity extends Activity {
             try (FileOutputStream out = new FileOutputStream(temp)) {
                 String text = "# Applied when starting the game\ncontroller " + controllerSwitch.isChecked()
                         + "\ntouch " + touchSwitch.isChecked()
-                        + "\nskip-pipboy-warmup " + skipWarmSwitch.isChecked() + "\n";
+                        + "\nskip-pipboy-warmup " + skipWarmSwitch.isChecked()
+                        + "\nskip-vats-outline " + skipVatsMaskSwitch.isChecked() + "\n";
                 out.write(text.getBytes(StandardCharsets.UTF_8));
             }
             if (!temp.renameTo(file)) throw new IOException("Cannot replace controls config");

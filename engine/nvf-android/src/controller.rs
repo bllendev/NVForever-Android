@@ -15,6 +15,8 @@ pub struct ControlsConfig {
     pub diagnostics: bool,
     /// Crash test (launcher switch): the Pip-Boy's hidden warm-up during a load is skipped.
     pub skip_pipboy_warmup: bool,
+    /// Crash test (launcher switch): no V.A.T.S. part-outline mask camera.
+    pub skip_vats_outline: bool,
 }
 impl ControlsConfig {
     pub fn load() -> Self {
@@ -23,6 +25,7 @@ impl ControlsConfig {
             touch: true,
             diagnostics: false,
             skip_pipboy_warmup: false,
+            skip_vats_outline: false,
         };
         for line in crate::paths::option_file("nvforever-controls.txt")
             .unwrap_or_default()
@@ -42,6 +45,7 @@ impl ControlsConfig {
                 "touch" => config.touch = enabled,
                 "diagnostics" => config.diagnostics = enabled,
                 "skip-pipboy-warmup" => config.skip_pipboy_warmup = enabled,
+                "skip-vats-outline" => config.skip_vats_outline = enabled,
                 _ => {}
             }
         }

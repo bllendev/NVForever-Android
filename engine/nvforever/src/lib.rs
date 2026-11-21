@@ -1071,6 +1071,10 @@ pub fn run(line: Vec<String>) -> AppExit {
 /// test the Android launcher offers, not a test aid (`pipboy_arm`).
 pub const NO_PIPBOY_WARM_ENV: &str = "NVF_NO_PIPBOY_WARM";
 
+/// Set (any value) to draw no V.A.T.S. part outline (no mask camera): a crash test the
+/// Android launcher offers (`vats_highlight`). V.A.T.S. itself is unchanged.
+pub const NO_VATS_OUTLINE_ENV: &str = "NVF_NO_VATS_OUTLINE";
+
 pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     // Started as this run's exit watcher (exit_watch.rs): wait for the game's process, no game.
     if exit_watch::run_if_watcher() {
