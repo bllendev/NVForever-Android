@@ -1,10 +1,9 @@
 package org.nvforever.android;
 
-import java.io.File;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.charset.StandardCharsets;
 import java.util.Comparator;
 
 public final class DebugReportTest {
@@ -31,6 +30,9 @@ public final class DebugReportTest {
             for (String excluded : new String[]{"OLD CRASH", "OLD RUN", "STALE SAME PID", "PRIVATE CONFIG"}) {
                 check(!report.contains(excluded), "exclude " + excluded);
             }
+            testReferencedPriorRun(Files.createDirectory(dir.resolve("prior")));
+            testRejectedReferences(Files.createDirectory(dir.resolve("rejected")));
+            testTruncatedReference(Files.createDirectory(dir.resolve("truncated")));
         } finally {
             try (var paths = Files.walk(dir)) {
                 for (Path path : (Iterable<Path>) paths.sorted(Comparator.reverseOrder())::iterator) {
@@ -39,6 +41,74 @@ public final class DebugReportTest {
             }
         }
         System.out.println("DebugReport tests passed");
+    }
+
+    private static void testReferencedPriorRun(Path dir) throws Exception {
+        Path prior = dir.resolve("nvforever-20261120-120000-42.log");
+        Path latest = dir.resolve("nvforever-20261120-120100-43.log");
+        Files.writeString(prior, "PRIOR START\n" + "x".repeat(300_000) + "\nPRIOR END\n");
+        Files.writeString(dir.resolve("nvforever-20261120-120050-99.log"), "UNREFERENCED RUN");
+        Files.writeString(latest, warning(prior) + "LATEST CLEAN RUN\n");
+        String report = export(dir);
+        check(report.contains("PRIOR START") && report.contains("PRIOR END"), "keeps referenced prior evidence");
+        check(report.contains("Previous abnormal run") && report.indexOf("LATEST CLEAN RUN") < report.indexOf("PRIOR START"),
+                "labels prior evidence separately from the latest run");
+        check(report.length() < 240_000 && report.contains("[Middle of log omitted]"), "prior evidence stays bounded");
+        check(!report.contains("UNREFERENCED RUN"), "does not infer prior run from file ordering");
+
+        Files.writeString(dir.resolve("crash-20261120-120101-43.txt"), "LATEST MATCHED CRASH");
+        Files.writeString(dir.resolve("crash-20261120-120059-43.txt"), "STALE SAME-PID CRASH");
+        Files.writeString(dir.resolve("crash-20261120-120102-42.txt"), "UNRELATED CRASH");
+        report = export(dir);
+        check(report.contains("LATEST MATCHED CRASH") && report.contains("PRIOR END"),
+                "prior evidence does not displace the latest run's crash report");
+        check(!report.contains("STALE SAME-PID CRASH") && !report.contains("UNRELATED CRASH"),
+                "crash matching still uses the latest run's PID and timestamp");
+    }
+
+    private static void testRejectedReferences(Path dir) throws Exception {
+        Path prior = dir.resolve("nvforever-20261120-120000-42.log");
+        Path latest = dir.resolve("nvforever-20261120-120100-43.log");
+        Path sameTime = dir.resolve("nvforever-20261120-120100-41.log");
+        Path config = dir.resolve("NVForever.ini");
+        Path outside = dir.getParent().resolve(prior.getFileName());
+        Files.writeString(prior, "LOCAL PRIOR");
+        Files.writeString(sameTime, "SAME TIME");
+        Files.writeString(config, "PRIVATE CONFIG");
+        Files.writeString(outside, "OUTSIDE CONTENT");
+        for (Path rejected : new Path[]{dir.resolve("nvforever-20261120-115959-42.log"), outside,
+                dir.resolve("..").resolve(prior.getFileName()), dir.resolve(".").resolve(prior.getFileName()),
+                prior.getFileName(), latest, sameTime, config}) {
+            Files.writeString(latest, warning(rejected) + "LATEST STILL EXPORTED\n");
+            String report = export(dir);
+            check(report.contains("LATEST STILL EXPORTED"), "keeps latest when reference rejected: " + rejected);
+            check(!report.contains("Previous abnormal run"), "rejects reference: " + rejected);
+        }
+        Files.writeString(latest, warning(prior).replace("nvforever::crash:", "other::module:"));
+        check(!export(dir).contains("LOCAL PRIOR"), "rejects another log source quoting the warning");
+    }
+
+    private static void testTruncatedReference(Path dir) throws Exception {
+        Path prior = dir.resolve("nvforever-20261120-120000-42.log");
+        Path latest = dir.resolve("nvforever-20261120-120100-43.log");
+        Files.writeString(prior, "PRIOR EVIDENCE");
+        String warning = warning(prior);
+        String tail = warning + "x".repeat(192 * 1024 - warning.getBytes(StandardCharsets.UTF_8).length);
+        Files.writeString(latest, "x".repeat(300_000) + "\n" + tail);
+        check(export(dir).contains("PRIOR EVIDENCE"), "accepts complete warning at retained tail boundary");
+        Files.writeString(latest, "x".repeat(300_000) + tail);
+        check(!export(dir).contains("PRIOR EVIDENCE"), "rejects warning-looking suffix of a truncated line");
+    }
+
+    private static String warning(Path path) {
+        return "2026-11-20T12:01:00.000000Z  WARN nvforever::crash: run log: the previous run did not end normally"
+                + " and left no crash report (a native crash, or the process was ended): " + path + "\n";
+    }
+
+    private static String export(Path dir) throws Exception {
+        StringWriter out = new StringWriter();
+        DebugReport.write(dir.toFile(), "build and device", out);
+        return out.toString();
     }
 
     private static void check(boolean condition, String name) {
