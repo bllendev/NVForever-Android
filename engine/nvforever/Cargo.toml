@@ -18,14 +18,6 @@ fnv-install.workspace = true
 fnv-util.workspace = true
 # The DLSS download, its checks and the DLSS folder, shared with the launcher (#2765).
 nvf-dlss-files.workspace = true
-# Player reports (reports/upload.rs): HTTPS through the system's TLS (Windows: SChannel;
-# Linux: the system's OpenSSL, the same build nvf-dlss-files already brings there, #3144)
-# and the system's certificates, not rustls. `native-tls-no-default`, not `native-tls`:
-# the latter also bundles webpki's root certificates (webpki-root-certs,
-# CDLA-Permissive-2.0, outside deny.toml), which the reports never use (they ask for
-# RootCerts::PlatformVerifier, the system's roots) (#1998). ureq and native-tls
-# MIT/Apache-2.0, schannel MIT, openssl Apache-2.0, openssl-sys MIT.
-ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
 fnv-save.workspace = true
 texpresso.workspace = true
 fnv-spt.workspace = true
@@ -68,6 +60,21 @@ ash = { version = "0.38", default-features = false }
 # up in memory) and to listen and announce itself on this machine only (`only-localhost`);
 # frame-rate-audit.md §1. MIT/Apache-2.0; the Tracy C++ client in tracy-client-sys is BSD-3-Clause.
 tracy-client = { version = "0.19", optional = true, default-features = false, features = ["ondemand", "only-localhost"] }
+
+# Player reports (reports/upload.rs): HTTPS through the system's TLS (Windows: SChannel;
+# Linux: the system's OpenSSL, the same build nvf-dlss-files already brings there, #3144)
+# and the system's certificates, not rustls. `native-tls-no-default`, not `native-tls`:
+# the latter also bundles webpki's root certificates (webpki-root-certs,
+# CDLA-Permissive-2.0, outside deny.toml), which the reports never use (they ask for
+# RootCerts::PlatformVerifier, the system's roots) (#1998). ureq and native-tls
+# MIT/Apache-2.0, schannel MIT, openssl Apache-2.0, openssl-sys MIT.
+#
+# Not Android: native-tls there is openssl-sys, which needs an OpenSSL built for the NDK
+# that this build does not carry, so the Android game would not link at all. Its
+# `mod http` is the stubs instead (reports/upload.rs), the same restriction
+# nvf-dlss-files makes for its download.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
 
 # The first-start dialogs that ask for the game's folder (setup.rs); MIT.
 [target.'cfg(windows)'.dependencies]
