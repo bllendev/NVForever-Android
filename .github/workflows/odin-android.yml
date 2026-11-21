@@ -52,31 +52,29 @@ jobs:
           CARGO_PROFILE_RELEASE_QUICK_DEBUG: 'false'
         run: cargo ndk -t arm64-v8a --platform 26 -o ../android/app/src/main/jniLibs build --locked --profile release-quick -p nvf-android
       - name: Package APK
+        run: gradle -p android --no-daemon -PprebuiltRust assembleDebug
+      - name: Sign APK with the dedicated Odin key
         env:
           ODIN_KEYSTORE_B64: ${{ secrets.ODIN_KEYSTORE_B64 }}
         run: |
-          if [[ -n "$ODIN_KEYSTORE_B64" ]]; then
-            umask 077
-            mkdir -p "$HOME/.android"
-            printf '%s' "$ODIN_KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
-          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            echo 'A stable ODIN_KEYSTORE_B64 key is required to publish upgradeable builds.' >&2
-            exit 1
-          fi
+          umask 077
+          ks=$(mktemp)
+          trap 'rm -f "$ks"' EXIT
+          test -n "$ODIN_KEYSTORE_B64"
+          printf '%s' "$ODIN_KEYSTORE_B64" | base64 -d > "$ks"
           unset ODIN_KEYSTORE_B64
-          trap 'rm -f "$HOME/.android/debug.keystore"' EXIT
-          gradle -p android --no-daemon -PprebuiltRust assembleDebug
+          mkdir -p dist
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" sign \
+            --ks "$ks" --ks-type PKCS12 --ks-key-alias androiddebugkey \
+            --ks-pass pass:android --key-pass pass:android --v4-signing-enabled false \
+            --out dist/NVForever-Odin-arm64.apk android/app/build/outputs/apk/debug/app-debug.apk
       - name: Verify package and signature
         run: |
-          mkdir dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk dist/NVForever-Odin-arm64.apk
           tools="$ANDROID_HOME/build-tools/$BUILD_TOOLS"
           cd dist
           "$tools/zipalign" -c -P 16 4 NVForever-Odin-arm64.apk
           "$tools/apksigner" verify --verbose --print-certs NVForever-Odin-arm64.apk | tee signer.txt
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            grep -q 'SHA-256 digest: 50ce2c81a82786f46813a83873df575fccd5c6f236fcef009e99e974324388b1' signer.txt
-          fi
+          grep -q 'SHA-256 digest: 50ce2c81a82786f46813a83873df575fccd5c6f236fcef009e99e974324388b1' signer.txt
           so=../android/app/src/main/jniLibs/arm64-v8a/libnvf_android.so
           readelf -lW "$so" | awk '$1 == "LOAD" { count++; if (strtonum($NF) < 16384) bad=1 } END { exit (!count || bad) }'
           "$tools/aapt2" dump badging NVForever-Odin-arm64.apk | tee package.txt
