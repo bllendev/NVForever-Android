@@ -34,6 +34,8 @@ use encase::internal::ReadFrom;
 use encase::private::Reader;
 use encase::ShaderType;
 
+mod map_diagnostic;
+
 /// A plugin that enables reading back gpu buffers and textures to the cpu.
 pub struct GpuReadbackPlugin {
     /// Describes the number of frames a buffer can be unused before it is removed from the pool in
@@ -51,7 +53,10 @@ impl Default for GpuReadbackPlugin {
 
 impl Plugin for GpuReadbackPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ExtractComponentPlugin::<Readback>::default())
+        app.add_plugins((
+            ExtractComponentPlugin::<Readback>::default(),
+            ExtractComponentPlugin::<ReadbackDiagnosticLabel>::default(),
+        ))
             .register_type::<ReadbackOnce>()
             .add_systems(
                 First,
@@ -115,6 +120,12 @@ impl Readback {
     }
 }
 
+/// Optional code-defined label for a [`Readback`] map failure. Use a short static
+/// identifier, not an asset path or gameplay data. Does not affect admission.
+#[derive(Component, ExtractComponent, Clone, Copy)]
+#[extract_app(RenderApp)]
+pub struct ReadbackDiagnosticLabel(pub &'static str);
+
 /// Marker component that pairs with a [`Readback`] to indicate the entity should be
 /// despawned after the first [`ReadbackComplete`] event fires for it.
 ///
@@ -144,7 +155,7 @@ impl ReadbackOnce {
 
 fn cleanup_readback_once(mut commands: Commands, query: Query<Entity, With<ReadbackOnce>>) {
     for entity in &query {
-        commands.entity(entity).remove::<(Readback, ReadbackOnce)>();
+        commands.entity(entity).remove::<(Readback, ReadbackOnce, ReadbackDiagnosticLabel)>();
     }
 }
 
@@ -266,6 +277,7 @@ struct GpuReadbacks {
 
 struct GpuReadback {
     pub entity: Entity,
+    pub diagnostic_label: Option<&'static str>,
     pub src: ReadbackSource,
     pub buffer: Buffer,
     pub rx: Receiver<(Entity, Buffer, Vec<u8>)>,
@@ -297,9 +309,10 @@ fn prepare_buffers(
     mut buffer_pool: ResMut<GpuReadbackBufferPool>,
     gpu_images: Res<RenderAssets<GpuImage>>,
     ssbos: Res<RenderAssets<GpuShaderBuffer>>,
-    handles: Query<(&MainEntity, &Readback)>,
+    handles: Query<(&MainEntity, &Readback, Option<&ReadbackDiagnosticLabel>)>,
 ) {
-    for (entity, readback) in handles.iter() {
+    for (entity, readback, label) in handles.iter() {
+        let diagnostic_label = label.map(|label| label.0);
         match readback {
             Readback::Texture(image) => {
                 if let Some(gpu_image) = gpu_images.get(image)
@@ -317,6 +330,7 @@ fn prepare_buffers(
                     let (tx, rx) = async_channel::bounded(1);
                     readbacks.requested.push(GpuReadback {
                         entity: entity.id(),
+                        diagnostic_label,
                         src: ReadbackSource::Texture {
                             texture: gpu_image.texture.clone(),
                             layout,
@@ -350,6 +364,7 @@ fn prepare_buffers(
                     let (tx, rx) = async_channel::bounded(1);
                     readbacks.requested.push(GpuReadback {
                         entity: entity.id(),
+                        diagnostic_label,
                         src: ReadbackSource::Buffer {
                             start_offset_and_size: *start_offset_and_size,
                             buffer: ssbo.buffer.clone(),
@@ -403,10 +418,11 @@ fn map_buffers(mut readbacks: ResMut<GpuReadbacks>) {
     for readback in requested {
         let slice = readback.buffer.slice(..);
         let entity = readback.entity;
+        let diagnostic_label = readback.diagnostic_label;
         let buffer = readback.buffer.clone();
         let tx = readback.tx.clone();
         slice.map_async(wgpu::MapMode::Read, move |res| {
-            res.expect("Failed to map buffer");
+            map_diagnostic::expect_mapped(res, diagnostic_label, buffer.size());
             let buffer_slice = buffer.slice(..);
             let data = buffer_slice.get_mapped_range().unwrap();
             let result = Vec::from(&*data);
