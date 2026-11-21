@@ -39,6 +39,11 @@ pub fn main() {
         return diag::run(why);
     }
     paths::set_environment(&home, &schemas);
+    // Crash test from the launcher: no hidden Pip-Boy warm-up while a load is covered
+    // (`nvforever::pipboy_arm`). Set before the engine starts any thread.
+    if controller::ControlsConfig::load().skip_pipboy_warmup {
+        std::env::set_var(nvforever::NO_PIPBOY_WARM_ENV, "1");
+    }
     let line = match paths::restart_line(&paths::internal_files()) {
         Ok(Some(line)) => line,
         Ok(None) => paths::command_line(&data, &schemas, &paths::user_args()),
