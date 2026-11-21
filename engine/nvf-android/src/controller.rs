@@ -17,20 +17,34 @@ pub struct ControlsConfig {
     pub skip_pipboy_warmup: bool,
     /// Crash test (launcher switch): no V.A.T.S. part-outline mask camera.
     pub skip_vats_outline: bool,
+    /// Crash test (launcher switch): the run asks for the Khronos Vulkan validation layer
+    /// (`nvforever::VULKAN_VALIDATION_ENV`, much slower).
+    pub vulkan_validation: bool,
 }
-impl ControlsConfig {
-    pub fn load() -> Self {
-        let mut config = Self {
+impl Default for ControlsConfig {
+    /// What a phone without the file gets: touch controls, nothing else.
+    fn default() -> Self {
+        Self {
             controller: false,
             touch: true,
             diagnostics: false,
             skip_pipboy_warmup: false,
             skip_vats_outline: false,
-        };
-        for line in crate::paths::option_file("nvforever-controls.txt")
-            .unwrap_or_default()
-            .lines()
-        {
+            vulkan_validation: false,
+        }
+    }
+}
+impl ControlsConfig {
+    pub fn load() -> Self {
+        Self::parse(&crate::paths::option_file("nvforever-controls.txt").unwrap_or_default())
+    }
+
+    /// `nvforever-controls.txt`: one `name value` a line, the launcher's switches
+    /// (LauncherActivity.java `saveControls`). A line that is blank, a comment, short of a
+    /// value, or carries anything but true/false/1/0 leaves its setting as it was.
+    fn parse(text: &str) -> Self {
+        let mut config = Self::default();
+        for line in text.lines() {
             let mut words = line.split_whitespace();
             let (Some(name), Some(value)) = (words.next(), words.next()) else {
                 continue;
@@ -46,6 +60,7 @@ impl ControlsConfig {
                 "diagnostics" => config.diagnostics = enabled,
                 "skip-pipboy-warmup" => config.skip_pipboy_warmup = enabled,
                 "skip-vats-outline" => config.skip_vats_outline = enabled,
+                "vulkan-validation" => config.vulkan_validation = enabled,
                 _ => {}
             }
         }
@@ -211,6 +226,29 @@ mod tests {
     };
 
     #[test]
+    fn controls_file_defaults_and_every_switch_it_can_set() {
+        let empty = ControlsConfig::parse("");
+        assert!(!empty.controller && empty.touch && !empty.diagnostics);
+        assert!(!empty.skip_pipboy_warmup && !empty.skip_vats_outline && !empty.vulkan_validation);
+
+        // What the launcher writes with every switch on (the comment line is ignored).
+        let on = ControlsConfig::parse(
+            "# Applied when starting the game\ncontroller true\ntouch true\nskip-pipboy-warmup true\nskip-vats-outline true\nvulkan-validation true\n",
+        );
+        assert!(on.controller && on.touch && on.skip_pipboy_warmup && on.skip_vats_outline && on.vulkan_validation);
+
+        // The off state is the file saying false, not only the file being absent.
+        let off = ControlsConfig::parse("controller false\ntouch false\nvulkan-validation false\n");
+        assert!(!off.controller && !off.touch && !off.vulkan_validation);
+
+        // 1/0 are accepted too; an unknown name, a missing or unreadable value and a blank
+        // line change nothing.
+        let mixed = ControlsConfig::parse("vulkan-validation 1\ndiagnostics 0\n\nnonsense true\nvulkan-validation\ntouch maybe\n");
+        assert!(mixed.vulkan_validation && !mixed.diagnostics && mixed.touch);
+        assert!(!ControlsConfig::parse("vulkan-validation 0").vulkan_validation);
+    }
+
+    #[test]
     fn legacy_migration_is_idempotent_and_preserves_custom_bindings() {
         let mut bindings = Bindings::game_defaults();
         assert!(!migrate_legacy_dpad(&mut bindings));
@@ -249,11 +287,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(InputPlugin)
             .insert_resource(Bindings::game_defaults())
-            .insert_resource(ControlsConfig {
-                controller: true,
-                touch: false,
-                diagnostics: false,
-            })
+            .insert_resource(ControlsConfig { controller: true, touch: false, ..default() })
             .add_plugins(ControllerPlugin)
             .add_plugins(nvf_play::pad::PadPlugin)
             .insert_resource(State::new(nvf_play::PlayState::Menu));

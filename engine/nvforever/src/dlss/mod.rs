@@ -1073,10 +1073,11 @@ pub(crate) fn dlss_pass(
 pub fn render_plugin() -> bevy::render::RenderPlugin {
     let adapter_name = adapter_pin();
     let memory_hints = crate::memory_budget::hints_at_start();
-    bevy::render::RenderPlugin {
-        render_creation: bevy::render::settings::WgpuSettings { adapter_name, memory_hints, ..default() }.into(),
-        ..default()
-    }
+    let mut settings = bevy::render::settings::WgpuSettings { adapter_name, memory_hints, ..default() };
+    // The launcher's Vulkan validation crash test, when it is on: the instance asks for the
+    // Khronos layer (vulkan_validation.rs). Off, the flags are Bevy's own, as before.
+    settings.instance_flags = crate::vulkan_validation::instance_flags(settings.instance_flags);
+    bevy::render::RenderPlugin { render_creation: settings.into(), ..default() }
 }
 
 /// The adapter name the loader pinned, if any.
