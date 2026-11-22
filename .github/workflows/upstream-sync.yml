@@ -1,0 +1,139 @@
+name: Upstream sync
+
+# Keeps our Android fork rebased on top of upstream NVForever
+# (LootJunkieAzza/NVForever main). Our work is a short stack of topic commits on top of
+# upstream; every day this replays that stack onto the newest upstream on the bot branch
+# odin/upstream-sync, starts an APK build of it, and opens (or refreshes) a pull request.
+# It never touches the base branch itself: promotion is a separate, manual workflow
+# (upstream-promote.yml) run after the APK was tested on the device.
+#
+# Which branch holds our stack: the repository variable SYNC_BASE (default: main).
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  rebase:
+    if: github.repository == 'bllendev/NVForever-Android'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE: ${{ vars.SYNC_BASE || 'main' }}
+      SYNC: odin/upstream-sync
+      UPSTREAM: https://github.com/LootJunkieAzza/NVForever.git
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ vars.SYNC_BASE || 'main' }}
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM"
+          git fetch --no-tags upstream main
+          echo "UP_SHA=$(git rev-parse upstream/main)" >> "$GITHUB_ENV"
+
+      - name: Already on top of upstream?
+        id: fresh
+        run: |
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+            echo "### $BASE already contains upstream ${UP_SHA::9}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rebase our stack onto upstream
+        id: rebase
+        if: steps.fresh.outputs.up_to_date == 'false'
+        run: |
+          git config user.name "upstream-sync[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          base_point=$(git merge-base upstream/main HEAD)
+          ours=$(git rev-list --count "$base_point"..HEAD)
+          theirs=$(git rev-list --count "$base_point"..upstream/main)
+          echo "ours=$ours" >> "$GITHUB_OUTPUT"
+          echo "theirs=$theirs" >> "$GITHUB_OUTPUT"
+          git switch -C "$SYNC"
+          if git rebase upstream/main > rebase.log 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            git diff --name-only --diff-filter=U > conflicts.txt || true
+            stopped=$(git rev-parse --short REBASE_HEAD 2>/dev/null || echo '?')
+            echo "stopped=$stopped" >> "$GITHUB_OUTPUT"
+            git rebase --abort
+          fi
+
+      - name: Report a conflict
+        if: steps.rebase.outputs.ok == 'false'
+        run: |
+          title="Upstream sync: rebase onto ${UP_SHA::9} needs a hand"
+          {
+            echo "Replaying \`$BASE\` (${{ steps.rebase.outputs.ours }} of our commits) onto upstream \`${UP_SHA::9}\` (${{ steps.rebase.outputs.theirs }} new upstream commits) stopped at our commit \`${{ steps.rebase.outputs.stopped }}\`."
+            echo
+            echo "Conflicting files:"
+            echo '```'
+            cat conflicts.txt
+            echo '```'
+            echo
+            echo "Nothing was pushed; \`$BASE\` is unchanged. Resolve locally: \`git fetch upstream && git switch -C $SYNC $BASE && git rebase upstream/main\`, then push \`$SYNC\`."
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > body.md
+          gh label create upstream-sync --color BFD4F2 --description "Automatic upstream rebase" 2>/dev/null || true
+          existing=$(gh issue list --label upstream-sync --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue edit "$existing" --title "$title" --body-file body.md
+          else
+            gh issue create --title "$title" --label upstream-sync --body-file body.md
+          fi
+          cat body.md >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Push the rebased stack and start its APK build
+        if: steps.rebase.outputs.ok == 'true'
+        run: |
+          git push --force-with-lease origin "$SYNC"
+          gh workflow run odin-android.yml --ref "$SYNC"
+          # A clean rebase closes any open conflict issue.
+          for n in $(gh issue list --label upstream-sync --state open --json number --jq '.[].number'); do
+            gh issue close "$n" --comment "Rebased cleanly onto ${UP_SHA::9} in $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          done
+
+      - name: Open or refresh the pull request
+        if: steps.rebase.outputs.ok == 'true'
+        run: |
+          {
+            echo "Our stack on \`$BASE\` replayed onto upstream \`${UP_SHA::9}\` (${{ steps.rebase.outputs.theirs }} new upstream commits, ${{ steps.rebase.outputs.ours }} of ours)."
+            echo
+            echo "Our commits, as rebased:"
+            echo '```'
+            git log --oneline --no-merges upstream/main..HEAD
+            echo '```'
+            echo
+            echo "Before promoting:"
+            echo "1. Wait for the **Odin Android debug** run on \`$SYNC\` and download its APK artifact."
+            echo "2. Test on the device: first load time (the load-freeze regression check), a save load, the wrist glance."
+            echo "3. Promote with the **Upstream promote** workflow (it backs up \`$BASE\` first). Do not merge this PR with GitHub's merge button: the branch is a rewrite of \`$BASE\`, not commits on top of it."
+          } > pr.md
+          pr=$(gh pr list --head "$SYNC" --base "$BASE" --state open --json number --jq '.[0].number')
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --title "Upstream sync onto ${UP_SHA::9}" --body-file pr.md
+          else
+            gh pr create --head "$SYNC" --base "$BASE" --title "Upstream sync onto ${UP_SHA::9}" --body-file pr.md --draft
+          fi
+          cat pr.md >> "$GITHUB_STEP_SUMMARY"
