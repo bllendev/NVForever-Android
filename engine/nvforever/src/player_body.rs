@@ -145,6 +145,18 @@ fn wrist_drop() -> f32 {
     std::env::var("NVF_WRIST_DROP").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(WRIST_DROP)
 }
 
+/// How far left of the eye the glance holds the arm, game units, at the Glance position
+/// row's Lower left (`nvf_play::wrist_arm::Position`, the default): the owner's first
+/// Odin photo had the device in the middle right of a 16:9 picture, over the way ahead,
+/// where the reference framing keeps it low on the left with the world clear beside it
+/// [design: the owner, 2026-11-21]. Centre is 0. `NVF_WRIST_SIDE` overrides it while it
+/// is being fitted.
+const WRIST_SIDE: f32 = 26.0;
+
+fn wrist_side() -> f32 {
+    std::env::var("NVF_WRIST_SIDE").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(WRIST_SIDE)
+}
+
 /// The field of view the first-person arms and weapon are drawn with otherwise, degrees
 /// as [`PIPBOY_FOV`] [documented: `Fallout_default.ini` `fDefault1stPersonFOV=55`,
 /// docs/design/layer3.md; hypothesis: that it is the view of the arms' own camera, so
@@ -2884,10 +2896,17 @@ fn keep_sights_facing(a: &mut Animator, spine: usize) -> f32 {
 /// second camera [design]. The rig's root keeps the place [`pose_rig`] gave it, under
 /// the lens nodes: the outer node stands at the eye looking along `forward`, the inner
 /// one scales across that look.
-fn place_lens(rig: &Rig, eye: Vec3, forward: Vec3, k: f32, drop: f32, transforms: &mut Query<&mut Transform>) {
+///
+/// `drop` and `side` move where the rig *appears*: moving the lens node by `d` across the
+/// view leaves the rig `(1 − k) · d` from where it was, so with the glance's wider arms
+/// view (`k` under 1) a drop puts the device lower in the picture and a positive `side`
+/// further right. The glance alone uses them (`wrist_drop`, `wrist_side`); the menus'
+/// raise and ordinary play pass 0 and are untouched.
+fn place_lens(rig: &Rig, eye: Vec3, forward: Vec3, k: f32, drop: f32, side: f32, transforms: &mut Query<&mut Transform>) {
     let Some([outer, inner]) = rig.lens else { return };
     let Ok(root) = transforms.get(rig.root).copied() else { return };
-    let at = Transform { translation: eye - Vec3::Z * drop, rotation: Quat::from_rotation_arc(Vec3::Y, forward.normalize_or(Vec3::Y)), scale: Vec3::ONE };
+    let turn = Quat::from_rotation_arc(Vec3::Y, forward.normalize_or(Vec3::Y));
+    let at = Transform { translation: eye - Vec3::Z * drop + turn * Vec3::X * side, rotation: turn, scale: Vec3::ONE };
     let local = Transform::from_matrix(at.to_matrix().inverse() * root.to_matrix());
     for (e, t) in [(outer, at), (inner, Transform::from_scale(Vec3::new(k, 1.0, k))), (rig.root, local)] {
         if let Ok(mut m) = transforms.get_mut(e) {
@@ -3880,13 +3899,17 @@ fn drive_body(
             _ => 1.0,
         };
         let forward = Vec3::from_array(nvf_play::space::look_dir(player.heading, player.pitch));
-        // The glance holds the arm lower than a menu would, so the road ahead is still
-        // read over the device (`WRIST_DROP`).
-        let drop = match (pip.on_arm() && pip.warming.is_none(), pipboy) {
-            (false, Some(t)) => wrist_drop() * pipboy_ease(t),
-            _ => 0.0,
+        // The glance holds the arm lower than a menu would and, unless the player asked
+        // for Centre, over to the left, so the way ahead is read beside the device
+        // (`WRIST_DROP`, `WRIST_SIDE`, `wrist_arm::Position`).
+        let (drop, side) = match (pip.on_arm() && pip.warming.is_none(), pipboy) {
+            (false, Some(t)) => {
+                let centred = wrist.as_deref().is_some_and(|w| w.centred());
+                (wrist_drop() * pipboy_ease(t), if centred { 0.0 } else { -wrist_side() * pipboy_ease(t) })
+            }
+            _ => (0.0, 0.0),
         };
-        place_lens(f, eye, forward, k, drop, &mut transforms);
+        place_lens(f, eye, forward, k, drop, side, &mut transforms);
         lens_k = k;
     }
     match first.and_then(|(_, v)| v) {

@@ -40,7 +40,7 @@ use crate::control::PlayerControl;
 use crate::pipboy::data::model::WorldMap;
 use crate::pipboy::data::read;
 use crate::player::Player;
-use crate::wrist_live::{Key, Live, LocalPic, MapPicture, Play, Spot};
+use crate::wrist_live::{Key, Live, LocalPic, MapPicture, Mark, MarkKind, Play, Spot, MARKS_MOST};
 use bevy::prelude::*;
 use std::time::Duration;
 
@@ -101,6 +101,33 @@ impl Style {
     }
 }
 
+/// Where in the frame the glance holds the device [design: the owner, 2026-11-21, after
+/// the first Odin photo: the arm came up in the middle right, over the way ahead].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Position {
+    /// Low on the left, the middle of the picture clear to walk through.
+    #[default]
+    LowerLeft,
+    /// Where the menus hold it: under the middle of the view.
+    Centre,
+}
+
+impl Position {
+    pub const NAMES: [&'static str; 2] = ["Lower left", "Centre"];
+
+    pub fn name(self) -> &'static str {
+        Position::NAMES[self as usize]
+    }
+
+    pub fn of(name: &str) -> Option<Position> {
+        match name {
+            "Lower left" => Some(Position::LowerLeft),
+            "Centre" => Some(Position::Centre),
+            _ => None,
+        }
+    }
+}
+
 /// The opt-in, and what the live view asks for this frame.
 #[derive(Resource, Debug, Default)]
 pub struct WristLive {
@@ -118,6 +145,9 @@ pub struct WristLive {
     pub style: Raise,
     /// Which picture its screen shows ([`Style`]), the settings page's third row.
     pub map_style: Style,
+    /// Where in the frame it holds the device ([`Position`]), the settings page's fourth
+    /// row.
+    pub map_position: Position,
     /// The player is asking for the glance now: the key is held past its moment
     /// ([`GLANCE_SECONDS`]) in Hold style, or the latch is on in Toggle style.
     pub asked: bool,
@@ -154,13 +184,17 @@ pub struct Shown {
     /// The texels of the Local Map's outline when that is the base
     /// ([`crate::wrist_local`]); `None` for the worldspace's own picture.
     pub local: Option<LocalPic>,
+    /// What is marked on the picture, in its own coordinates: the active quest's targets,
+    /// the map markers and the doors the HUD compass's last look found
+    /// ([`crate::compass::CompassNear`]), at most [`crate::wrist_live::MARKS_MOST`].
+    pub marks: Vec<Mark>,
 }
 
 impl PartialEq for Shown {
     /// The same picture of the same place: the outline's by its texels rather than by
     /// every sample of them ([`LocalPic::is`]).
     fn eq(&self, other: &Self) -> bool {
-        (self.key, &self.texture, self.uv, self.forward, self.half) == (other.key, &other.texture, other.uv, other.forward, other.half)
+        (self.key, &self.texture, self.uv, self.forward, self.half, &self.marks) == (other.key, &other.texture, other.uv, other.forward, other.half, &other.marks)
             && match (&self.local, &other.local) {
                 (Some(a), Some(b)) => a.is(b),
                 (a, b) => a.is_none() == b.is_none(),
@@ -184,6 +218,17 @@ fn take_map_style(world: &mut World, name: &str) -> bool {
     match Style::of(name) {
         Some(style) => {
             world.resource_mut::<WristLive>().map_style = style;
+            true
+        }
+        None => false,
+    }
+}
+
+/// Take where the glance holds the device by name; false: not one of ours.
+fn take_position(world: &mut World, name: &str) -> bool {
+    match Position::of(name) {
+        Some(at) => {
+            world.resource_mut::<WristLive>().map_position = at;
             true
         }
         None => false,
@@ -233,6 +278,24 @@ const ACTIONS: [Control; 5] = [Control::Use, Control::Block, Control::ReadyItem,
 /// menus take to lower, so one press does one thing].
 const COOLDOWN: Duration = Duration::from_millis(600);
 
+/// What of the HUD compass's last look the glance's map marks, and as what: the active
+/// quest's targets and the player's own marker, the map markers of the places about them,
+/// and the doors when the player asked the compass for those. The living — actors,
+/// companions, whatever is hostile — is left off: the glance draws a map, not a radar
+/// [design: the owner, 2026-11-21]. The compass finds them itself, ten times a second
+/// (`crate::compass::gather`), so nothing here looks at the world.
+fn marked(m: crate::compass::Mark) -> Option<MarkKind> {
+    use crate::compass::Mark as C;
+    match m {
+        C::Quest => Some(MarkKind::Quest),
+        C::Player => Some(MarkKind::Player),
+        C::Place => Some(MarkKind::Place),
+        C::Found => Some(MarkKind::Found),
+        C::Door => Some(MarkKind::Door),
+        C::Actor | C::Hostile | C::Companion => None,
+    }
+}
+
 /// Where the glance's raise stands after `dt` seconds: up to the hold the menus use, and
 /// straight back to nothing the frame it is let go. Nothing here touches input, so a menu
 /// or a conversation opening in the middle of a raise leaves no control held and no pose
@@ -262,6 +325,12 @@ impl WristLive {
     /// leaves the pose to its normal owner.
     pub fn arm_clip_time(&self) -> Option<f32> {
         self.open.filter(|_| self.live()).map(|_| self.arm)
+    }
+
+    /// Whether the glance holds the device under the middle of the view rather than low on
+    /// the left (`wrist-map-position`), for nvforever's body.
+    pub fn centred(&self) -> bool {
+        self.map_position == Position::Centre
     }
 
     /// Whether the close picture is wanted now: the glance holds the arm and the player
@@ -367,6 +436,22 @@ impl Plugin for WristLivePlugin {
                 ask_keep: false,
             },
         );
+        add_choice_list(
+            app,
+            row(
+                "wrist-map-position",
+                "Glance position",
+                "Lower left: the arm comes up low on the left, leaving the middle of the picture clear to walk through. Centre: under the middle of the view, where the menus hold it.",
+            ),
+            ChoiceList {
+                names: |_| Position::NAMES.iter().map(|n| n.to_string()).collect(),
+                chosen: |w| w.resource::<WristLive>().map_position.name().to_string(),
+                pick: |w, n| take_position(w, n),
+                save: |w| w.resource::<WristLive>().map_position.name().to_string(),
+                load: |w, t| take_position(w, t),
+                ask_keep: false,
+            },
+        );
     }
 }
 
@@ -381,10 +466,12 @@ pub(crate) fn decide(
     (pip, control, active): (Option<Res<crate::pipboy::PipBoy>>, Option<Res<PlayerControl>>, Option<Res<crate::menu::ActiveMenu>>),
     (location, world, player): (Option<Res<crate::Location>>, Option<Res<crate::PlayWorld>>, Option<Res<Player>>),
     (vats, kill_cam): (Option<Res<crate::vats_mode::VatsMode>>, Option<Res<crate::kill_cam::KillCam>>),
-    hold: Option<Res<crate::flashlight::MenuKeyHold>>,
+    (hold, near): (Option<Res<crate::flashlight::MenuKeyHold>>, Option<Res<crate::compass::CompassNear>>),
     mut maps: Local<Maps>,
     mut was_menus: Local<bool>,
     mut latched: Local<bool>,
+    mut marks: Local<Vec<(MarkKind, [f32; 2])>>,
+    mut refused: Local<bool>,
 ) {
     // Nothing is held while the frame's own keys are read, so a press of the hands' own
     // controls does its job on the frame it is made and only then ends the glance.
@@ -394,7 +481,7 @@ pub(crate) fn decide(
         // Pip-Boy's key is left entirely alone, so the menus behave as they always did.
         if wrist.open.is_some() || wrist.shown.is_some() || wrist.asked || *latched {
             (wrist.open, wrist.shown, wrist.arm, wrist.asked, wrist.live) = (None, None, 0.0, false, Live::default());
-            *latched = false;
+            (*latched, *refused) = (false, false);
         }
         return;
     }
@@ -441,8 +528,10 @@ pub(crate) fn decide(
         pipboy: menus,
         menu: active.as_deref().is_some_and(|a| a.0.is_some()),
         vats: vats.as_deref().is_some_and(|v| v.holds_input()) || kill_cam.as_deref().is_some_and(|k| k.active()),
-        // Holstered and empty-handed only, until the armed pose is compared with stock.
-        weapon_out: control.as_deref().is_some_and(|c| c.weapon_out || c.aiming),
+        // A drawn weapon is no longer a blocker: the Pip-Boy clip poses both arms, so the
+        // weapon hand is held down while the arm is up exactly as the menus' own raise
+        // holds it (the owner, 2026-11-21). The sights still are.
+        aiming: control.as_deref().is_some_and(|c| c.aiming),
         // Read afresh from this frame's input and never kept: the press is not swallowed,
         // the glance simply lets the arm go before the press is acted on
         // [design: the behaviour notes in spikes/001-live-wrist-world/README.md].
@@ -470,19 +559,26 @@ pub(crate) fn decide(
     // let go (`enabled` below), so nothing raises the arm by itself any more.
     let press = want_open && wrist.live.showing().is_none();
     let was = wrist.open;
+    // What the compass found last, as the glance marks it: the same buffer every sample,
+    // so no list of places is allocated per frame.
+    marks.clear();
+    if let Some(found) = near.as_deref().filter(|_| want_open) {
+        marks.extend(found.0.iter().filter_map(|n| Some((marked(n.mark)?, n.at))).take(MARKS_MOST * 2));
+    }
+    let marks = marks.as_slice();
     let frame = wrist.live.step(now, want_open, press, &play, || {
         let (feet, heading) = here?;
         let base: &dyn MapPicture = match outline {
             Some(close) => close,
             None => map?,
         };
-        Some(Spot { map: base, feet, heading })
+        Some(Spot { map: base, feet, heading, marks })
     });
     if frame.clear.is_some() {
         wrist.shown = None;
     }
     if let Some(draw) = frame.draw {
-        wrist.shown = Some(Shown { key: draw.key, texture: draw.texture.to_string(), uv: draw.uv, forward: draw.forward, half: draw.half, local: draw.local.cloned() });
+        wrist.shown = Some(Shown { key: draw.key, texture: draw.texture.to_string(), uv: draw.uv, forward: draw.forward, half: draw.half, local: draw.local.cloned(), marks: draw.marks });
     }
     if frame.pose.is_none() {
         // An interruption (a menu, a conversation, a weapon) drops the latch too, so the
@@ -499,6 +595,16 @@ pub(crate) fn decide(
         (None, Some(key)) => info!("wrist: the live World Map is on the arm (worldspace {:#010x})", key.world),
         (Some(_), None) => info!("wrist: the live World Map let go of the arm: {}", play.eligible().err().map_or("nothing to show", |b| b.why())),
         _ => {}
+    }
+    // A key asked for the glance and nothing came up: say why, once for that press and
+    // never again until it is let go, so a player's log shows what stopped it instead of
+    // nothing at all [design: the owner, 2026-11-21]. Only for a glance that never opened
+    // — one that is interrupted while it is up says so on the line above.
+    if !want_open {
+        *refused = false;
+    } else if !*refused && was.is_none() && frame.pose.is_none() {
+        *refused = true;
+        info!("wrist: the glance was asked for and did not open: {}", play.eligible().err().map_or("nothing to show", |b| b.why()));
     }
 }
 
@@ -519,6 +625,7 @@ mod tests {
             forward: [0.0, -1.0],
             half: crate::wrist_live::HALF_WINDOW,
             local,
+            marks: Vec::new(),
         }
     }
 
@@ -585,6 +692,31 @@ mod tests {
         let down = WristLive::held_for_test(false, None);
         assert!(up.live() && up.open.is_none(), "no picture yet is still no arm");
         assert!(down.open.is_none() && !down.asked);
+    }
+
+    /// Every system of the glance, with the one that follows it, built into one schedule:
+    /// a parameter that holds something another holds (Bevy's B0002) panics here, in the
+    /// tests, instead of on the first frame of a shipped build — which is how the port's
+    /// `ControlInput` reading `WristLive` while `decide` wrote it was found (the spike's
+    /// notes, 2026-11-21). **Every system this mode adds belongs in this list.**
+    #[test]
+    fn the_glances_systems_have_no_conflicting_parameters() {
+        let mut world = World::new();
+        let mut schedule = Schedule::default();
+        schedule.add_systems((decide, crate::wrist_local::build).chain());
+        schedule.initialize(&mut world).expect("the schedule builds");
+    }
+
+    /// Where the device is held is the player's: Lower left by default, Centre on asking,
+    /// and nothing else is a name of this row.
+    #[test]
+    fn the_glance_holds_the_device_lower_left_until_the_player_asks_for_the_middle() {
+        assert_eq!(Position::default(), Position::LowerLeft);
+        assert_eq!((Position::LowerLeft.name(), Position::Centre.name()), ("Lower left", "Centre"));
+        assert_eq!(Position::of("Centre"), Some(Position::Centre));
+        assert_eq!(Position::of("Lower right"), None);
+        assert!(!WristLive::default().centred());
+        assert!(WristLive { map_position: Position::Centre, ..default() }.centred());
     }
 
     /// Hold style asks while the key is held; Toggle style flips on each hold and an

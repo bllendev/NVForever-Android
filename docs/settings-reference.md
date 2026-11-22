@@ -259,6 +259,13 @@ Tweaks tab's rows (#1892) are listed in docs/design/settings-tweaks-layout.md.
   World Map page shows it.
 - Registered in `engine/nvf-play/src/wrist_arm.rs`
 
+### `wrist-map-position`: Glance position
+
+- On the page: Lower left: the arm comes up low on the left, leaving the middle of the
+  picture clear to walk through. Centre: under the middle of the view, where the menus
+  hold it.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
 ## Gameplay › Saving
 
 ### `autosave-travel`: Autosave after travel

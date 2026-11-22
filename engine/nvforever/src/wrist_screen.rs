@@ -52,7 +52,7 @@ use nvf_assets::{GameData, NifMaterial};
 use nvf_play::pipboy::device_screen::SCREEN_TINT;
 use nvf_play::pipboy::transition::ScreenLook;
 use nvf_play::wrist_arm::{WristBody, WristLive};
-use nvf_play::wrist_live::{window, LocalPic, Window};
+use nvf_play::wrist_live::{window, LocalPic, Mark, MarkKind, Window};
 
 pub struct WristScreenPlugin;
 
@@ -82,9 +82,11 @@ struct Worn {
     /// The picture the live view lays out and the screen wears.
     picture: Option<Handle<Image>>,
     /// What was last laid out, so the work is done only when the view moved: the window,
-    /// the way the player faces, and the outline it was laid out from (held, so the same
-    /// texels are never mistaken for another picture at the same address).
+    /// the way the player faces, what was marked on it, and the outline it was laid out
+    /// from (held, so the same texels are never mistaken for another picture at the same
+    /// address).
     window: Option<(Window, [f32; 2])>,
+    marks: Vec<Mark>,
     base: Option<LocalPic>,
     /// The picture the log line last named.
     said: Option<String>,
@@ -194,7 +196,7 @@ fn wear_map(
     // North up, as the paused page's map is: the player's own mark turns instead
     // (`compose`), which is what a map on a wrist reads like.
     let win = window(shown.uv, NORTH, shown.half, 1.0);
-    if worn.window != Some((win, shown.forward)) || !same_base(shown.local.as_ref(), worn.base.as_ref()) {
+    if worn.window != Some((win, shown.forward)) || worn.marks != shown.marks || !same_base(shown.local.as_ref(), worn.base.as_ref()) {
         let made = match &shown.local {
             // The outline's own: one byte a sample, drawn at full as the paused Local Map
             // page draws the very same picture.
@@ -203,11 +205,13 @@ fn wear_map(
         };
         let Some(base) = made else { return };
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
-        compose(&mut out, CANVAS, &base, win, shown.forward);
+        compose(&mut out, CANVAS, &base, win, shown.forward, &shown.marks);
         if let Some(mut live) = images.get_mut(&picture) {
             live.data = Some(out);
         }
         (worn.window, worn.base) = (Some((win, shown.forward)), shown.local.clone());
+        worn.marks.clear();
+        worn.marks.extend_from_slice(&shown.marks);
     }
     if worn.copy.as_ref().is_none_or(|(_, source)| *source != own) {
         let base = materials.get(&own).cloned().unwrap_or_default();
@@ -243,8 +247,33 @@ const LETTER: u8 = 210;
 /// The player's mark, as a share of the picture: a triangle pointing the way they face.
 const MARK_SHARE: f32 = 0.07;
 
-/// Where the compass letters sit, as a share of the picture from its middle.
+/// Where the compass letters sit at the most, as a share of the picture from its middle.
 const LETTER_RING: f32 = 0.37;
+
+/// How much of the live picture the device's glass hides at each edge, as a share of the
+/// picture: the shape the picture is worn on runs under the Pip-Boy's own frame, so the
+/// outermost part of the canvas is never read [observed: the owner's photo of the Odin
+/// build map.12, 2026-11-21 — the S of the compass stood on the bottom edge of the glass,
+/// its lower half under the device's button bar, where N, E and W were clear].
+const GLASS_INSET: f32 = 0.10;
+
+/// How far inside the glass the whole of a compass letter's box stays [design].
+const LETTER_MARGIN: f32 = 0.02;
+
+/// The texels a dot of a letter is drawn with on a picture `side` texels square.
+fn glyph_dot(side: u32) -> u32 {
+    (side / 64).max(1)
+}
+
+/// How far from the middle the compass letters stand on a picture `side` texels square,
+/// across and down: [`LETTER_RING`] at the most, pulled in until the whole of each
+/// letter's box is inside the glass ([`GLASS_INSET`]) with [`LETTER_MARGIN`] to spare.
+fn letter_ring(side: u32) -> [f32; 2] {
+    let s = side.max(1) as f32;
+    let dot = glyph_dot(side) as f32 / s;
+    let room = 0.5 - GLASS_INSET - LETTER_MARGIN;
+    [(room - 5.0 * dot / 2.0).clamp(0.0, LETTER_RING), (room - 7.0 * dot / 2.0).clamp(0.0, LETTER_RING)]
+}
 
 /// A picture to read texels from (rows top first): the worldspace's own, four bytes a
 /// texel, or the local outline's, one.
@@ -288,7 +317,7 @@ const WORLD_GAIN: f32 = nvf_play::pipboy::data::MAP_ALPHA / 255.0;
 /// compass letters over it. North is up, so the letters stand still and the mark turns
 /// ([`facing`] as [`nvf_play::wrist_arm::Shown`] gives it, map space with v southward).
 /// The marks are drawn white: the screen's own ink colours them (`map_ink`).
-pub fn compose(out: &mut [u8], side: u32, map: &Pic, win: Window, facing: [f32; 2]) {
+pub fn compose(out: &mut [u8], side: u32, map: &Pic, win: Window, facing: [f32; 2], marks: &[Mark]) {
     let side = side.max(1);
     for y in 0..side {
         for x in 0..side {
@@ -300,8 +329,70 @@ pub fn compose(out: &mut [u8], side: u32, map: &Pic, win: Window, facing: [f32; 
             }
         }
     }
+    draw_marks(out, side, win, marks);
     draw_letters(out, side);
     draw_mark(out, side, facing);
+}
+
+/// What the map's marks are drawn in: a step under the compass letters, so the player's
+/// own mark and the letters stay the brightest things on the glass. A quest target and the
+/// player's own marker are drawn at the screen's full instead, as the compass draws them
+/// over the rest.
+const PIN: u8 = 190;
+
+/// A mark's reach from its middle, as a share of the picture [design: big enough to read
+/// at the glass's size, small enough not to hide the map under it].
+const PIN_SHARE: f32 = 0.035;
+
+/// The marks over the map (`nvf_play::wrist_live::Mark`): a diamond where the thing falls
+/// inside the window, else a chevron held at the glass's edge pointing the way it lies
+/// [design: the owner, 2026-11-21]. North is up, as the map under them is, so a mark's
+/// place on the canvas is the window taken the other way about ([`Window::of`]).
+fn draw_marks(out: &mut [u8], side: u32, win: Window, marks: &[Mark]) {
+    let s = side as f32;
+    let r = s * PIN_SHARE;
+    // The glass, with room for the mark itself, so nothing is drawn under the device's
+    // own frame ([`GLASS_INSET`]).
+    let (lo, hi) = (GLASS_INSET * s + r, (1.0 - GLASS_INSET) * s - r);
+    if hi <= lo {
+        return;
+    }
+    for m in marks {
+        let Some(c) = win.of(m.uv) else { continue };
+        let at = [c[0] * s, c[1] * s];
+        if !at.iter().all(|v| v.is_finite()) {
+            continue;
+        }
+        let held = [at[0].clamp(lo, hi), at[1].clamp(lo, hi)];
+        let (ink, size) = if m.kind >= MarkKind::Quest { (MARK, r) } else { (PIN, r * 0.75) };
+        let away = [at[0] - held[0], at[1] - held[1]];
+        if away[0].abs() < 1e-3 && away[1].abs() < 1e-3 {
+            diamond(out, side, held, size, ink);
+        } else {
+            chevron(out, side, held, away, size, ink);
+        }
+    }
+}
+
+/// A small diamond about `at`.
+fn diamond(out: &mut [u8], side: u32, at: [f32; 2], r: f32, ink: u8) {
+    let (top, right, bottom, left) = ([at[0], at[1] - r], [at[0] + r, at[1]], [at[0], at[1] + r], [at[0] - r, at[1]]);
+    fill_triangle(out, side, top, right, bottom, ink);
+    fill_triangle(out, side, top, bottom, left, ink);
+}
+
+/// A chevron at `at` pointing along `away`: what a mark off the window is held at the
+/// glass's edge as.
+fn chevron(out: &mut [u8], side: u32, at: [f32; 2], away: [f32; 2], r: f32, ink: u8) {
+    let n = (away[0] * away[0] + away[1] * away[1]).sqrt();
+    if !n.is_finite() || n <= 1e-6 {
+        return;
+    }
+    let [dx, dy] = [away[0] / n, away[1] / n];
+    let point = [at[0] + dx * r, at[1] + dy * r];
+    let (bx, by) = (at[0] - dx * r * 0.4, at[1] - dy * r * 0.4);
+    let (sx, sy) = (-dy * r * 0.8, dx * r * 0.8);
+    fill_triangle(out, side, point, [bx + sx, by + sy], [bx - sx, by - sy], ink);
 }
 
 /// The player's own mark: a triangle at the middle, its point the way they face.
@@ -336,11 +427,12 @@ fn fill_triangle(out: &mut [u8], side: u32, a: [f32; 2], b: [f32; 2], c: [f32; 2
     }
 }
 
-/// The compass letters, at the four sides of a north-up picture.
+/// The compass letters, at the four sides of a north-up picture, every one of them whole
+/// inside the glass ([`letter_ring`]).
 fn draw_letters(out: &mut [u8], side: u32) {
     let mid = side as f32 / 2.0;
-    let ring = side as f32 * LETTER_RING;
-    for (glyph, at) in [(N_GLYPH, [mid, mid - ring]), (E_GLYPH, [mid + ring, mid]), (S_GLYPH, [mid, mid + ring]), (W_GLYPH, [mid - ring, mid])] {
+    let [across, down] = letter_ring(side).map(|r| r * side as f32);
+    for (glyph, at) in [(N_GLYPH, [mid, mid - down]), (E_GLYPH, [mid + across, mid]), (S_GLYPH, [mid, mid + down]), (W_GLYPH, [mid - across, mid])] {
         draw_glyph(out, side, glyph, at);
     }
 }
@@ -354,7 +446,7 @@ const W_GLYPH: [u8; 7] = [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 
 
 /// A letter, drawn about `at`, as many texels a dot as the picture can spare.
 fn draw_glyph(out: &mut [u8], side: u32, glyph: [u8; 7], at: [f32; 2]) {
-    let dot = (side / 64).max(1);
+    let dot = glyph_dot(side);
     let (w, h) = (5 * dot, 7 * dot);
     let x0 = at[0] as i64 - (w / 2) as i64;
     let y0 = at[1] as i64 - (h / 2) as i64;
@@ -461,7 +553,7 @@ mod tests {
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
         let map = grey();
         let win = window([0.5; 2], NORTH, 0.1, 1.0);
-        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, facing);
+        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, facing, &[]);
         out
     }
 
@@ -515,14 +607,38 @@ mod tests {
 
     #[test]
     fn the_compass_letters_stand_still_at_the_four_sides() {
+        let [across, down] = letter_ring(CANVAS);
         let out = laid([1.0, 0.0]);
-        for at in [[0.5, 0.5 - LETTER_RING], [0.5 + LETTER_RING, 0.5], [0.5, 0.5 + LETTER_RING], [0.5 - LETTER_RING, 0.5]] {
+        for at in [[0.5, 0.5 - down], [0.5 + across, 0.5], [0.5, 0.5 + down], [0.5 - across, 0.5]] {
             assert!(brightest(&out, at, 0.03) >= LETTER, "no letter at {at:?}");
         }
         // Turning the player does not move them.
         let turned = laid(NORTH);
-        for at in [[0.5, 0.5 - LETTER_RING], [0.5 + LETTER_RING, 0.5]] {
+        for at in [[0.5, 0.5 - down], [0.5 + across, 0.5]] {
             assert!(brightest(&turned, at, 0.03) >= LETTER, "the letters moved with the player");
+        }
+    }
+
+    /// Every one of the four letters is drawn whole inside the glass: the owner's device
+    /// showed the S standing on the bottom edge, half of it under the Pip-Boy's own frame.
+    #[test]
+    fn no_compass_letter_runs_off_the_glass() {
+        for side in [64u32, 128, CANVAS, 512] {
+            let mut out = vec![0u8; (side * side * 4) as usize];
+            let map = vec![0u8; 16 * 16];
+            compose(&mut out, side, &Pic { size: [16, 16], rgba: &map, stride: 1, gain: 1.0 }, window([0.5; 2], NORTH, 0.1, 1.0), NORTH, &[]);
+            let (lo, hi) = ((GLASS_INSET * side as f32) as u32, ((1.0 - GLASS_INSET) * side as f32) as u32);
+            for y in 0..side {
+                for x in 0..side {
+                    let inside = (lo..=hi).contains(&x) && (lo..=hi).contains(&y);
+                    if !inside {
+                        assert!(out[((y * side + x) * 4) as usize] < LETTER, "a letter's dot at {x},{y} of {side} is under the device's frame");
+                    }
+                }
+            }
+            // And they are still out at the sides, not bunched about the player's mark.
+            let [across, down] = letter_ring(side);
+            assert!(across > 0.2 && down > 0.2, "{side}: the ring collapsed to {across}, {down}");
         }
     }
 
@@ -539,7 +655,7 @@ mod tests {
         }
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
         let win = window([0.5; 2], NORTH, 0.25, 1.0);
-        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, NORTH);
+        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, NORTH, &[]);
         // Clear of the compass letters and the mark in the middle.
         let top = out[((CANVAS / 4 * CANVAS + CANVAS / 4) * 4) as usize];
         let bottom = out[((CANVAS * 3 / 4 * CANVAS + CANVAS / 4) * 4) as usize];
@@ -573,7 +689,7 @@ mod tests {
         let alpha: Vec<u8> = (0..w * h).map(|i| if i / w < 8 { 200 } else { 20 }).collect();
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
         let win = window([0.5; 2], NORTH, 0.25, 1.0);
-        compose(&mut out, CANVAS, &Pic { size: [w as u32, h as u32], rgba: &alpha, stride: 1, gain: 1.0 }, win, NORTH);
+        compose(&mut out, CANVAS, &Pic { size: [w as u32, h as u32], rgba: &alpha, stride: 1, gain: 1.0 }, win, NORTH, &[]);
         let top = out[((CANVAS / 4 * CANVAS + CANVAS / 4) * 4) as usize];
         let bottom = out[((CANVAS * 3 / 4 * CANVAS + CANVAS / 4) * 4) as usize];
         assert_eq!((top, bottom), (200, 20), "the samples are drawn as they are, north up");
@@ -588,6 +704,53 @@ mod tests {
         assert!(same_base(None, None) && !same_base(Some(&a), None));
     }
 
+    /// A quest target inside the window is a mark where it stands; one outside is held at
+    /// the glass's edge on its side, and nothing is ever drawn under the device's frame.
+    #[test]
+    fn the_marks_stand_where_they_are_and_are_held_at_the_edge_when_they_are_not() {
+        let map = vec![0u8; 16 * 16];
+        let pic = || Pic { size: [16, 16], rgba: &map, stride: 1, gain: 1.0 };
+        // The window shows a quarter of the picture about the player: canvas 0…1 is
+        // picture 0.25…0.75.
+        let win = window([0.5; 2], NORTH, 0.25, 1.0);
+        let laid = |marks: &[Mark]| {
+            let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
+            compose(&mut out, CANVAS, &pic(), win, NORTH, marks);
+            out
+        };
+        // Inside: three quarters across and halfway down the canvas.
+        let near = laid(&[Mark { kind: MarkKind::Quest, uv: [0.625, 0.5] }]);
+        assert_eq!(brightest(&near, [0.75, 0.5], 0.01), MARK, "no mark where the target stands");
+        assert!(brightest(&near, [0.25, 0.5], 0.01) < PIN, "something was drawn where nothing is");
+        // Outside, far to the east: held at the right-hand edge of the glass, inside it.
+        let far = laid(&[Mark { kind: MarkKind::Quest, uv: [0.95, 0.5] }]);
+        let held = 1.0 - GLASS_INSET - PIN_SHARE;
+        assert_eq!(brightest(&far, [held, 0.5], 0.02), MARK, "the chevron is not at the edge");
+        for x in 0..CANVAS {
+            for y in 0..CANVAS {
+                let inside = ((GLASS_INSET * CANVAS as f32) as u32..=((1.0 - GLASS_INSET) * CANVAS as f32) as u32).contains(&x);
+                if !inside {
+                    assert!(far[((y * CANVAS + x) * 4) as usize] < PIN, "a mark's texel at {x},{y} is under the device's frame");
+                }
+            }
+        }
+        // A place is drawn a step under a quest target, and an unusable place is not drawn.
+        let place = laid(&[Mark { kind: MarkKind::Place, uv: [0.625, 0.5] }]);
+        assert_eq!(brightest(&place, [0.75, 0.5], 0.01), PIN);
+        assert_eq!(laid(&[Mark { kind: MarkKind::Quest, uv: [f32::NAN, 0.5] }]), laid(&[]), "a place that is not a number draws nothing at all");
+    }
+
+    /// Every system this file adds, in one schedule: a parameter that holds what another
+    /// holds (Bevy's B0002) panics here rather than on the first frame of a shipped build.
+    /// **Every system this file adds belongs in this list.**
+    #[test]
+    fn the_screens_systems_have_no_conflicting_parameters() {
+        let mut world = World::new();
+        let mut schedule = Schedule::default();
+        schedule.add_systems((wear_map, feed, hide_lit).chain());
+        schedule.initialize(&mut world).expect("the schedule builds");
+    }
+
     /// The regression the behaviour notes call for: whatever the live view wears, the
     /// screen is asked for only while the arm is held, so a yield gives the shape, the
     /// lit copy and the glow straight back to `pipboy_arm::show_screen`.
@@ -600,6 +763,7 @@ mod tests {
             forward: NORTH,
             half: nvf_play::wrist_live::HALF_WINDOW,
             local: None,
+            marks: Vec::new(),
         };
         let held = nvf_play::wrist_arm::WristLive::held_for_test(true, Some(shown.clone()));
         let let_go = nvf_play::wrist_arm::WristLive::held_for_test(false, Some(shown));

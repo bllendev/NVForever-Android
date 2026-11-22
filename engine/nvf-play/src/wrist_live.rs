@@ -19,8 +19,8 @@
 //!
 //! - Off by default, and closed when off. The mode opens only on a rising edge of its own
 //!   action, in a frame that is eligible ([`Play::eligible`]): ordinary first-person play,
-//!   weapon away, an exterior worldspace, and an arm with a screen shape of its own. The
-//!   same press closes it again.
+//!   the sights down (a drawn weapon is allowed), an exterior worldspace, and an arm with
+//!   a screen shape of its own. The same press closes it again.
 //! - Every frame is judged afresh and fails closed. An ineligible frame (a menu, the
 //!   normal Pip-Boy, a conversation, a loading screen, V.A.T.S., suppressed input, third
 //!   person, a rig or session that was replaced) gives the pose and the screen back and
@@ -64,7 +64,7 @@ pub enum Block {
     PipBoy,
     Vats,
     NotFirstPerson,
-    WeaponOut,
+    Aiming,
     Acting,
     Taken,
     Cooldown,
@@ -82,7 +82,7 @@ impl Block {
             Block::PipBoy => "the Pip-Boy menus own the arm",
             Block::Vats => "V.A.T.S. owns the camera",
             Block::NotFirstPerson => "the first-person arms are not drawn",
-            Block::WeaponOut => "a weapon is in hand",
+            Block::Aiming => "the sights are up",
             Block::Acting => "the player is doing something with their hands",
             Block::Taken => "another owner holds the arm",
             Block::Cooldown => "the Pip-Boy has only just gone down",
@@ -119,9 +119,12 @@ pub struct Play {
     pub menu: bool,
     /// V.A.T.S. or a kill cam owns the camera (`vats_mode`, `kill_cam`).
     pub vats: bool,
-    /// A weapon is drawn or the sights are up. The first pass is holstered, empty-handed
-    /// first person only, until the armed pose has been compared against stock.
-    pub weapon_out: bool,
+    /// The sights are up (`control::PlayerControl::aiming`). A weapon merely *drawn* is no
+    /// blocker: the glance raises the arm with it in hand and the Pip-Boy clip holds the
+    /// weapon hand down for as long as it is up, which is what the menus' own raise does
+    /// with a drawn weapon [design: the owner, 2026-11-21]. Aiming is still a blocker, so
+    /// the sights can never come up through a raised arm.
+    pub aiming: bool,
     /// Another owner holds the arm pose or the screen material this frame.
     pub taken: bool,
     /// The player is acting this very frame: attack, ready or reload, block or aim,
@@ -144,7 +147,7 @@ impl Play {
             (self.pipboy, Block::PipBoy),
             (self.vats, Block::Vats),
             (!self.first_person, Block::NotFirstPerson),
-            (self.weapon_out, Block::WeaponOut),
+            (self.aiming, Block::Aiming),
             // Before the frame's action is read, so the press acts on its own frame.
             (self.acting, Block::Acting),
             (self.taken, Block::Taken),
@@ -204,12 +207,42 @@ pub trait MapPicture {
     }
 }
 
-/// Where the player is, for one sample: their feet in game space (x east, y north) and
-/// their compass heading in radians (0 north, as `player::Player::heading` keeps it).
+/// What a mark on the glance's map stands for. The compass keeps the same kinds
+/// (`crate::compass::Mark`); they are named again here so this module stays a thing of
+/// plain values with no engine behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MarkKind {
+    /// A door leading elsewhere (the player's Show Doors on Compass tweak).
+    Door,
+    /// A map marker the player has not been to, and one they have.
+    Place,
+    Found,
+    /// A target of the active quest, drawn over the rest.
+    Quest,
+    /// The player's own custom map marker.
+    Player,
+}
+
+/// A mark on the picture: what it is, and where it falls on the map picture (texture
+/// coordinates, which may lie outside it — the screen holds those at its edge).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mark {
+    pub kind: MarkKind,
+    pub uv: [f32; 2],
+}
+
+/// How many marks one sample carries at the most, so the sample's cost is bounded and no
+/// list of the world's places reaches the screen [design].
+pub const MARKS_MOST: usize = 24;
+
+/// Where the player is, for one sample: their feet in game space (x east, y north), their
+/// compass heading in radians (0 north, as `player::Player::heading` keeps it), and what
+/// is marked about them (game x, y), as the HUD compass's own last look found it.
 pub struct Spot<'a> {
     pub map: &'a dyn MapPicture,
     pub feet: [f32; 2],
     pub heading: f32,
+    pub marks: &'a [(MarkKind, [f32; 2])],
 }
 
 impl<'a> Spot<'a> {
@@ -232,7 +265,23 @@ impl<'a> Spot<'a> {
         // Clockwise from north on a picture whose y runs down, so the arrow points the way
         // the player faces.
         let (sin, cos) = self.heading.sin_cos();
-        Some(Draw { key, texture, uv, forward: [sin, -cos], half: self.map.half_window(), local })
+        // The marks on the same picture, the ones whose place is a number at all; held to
+        // [`MARKS_MOST`], the quest's and the player's own first.
+        let mut marks: Vec<Mark> = Vec::new();
+        for want in [true, false] {
+            for (kind, at) in self.marks.iter().filter(|(k, _)| (*k >= MarkKind::Quest) == want) {
+                if marks.len() >= MARKS_MOST {
+                    break;
+                }
+                if at.iter().all(|v| v.is_finite()) {
+                    let uv = self.map.map_uv(at[0], at[1]);
+                    if uv.iter().all(|v| v.is_finite()) {
+                        marks.push(Mark { kind: *kind, uv });
+                    }
+                }
+            }
+        }
+        Some(Draw { key, texture, uv, forward: [sin, -cos], half: self.map.half_window(), local, marks })
     }
 }
 
@@ -248,13 +297,15 @@ pub struct Draw<'a> {
     pub half: f32,
     /// The texels when the picture was laid out here ([`MapPicture::local`]).
     pub local: Option<&'a LocalPic>,
+    /// What is marked on the picture ([`Mark`]), at most [`MARKS_MOST`] of them.
+    pub marks: Vec<Mark>,
 }
 
 impl PartialEq for Draw<'_> {
     /// The same request: the same place on the same picture, the outline's by its texels
     /// rather than by every sample of them ([`LocalPic::is`]).
     fn eq(&self, other: &Self) -> bool {
-        (self.key, self.texture, self.uv, self.forward, self.half) == (other.key, other.texture, other.uv, other.forward, other.half)
+        (self.key, self.texture, self.uv, self.forward, self.half, &self.marks) == (other.key, other.texture, other.uv, other.forward, other.half, &other.marks)
             && match (self.local, other.local) {
                 (Some(a), Some(b)) => a.is(b),
                 (a, b) => a.is_none() == b.is_none(),
@@ -292,6 +343,20 @@ impl Window {
     pub fn at(&self, mesh: [f32; 2]) -> [f32; 2] {
         let [a, b, c, d] = self.matrix;
         [a * mesh[0] + c * mesh[1] + self.offset[0], b * mesh[0] + d * mesh[1] + self.offset[1]]
+    }
+
+    /// The other way about: where a place `map` on the map picture falls on the shape's
+    /// own canvas, for the marks the screen draws over the picture. `None` for a window
+    /// that folds flat (nothing on the picture has a place on the canvas then).
+    pub fn of(&self, map: [f32; 2]) -> Option<[f32; 2]> {
+        let [a, b, c, d] = self.matrix;
+        let det = a * d - b * c;
+        if !det.is_finite() || det.abs() < 1e-12 {
+            return None;
+        }
+        let (x, y) = (map[0] - self.offset[0], map[1] - self.offset[1]);
+        let out = [(d * x - c * y) / det, (a * y - b * x) / det];
+        out.iter().all(|v| v.is_finite()).then_some(out)
     }
 }
 
@@ -403,7 +468,7 @@ mod tests {
     }
 
     fn at(map: &Patch, x: f32, y: f32, heading: f32) -> Option<Spot<'_>> {
-        Some(Spot { map, feet: [x, y], heading })
+        Some(Spot { map, feet: [x, y], heading, marks: &[] })
     }
 
     #[test]
@@ -427,7 +492,7 @@ mod tests {
             (Play { pipboy: true, ..play() }, Block::PipBoy),
             (Play { vats: true, ..play() }, Block::Vats),
             (Play { first_person: false, ..play() }, Block::NotFirstPerson),
-            (Play { weapon_out: true, ..play() }, Block::WeaponOut),
+            (Play { aiming: true, ..play() }, Block::Aiming),
             (Play { taken: true, ..play() }, Block::Taken),
             (Play { world: None, ..play() }, Block::Interior),
             (Play { screen: None, ..play() }, Block::NoScreen),
@@ -489,14 +554,14 @@ mod tests {
     fn an_interruption_gives_it_back_and_takes_another_press() {
         let map = Patch("synthetic-owned-map.dds");
         // The frame a menu opens, a conversation or a loading screen starts, V.A.T.S. is
-        // entered, a weapon comes out, a door leads inside, the rig is rebuilt, or the
+        // entered, the sights come up, a door leads inside, the rig is rebuilt, or the
         // game is reloaded: the pose and the screen go back in that same frame.
         let replacements = [
             Play { menu: true, ..play() },
             Play { pipboy: true, ..play() },
             Play { playing: false, ..play() },
             Play { vats: true, ..play() },
-            Play { weapon_out: true, ..play() },
+            Play { aiming: true, ..play() },
             Play { input_suppressed: true, ..play() },
             Play { first_person: false, ..play() },
             Play { world: None, ..play() },
@@ -616,6 +681,48 @@ mod tests {
         assert!(about(w.at([extent / 2.0, extent]), [uv[0], uv[1] + half]));
     }
 
+    /// The marks the compass keeps are carried on the sample, in the picture's own
+    /// coordinates, the quest's and the player's own kept first and the list held to
+    /// [`MARKS_MOST`]. A place that is not a number is left out, one off the picture is
+    /// not (the screen holds it at its edge).
+    #[test]
+    fn the_marks_ride_on_the_sample_in_the_pictures_own_frame() {
+        let map = Patch("synthetic-owned-map.dds");
+        let mut marks: Vec<(MarkKind, [f32; 2])> = (0..MARKS_MOST + 10).map(|i| (MarkKind::Place, [i as f32, 0.0])).collect();
+        marks.push((MarkKind::Quest, [CELL, CELL]));
+        marks.push((MarkKind::Door, [f32::NAN, 0.0]));
+        marks.push((MarkKind::Found, [40.0 * CELL, 0.0]));
+        let mut live = Live::default();
+        let drawn = live.step(t(0), true, true, &play(), || Some(Spot { map: &map, feet: [0.0, 0.0], heading: 0.0, marks: &marks })).draw.unwrap();
+        assert_eq!(drawn.marks.len(), MARKS_MOST);
+        assert_eq!(drawn.marks[0], Mark { kind: MarkKind::Quest, uv: [0.75, 0.25] }, "the quest's target comes first");
+        assert!(drawn.marks[1..].iter().all(|m| m.kind == MarkKind::Place), "the rest in the order the compass found them");
+        assert!(!drawn.marks.iter().any(|m| m.uv.iter().any(|v| v.is_nan())), "a place that is not a number is left out");
+        // Nothing marked is nothing drawn over the map, and the sample is still a sample.
+        let plain = live.step(t(100), true, false, &play(), || at(&map, 0.0, 0.0, 0.0)).draw.unwrap();
+        assert!(plain.marks.is_empty());
+        // A mark off the picture rides along: the screen holds it at the window's edge.
+        let far = &[(MarkKind::Found, [40.0 * CELL, 0.0])][..];
+        let out = live.step(t(200), true, false, &play(), || Some(Spot { map: &map, feet: [0.0, 0.0], heading: 0.0, marks: far })).draw.unwrap();
+        assert!(out.marks[0].uv[0] > 1.0, "{:?}", out.marks);
+    }
+
+    /// The window the other way about: a place on the map picture back to the canvas the
+    /// screen lays out, which is how a mark is put over the picture.
+    #[test]
+    fn the_window_takes_a_place_on_the_map_back_to_the_canvas() {
+        for forward in [[0.0, -1.0], [1.0, 0.0], [0.6, 0.8]] {
+            let w = window([0.25, 0.75], forward, 0.1, 1.0);
+            for canvas in [[0.5, 0.5], [0.0, 0.0], [1.0, 0.25], [0.3, 0.9]] {
+                let back = w.of(w.at(canvas)).expect("a window that does not fold flat");
+                assert!((back[0] - canvas[0]).abs() < 1e-5 && (back[1] - canvas[1]).abs() < 1e-5, "{canvas:?} came back as {back:?}");
+            }
+        }
+        // A window that folds flat has no way back.
+        assert_eq!(Window { matrix: [0.0; 4], offset: [0.0; 2] }.of([0.5; 2]), None);
+        assert_eq!(Window { matrix: [f32::NAN, 0.0, 0.0, 1.0], offset: [0.0; 2] }.of([0.5; 2]), None);
+    }
+
     /// A picture laid out here (the Local Map's outline) is shown like any other: its own
     /// window, its own projection, and the same rules about what cannot be drawn.
     #[test]
@@ -638,7 +745,7 @@ mod tests {
         let pic = |size: [u32; 2], n: usize| LocalPic { alpha: std::sync::Arc::new(vec![7; n]), size };
         let close = Close(pic([8, 8], 64));
         let mut live = Live::default();
-        let drawn = live.step(t(0), true, true, &play(), || Some(Spot { map: &close, feet: [0.0, 0.0], heading: 0.0 })).draw.unwrap();
+        let drawn = live.step(t(0), true, true, &play(), || Some(Spot { map: &close, feet: [0.0, 0.0], heading: 0.0, marks: &[] })).draw.unwrap();
         assert_eq!((drawn.uv, drawn.half), ([0.5, 0.5], 0.26));
         assert!(drawn.local.is_some_and(|p| p.is(&close.0)), "the texels are the ones the picture was laid out in");
         // The whole picture at once is the default, as a worldspace's own picture is.
@@ -650,7 +757,7 @@ mod tests {
             assert!(!short.usable());
             let starved = Close(short);
             let mut live = Live::default();
-            assert!(live.step(t(0), true, true, &play(), || Some(Spot { map: &starved, feet: [0.0, 0.0], heading: 0.0 })).draw.is_none());
+            assert!(live.step(t(0), true, true, &play(), || Some(Spot { map: &starved, feet: [0.0, 0.0], heading: 0.0, marks: &[] })).draw.is_none());
         }
         // Two pictures of the same samples are not the same picture.
         assert!(!pic([8, 8], 64).is(&pic([8, 8], 64)));

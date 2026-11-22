@@ -133,7 +133,7 @@ impl Plugin for WristLocalPlugin {
 }
 
 /// Cast a few of the wrist's rays, and lay the picture out when the grid is done.
-fn build(
+pub(crate) fn build(
     wrist: Option<Res<crate::wrist_arm::WristLive>>,
     mut map: ResMut<WristMap>,
     (location, world, player): (Option<Res<crate::Location>>, Option<Res<crate::PlayWorld>>, Option<Res<crate::player::Player>>),
