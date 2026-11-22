@@ -4,7 +4,9 @@
 //! [design: spikes/001-live-wrist-world/README.md].
 //!
 //! The player turns it on at Gameplay › Pip-Boy on the settings page (`wrist-map`, off
-//! until they do) and chooses how its key works (`wrist-map-raise`: Hold or Toggle).
+//! until they do), chooses how its key works (`wrist-map-raise`: Hold or Toggle) and
+//! which picture its screen shows (`wrist-map-style`: Local, the place round them as the
+//! Local Map page draws it, or World, the worldspace's own picture).
 //! `NVF_WRIST_LIVE=1` forces it on for a developer whatever the row says, and
 //! `NVF_WRIST_FORCE_RAISE=1` holds the glance up with no key at all so a screenshot can
 //! be taken of it. Both are developers' switches, named nowhere a player looks.
@@ -68,6 +70,37 @@ impl Raise {
     }
 }
 
+/// What the glance's screen shows [design: the clean-room notes' "green local-map look";
+/// the owner's goal of 2026-11-21].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    /// The Local Map's own outline of the place round the player
+    /// ([`crate::wrist_local`]): the roads, the buildings and the walls about them, as the
+    /// paused Local Map page draws them. The worldspace's own picture stands in where
+    /// there is no outline yet.
+    #[default]
+    Local,
+    /// The picture the load order owns for the worldspace, as the paused World Map page
+    /// shows it.
+    World,
+}
+
+impl Style {
+    pub const NAMES: [&'static str; 2] = ["Local", "World"];
+
+    pub fn name(self) -> &'static str {
+        Style::NAMES[self as usize]
+    }
+
+    pub fn of(name: &str) -> Option<Style> {
+        match name {
+            "Local" => Some(Style::Local),
+            "World" => Some(Style::World),
+            _ => None,
+        }
+    }
+}
+
 /// The opt-in, and what the live view asks for this frame.
 #[derive(Resource, Debug, Default)]
 pub struct WristLive {
@@ -83,6 +116,8 @@ pub struct WristLive {
     pub held_up: bool,
     /// How its key works ([`Raise`]), the settings page's second row.
     pub style: Raise,
+    /// Which picture its screen shows ([`Style`]), the settings page's third row.
+    pub map_style: Style,
     /// The player is asking for the glance now: the key is held past its moment
     /// ([`GLANCE_SECONDS`]) in Hold style, or the latch is on in Toggle style.
     pub asked: bool,
@@ -138,6 +173,17 @@ fn take_style(world: &mut World, name: &str) -> bool {
     match Raise::of(name) {
         Some(style) => {
             world.resource_mut::<WristLive>().style = style;
+            true
+        }
+        None => false,
+    }
+}
+
+/// Take the picture the glance shows by name; false: not one of ours.
+fn take_map_style(world: &mut World, name: &str) -> bool {
+    match Style::of(name) {
+        Some(style) => {
+            world.resource_mut::<WristLive>().map_style = style;
             true
         }
         None => false,
@@ -218,10 +264,11 @@ impl WristLive {
         self.open.filter(|_| self.live()).map(|_| self.arm)
     }
 
-    /// Whether the close picture is wanted now: the glance holds the arm, so
-    /// [`crate::wrist_local`] casts its rays only for a frame that will show them.
+    /// Whether the close picture is wanted now: the glance holds the arm and the player
+    /// chose Local, so [`crate::wrist_local`] casts its rays only for a frame that will
+    /// show them.
     pub fn wants_local(&self) -> bool {
-        self.live() && self.open.is_some()
+        self.live() && self.open.is_some() && self.map_style == Style::Local
     }
 }
 
@@ -301,6 +348,22 @@ impl Plugin for WristLivePlugin {
                 pick: |w, n| take_style(w, n),
                 save: |w| w.resource::<WristLive>().style.name().to_string(),
                 load: |w, t| take_style(w, t),
+                ask_keep: false,
+            },
+        );
+        add_choice_list(
+            app,
+            row(
+                "wrist-map-style",
+                "Glance map",
+                "Local: the place round you, drawn from what is there — the roads, the buildings and the walls about them. World: the worldspace's own map picture, as the World Map page shows it.",
+            ),
+            ChoiceList {
+                names: |_| Style::NAMES.iter().map(|n| n.to_string()).collect(),
+                chosen: |w| w.resource::<WristLive>().map_style.name().to_string(),
+                pick: |w, n| take_map_style(w, n),
+                save: |w| w.resource::<WristLive>().map_style.name().to_string(),
+                load: |w, t| take_map_style(w, t),
                 ask_keep: false,
             },
         );
@@ -399,8 +462,8 @@ pub(crate) fn decide(
     // The base: the Local Map's outline of the place round the player where
     // `crate::wrist_local` has one that covers the window, else the picture the load
     // order owns for the worldspace, as the paused World Map page shows it.
-    let outline = match (exterior, here) {
-        (Some(w), Some((feet, _))) => close.as_deref().and_then(|c| c.ready.as_ref()).filter(|r| r.covers(None, w, feet)),
+    let outline = match (exterior, here, wrist.map_style) {
+        (Some(w), Some((feet, _)), Style::Local) => close.as_deref().and_then(|c| c.ready.as_ref()).filter(|r| r.covers(None, w, feet)),
         _ => None,
     };
     // The key is the press: the rules open on its edge and close the moment it is
@@ -570,6 +633,22 @@ mod tests {
         for quiet in [WristLive { on: true, open: None, ..default() }, WristLive { on: false, open: Some(key()), ..default() }, WristLive::default()] {
             assert!(!quiet.wants_local());
         }
+    }
+
+    /// The picture the player chose: Local by default, and the close picture is made and
+    /// shown only for it.
+    #[test]
+    fn the_glance_shows_the_local_map_until_the_player_asks_for_the_world() {
+        assert_eq!(Style::default(), Style::Local);
+        assert_eq!((Style::Local.name(), Style::World.name()), ("Local", "World"));
+        assert_eq!(Style::of("World"), Some(Style::World));
+        assert_eq!(Style::of("Wherever"), None);
+        assert!(WristLive { on: true, open: Some(key()), ..default() }.wants_local());
+        assert!(!WristLive { on: true, open: Some(key()), map_style: Style::World, ..default() }.wants_local());
+        // Which picture is shown is all it changes: the glance itself still opens, holds
+        // the arm and shows the worldspace's own picture either way.
+        let world = WristLive { on: true, open: Some(key()), map_style: Style::World, shown: Some(shown_for(None)), arm: 0.25, ..default() };
+        assert_eq!((world.wants(), world.arm_clip_time()), (Some(&shown_for(None)), Some(0.25)));
     }
 
     /// Two samples of the same outline are the same sample (the texels are compared by

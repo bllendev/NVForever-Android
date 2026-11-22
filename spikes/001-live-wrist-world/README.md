@@ -190,19 +190,52 @@ the earlier "screen facing away" was the modded install's, not the engine's.
   on the frame of the press, before the press is acted on; and the real Pip-Boy going down
   starts a short wait so one press does one thing. The Pip-Boy's own key is deliberately
   not blocked — it must keep working, and the menus block the glance by themselves.
-- **Not done: the green local map.** The base picture is still the worldspace map. The
-  next step is the local-map outline (`nvf-play` `pipboy/data/outline.rs`), which already
-  draws buildings and slope without a camera, but it needs the physics queries and the
-  land surface that `pipboy::data` holds, so the producer belongs in nvf-play beside that
-  code: keep an `Outline` for the player's surroundings while the glance is open, advance
-  it on a budget, and publish its alpha and frame on `WristLive::shown` for
-  `wrist_screen::compose` to lay out, falling back to the worldspace picture wherever no
-  outline exists. The clean-room spec's §9 table says the same.
+- **Done since: the green local map** (see the next section).
 - **Also not done from the spec**: the derived control suppression belongs with a real
   hold/toggle key — with the current self-opening mode, holding Attack or Ready would trap
   the player, so the glance yields to those presses instead. Device presets (the glass's
   own UV rectangle), the DATA lamp, knobs, the rad needle and the up/down foley are
   untouched.
+
+## The green local map (2026-11-21)
+
+**It works on the desktop with vanilla data**: at Goodsprings the glass shows the place
+round the player in green, the buildings and the road's banks as outlines, the player's
+mark in the middle and N, E and W at the sides (`local-a.png` of the try folder; the
+screen's colour was set to Green in `NVForever.ini` for the shot).
+
+- **The base is the Local Map's own outline**, option 2 of the clean-room spec's §9: no
+  second camera, no readback, and the picture a plan of the collision the physics world
+  holds. The ray casting the Local Map page did inline is `pipboy::data::outline::cast`
+  now, and `nvf-play` `wrist_local` asks it for a grid of the 5×5 cells round the player
+  (246 × 246 samples 96 units apart) whenever the glance holds the arm: 1.5 ms of a frame,
+  64 rays at a time. At Goodsprings the whole grid was made in about a second of looking
+  (`wrist: the local map's outline is made for the glance: 246x246 samples 96 apart, 60516
+  landed`) and the screen changed from the worldspace picture to the outline in the same
+  breath. The grid is kept for a lattice of anchors, so walking about keeps it; the
+  finished one stays on the screen while the next is cast.
+- **The window is close**: about 175 m across the glass (`wrist_local::LOCAL_SPAN`), two
+  texels a sample, where the worldspace picture shows a slice of the whole map. The
+  picture is laid out once per grid and shared behind an `Arc`; the screen lays its canvas
+  out again only when the window, the facing or the base itself changed.
+- **The ink is the Pip-Boy screens' own colour** (`interface::pipboy_rgb`), so a green
+  device draws a green map, and it is at full strength: the dimming moved into the base
+  (`Pic::gain`), which leaves the player's mark and the compass letters the brightest
+  things on the glass.
+- **The player chooses** at Gameplay › Pip-Boy: `wrist-map-style`, Local (the default) or
+  World. Where there is no outline yet — the first second of a glance, after travel, or
+  where the player has walked off the one that is made — the worldspace's own picture
+  stands in, so the glass is never blank.
+- **A crash that was in the port**: `ControlInput` read `WristLive` while `decide` writes
+  it, which Bevy refuses (B0002), so every run panicked on the first frame of `Update`.
+  The hold is a global now (`wrist_arm::glance_holds`), cleared while the frame's keys are
+  read and set from the frame's own decision — which is also what the behaviour notes ask
+  for, since the press of an attack must be seen on the frame it is made.
+- **`NVF_WRIST_FORCE_RAISE=1`** holds the glance up with no key, for screenshots. A
+  developer's switch; it stands in for the key and nothing else.
+- **Still not done**: interiors (the glance does not open in one yet, though the producer
+  draws a plan of the rooms), the marker and door icons over the outline, and everything
+  of the spec's §8 (lamp, knobs, needle, foley).
 
 ## Blockers for a desktop try
 

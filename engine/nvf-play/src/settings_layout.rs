@@ -306,7 +306,7 @@ mod tests {
     /// resolution row, Gore Shake and #2670's Cloud shadows; #2661's mesh terrain blend row, the
     /// Quick Loot rows; #2965's heat haze row; #2675's desert haze row; Sprint; #2671's terrain
     /// shadows row), by the group it registers with.
-    const KNOWN: [(&str, &str); 141] = [
+    const KNOWN: [(&str, &str); 142] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -350,6 +350,7 @@ mod tests {
         ("aim-lock", "Controller"),
         ("wrist-map", "Gameplay"),
         ("wrist-map-raise", "Gameplay"),
+        ("wrist-map-style", "Gameplay"),
         ("autosave-travel", "Saving"),
         ("autosave-fast-travel", "Saving"),
         ("autosave-wait", "Saving"),

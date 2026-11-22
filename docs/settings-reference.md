@@ -252,6 +252,13 @@ Tweaks tab's rows (#1892) are listed in docs/design/settings-tweaks-layout.md.
   next hold puts it down.
 - Registered in `engine/nvf-play/src/wrist_arm.rs`
 
+### `wrist-map-style`: Glance map
+
+- On the page: Local: the place round you, drawn from what is there — the roads, the
+  buildings and the walls about them. World: the worldspace's own map picture, as the
+  World Map page shows it.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
 ## Gameplay › Saving
 
 ### `autosave-travel`: Autosave after travel
