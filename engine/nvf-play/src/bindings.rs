@@ -1419,11 +1419,15 @@ impl ControlInput<'_, '_> {
     }
 
     pub fn pressed(&self, c: Control) -> bool {
+        self.pressed_with_pad(c, true)
+    }
+
+    pub(crate) fn pressed_with_pad(&self, c: Control, allow_pad: bool) -> bool {
         if self.suppressed() || self.held(c) {
             return false;
         }
         if self.controller() {
-            return self.pad_is(c, Ask::Pressed) || (keys_with_pad() && self.keys_pressed(c));
+            return (allow_pad && self.pad_is(c, Ask::Pressed)) || (keys_with_pad() && self.keys_pressed(c));
         }
         self.keys_pressed(c)
     }
@@ -1442,13 +1446,17 @@ impl ControlInput<'_, '_> {
     }
 
     pub fn just_pressed(&self, c: Control) -> bool {
+        self.just_pressed_with_pad(c, true)
+    }
+
+    pub(crate) fn just_pressed_with_pad(&self, c: Control, allow_pad: bool) -> bool {
         if self.suppressed() || self.held(c) {
             return false;
         }
         let b = self.bindings.get(c);
         let keys = || b.key.is_some_and(|k| self.keys.just_pressed(k) && self.open_key(k)) || b.mouse.is_some_and(|m| self.mouse.just_pressed(m) && self.open_button(m));
         if self.controller() {
-            return self.pad_is(c, Ask::JustPressed) || (keys_with_pad() && keys());
+            return (allow_pad && self.pad_is(c, Ask::JustPressed)) || (keys_with_pad() && keys());
         }
         keys()
     }
