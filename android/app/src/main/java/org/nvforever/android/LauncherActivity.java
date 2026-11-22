@@ -43,6 +43,9 @@ public class LauncherActivity extends Activity {
     private Switch skipWarmSwitch;
     private Switch skipVatsMaskSwitch;
     private Switch vulkanValidationSwitch;
+    private Switch vulkanSyncSwitch;
+    private Switch vulkanGpuavSwitch;
+    private Switch breadcrumbsSwitch;
     private boolean loadingControls;
     private Button permissionButton;
     private Button pickButton;
@@ -92,6 +95,18 @@ public class LauncherActivity extends Activity {
         vulkanValidationSwitch.setText("Crash test: Vulkan validation (slow)");
         vulkanValidationSwitch.setTextColor(Color.WHITE);
         root.addView(vulkanValidationSwitch);
+        vulkanSyncSwitch = new Switch(this);
+        vulkanSyncSwitch.setText("Crash test: Vulkan sync validation (needs the switch above)");
+        vulkanSyncSwitch.setTextColor(Color.WHITE);
+        root.addView(vulkanSyncSwitch);
+        vulkanGpuavSwitch = new Switch(this);
+        vulkanGpuavSwitch.setText("Crash test: Vulkan GPU-assisted validation (very slow)");
+        vulkanGpuavSwitch.setTextColor(Color.WHITE);
+        root.addView(vulkanGpuavSwitch);
+        breadcrumbsSwitch = new Switch(this);
+        breadcrumbsSwitch.setText("Crash test: GPU breadcrumbs");
+        breadcrumbsSwitch.setTextColor(Color.WHITE);
+        root.addView(breadcrumbsSwitch);
         TextView controlsHint = new TextView(this);
         controlsHint.setText("Los cambios se aplican al iniciar el juego.\nMando: A usar/aceptar · B Pip-Boy/volver · X recargar · Y saltar\nLT apuntar · RT disparar · RB VATS · LB cámara · Start pausa");
         controlsHint.setTextColor(Color.LTGRAY);
@@ -102,6 +117,9 @@ public class LauncherActivity extends Activity {
         skipWarmSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
         skipVatsMaskSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
         vulkanValidationSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
+        vulkanSyncSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
+        vulkanGpuavSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
+        breadcrumbsSwitch.setOnCheckedChangeListener((b, checked) -> saveControls());
 
         permissionButton = addButton(root, "1. Grant all-files access", v -> requestFilesAccess());
         pickButton = addButton(root, "2. Choose Fallout Data folder", v -> pickFolder());
@@ -263,6 +281,9 @@ public class LauncherActivity extends Activity {
         boolean skipWarm = false;
         boolean skipVatsMask = false;
         boolean vulkanValidation = false;
+        boolean vulkanSync = false;
+        boolean vulkanGpuav = false;
+        boolean breadcrumbs = false;
         if (hasFilesAccess() && controlsFile().isFile()) {
             try (java.io.BufferedReader in = new java.io.BufferedReader(new java.io.FileReader(controlsFile()))) {
                 String line;
@@ -276,6 +297,9 @@ public class LauncherActivity extends Activity {
                     if (pair[0].equals("skip-pipboy-warmup")) skipWarm = on;
                     if (pair[0].equals("skip-vats-outline")) skipVatsMask = on;
                     if (pair[0].equals("vulkan-validation")) vulkanValidation = on;
+                    if (pair[0].equals("vulkan-validation-sync")) vulkanSync = on;
+                    if (pair[0].equals("vulkan-validation-gpuav")) vulkanGpuav = on;
+                    if (pair[0].equals("gpu-breadcrumbs")) breadcrumbs = on;
                 }
             } catch (IOException e) { android.util.Log.e("NVForever", "Reading controls", e); }
         }
@@ -285,6 +309,9 @@ public class LauncherActivity extends Activity {
         skipWarmSwitch.setChecked(skipWarm);
         skipVatsMaskSwitch.setChecked(skipVatsMask);
         vulkanValidationSwitch.setChecked(vulkanValidation);
+        vulkanSyncSwitch.setChecked(vulkanSync);
+        vulkanGpuavSwitch.setChecked(vulkanGpuav);
+        breadcrumbsSwitch.setChecked(breadcrumbs);
         loadingControls = false;
     }
 
@@ -300,7 +327,10 @@ public class LauncherActivity extends Activity {
                         + "\ntouch " + touchSwitch.isChecked()
                         + "\nskip-pipboy-warmup " + skipWarmSwitch.isChecked()
                         + "\nskip-vats-outline " + skipVatsMaskSwitch.isChecked()
-                        + "\nvulkan-validation " + vulkanValidationSwitch.isChecked() + "\n";
+                        + "\nvulkan-validation " + vulkanValidationSwitch.isChecked()
+                        + "\nvulkan-validation-sync " + vulkanSyncSwitch.isChecked()
+                        + "\nvulkan-validation-gpuav " + vulkanGpuavSwitch.isChecked()
+                        + "\ngpu-breadcrumbs " + breadcrumbsSwitch.isChecked() + "\n";
                 out.write(text.getBytes(StandardCharsets.UTF_8));
             }
             if (!temp.renameTo(file)) throw new IOException("Cannot replace controls config");

@@ -46,6 +46,7 @@
 //!
 //! [`crash::render_error`]: crate::crash
 
+pub mod breadcrumbs;
 pub mod fault;
 pub mod report;
 pub mod ring;
@@ -130,7 +131,9 @@ pub fn dump_text(why: &str) -> String {
         Err(_) => (Vec::new(), 0),
     };
     let fault = FAULT.get().and_then(|f| f.as_deref());
-    report::dump(why, &frames, pushed, &sampled_now(), fault)
+    // The breadcrumbs last: the node the GPU was in is the answer the rest of the dump is
+    // context for, and it is `""` unless this run was asked for them (`breadcrumbs`).
+    format!("{}{}", report::dump(why, &frames, pushed, &sampled_now(), fault), breadcrumbs::section())
 }
 
 /// The dump for a crash report, or `""` when the device is not lost. Appended under the
@@ -158,9 +161,11 @@ impl Plugin for GpuRecorderPlugin {
         app.init_resource::<Recorder>().add_systems(Startup, stash_device).add_systems(Last, record);
     }
 
-    /// The render world exists by now: say whether `VK_EXT_device_fault` is on.
+    /// The render world exists by now: say whether `VK_EXT_device_fault` is on, and whether
+    /// this run records GPU breadcrumbs.
     fn finish(&self, app: &mut App) {
         fault::report_start(app);
+        breadcrumbs::report_start();
     }
 }
 

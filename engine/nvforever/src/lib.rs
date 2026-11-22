@@ -1084,6 +1084,17 @@ pub const VULKAN_VALIDATION_ENV: &str = "NVF_VULKAN_VALIDATION";
 /// for the one line the run log gets (`vulkan_validation`). Unset elsewhere.
 pub const VULKAN_VALIDATION_LIB_ENV: &str = "NVF_VULKAN_VALIDATION_LIB";
 
+/// Which of the validation layer's deeper checks to ask for on top of the core ones, as a
+/// comma list of `sync` and `gpuav` (`1` is both): a crash test the Android launcher offers
+/// in two switches of its own (`vulkan_validation`). Needs the validation switch as well.
+pub const VULKAN_VALIDATION_DEEP_ENV: &str = "NVF_VULKAN_VALIDATION_DEEP";
+
+/// Set (anything but `0`) to have every render-graph node write a GPU marker before and
+/// after its work, so a lost device names the node the GPU hung in: a crash test the Android
+/// launcher offers (`gpu_recorder::breadcrumbs`). Read in the vendored `bevy_render`
+/// (`bevy::render::gpu_breadcrumbs`) as well, which is where the markers are recorded.
+pub const GPU_BREADCRUMBS_ENV: &str = "NVF_GPU_BREADCRUMBS";
+
 pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     // Started as this run's exit watcher (exit_watch.rs): wait for the game's process, no game.
     if exit_watch::run_if_watcher() {
@@ -1646,7 +1657,14 @@ pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     app.add_plugins(anti_lag::AntiLagInitPlugin);
     // Asks for VK_EXT_device_fault the same way, so a lost device can say what faulted
     // (gpu_recorder/fault.rs). Nothing is enabled on a driver without it.
-    gpu_recorder::fault::ask_for_extension(&mut app.world_mut().get_resource_or_init::<bevy::render::renderer::raw_vulkan_init::RawVulkanInitSettings>());
+    {
+        let mut settings = app.world_mut().get_resource_or_init::<bevy::render::renderer::raw_vulkan_init::RawVulkanInitSettings>();
+        gpu_recorder::fault::ask_for_extension(&mut settings);
+        // The validation layer's deeper checks (synchronization, GPU-assisted), asked for on
+        // the instance through VK_EXT_layer_settings. Nothing without both crash-test
+        // switches (`vulkan_validation`).
+        vulkan_validation::ask_for_layer_settings(&mut settings);
+    }
     // The upscaler this run starts with, before the renderer exists: Streamline must be loaded
     // and initialised before the Vulkan instance is made (dlss/, #2198), so the settings' INI is
     // read here by the rows' own rules and precedence, as `apply_stored` applies them at
