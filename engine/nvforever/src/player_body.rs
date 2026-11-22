@@ -124,6 +124,27 @@ const PIPBOY_BLEND: f32 = 8.0 / 30.0;
 /// `Fallout.ini` the same].
 pub const PIPBOY_FOV: f32 = 47.0;
 
+/// The field of view the arm is drawn with for the live wrist map's glance
+/// (`crate::wrist_screen`), degrees as [`PIPBOY_FOV`] counts them. The menus' 47 fills the
+/// picture with the device, which is what a menu wants; a glance keeps the road ahead in
+/// view, so the whole Pip-Boy sits in the lower left instead. The lens draws the rig
+/// across the view about the eye, so a narrow arms view throws what is off the eye's axis
+/// off the picture as well: at the menus' 47 the hand fills the screen and the device is
+/// past the left edge, at 85 the device is still cut by it, at 110 it is whole and the
+/// road ahead stays clear [design: fitted on the desktop against the vanilla Pip-Boy 3000
+/// at Goodsprings, 2026-11-21, spikes/001-live-wrist-world].
+const WRIST_FOV: f32 = 110.0;
+
+/// How far below the eye the glance holds the arm, game units: a menu puts the device in
+/// the middle of the view, a glance keeps it under the road ahead [design: fitted on the
+/// desktop at Goodsprings, 2026-11-21, spikes/001-live-wrist-world]. `NVF_WRIST_DROP`
+/// overrides it while it is being fitted.
+const WRIST_DROP: f32 = 3.0;
+
+fn wrist_drop() -> f32 {
+    std::env::var("NVF_WRIST_DROP").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(WRIST_DROP)
+}
+
 /// The field of view the first-person arms and weapon are drawn with otherwise, degrees
 /// as [`PIPBOY_FOV`] [documented: `Fallout_default.ini` `fDefault1stPersonFOV=55`,
 /// docs/design/layer3.md; hypothesis: that it is the view of the arms' own camera, so
@@ -2863,10 +2884,10 @@ fn keep_sights_facing(a: &mut Animator, spine: usize) -> f32 {
 /// second camera [design]. The rig's root keeps the place [`pose_rig`] gave it, under
 /// the lens nodes: the outer node stands at the eye looking along `forward`, the inner
 /// one scales across that look.
-fn place_lens(rig: &Rig, eye: Vec3, forward: Vec3, k: f32, transforms: &mut Query<&mut Transform>) {
+fn place_lens(rig: &Rig, eye: Vec3, forward: Vec3, k: f32, drop: f32, transforms: &mut Query<&mut Transform>) {
     let Some([outer, inner]) = rig.lens else { return };
     let Ok(root) = transforms.get(rig.root).copied() else { return };
-    let at = Transform { translation: eye, rotation: Quat::from_rotation_arc(Vec3::Y, forward.normalize_or(Vec3::Y)), scale: Vec3::ONE };
+    let at = Transform { translation: eye - Vec3::Z * drop, rotation: Quat::from_rotation_arc(Vec3::Y, forward.normalize_or(Vec3::Y)), scale: Vec3::ONE };
     let local = Transform::from_matrix(at.to_matrix().inverse() * root.to_matrix());
     for (e, t) in [(outer, at), (inner, Transform::from_scale(Vec3::new(k, 1.0, k))), (rig.root, local)] {
         if let Ok(mut m) = transforms.get_mut(e) {
@@ -3201,7 +3222,7 @@ fn drive_body(
     mut transforms: Query<&mut Transform>,
     mut visibility: Query<&mut Visibility>,
     mut anim: ResMut<WeaponAnim>,
-    (furniture, mut idles, mut seat, pip, cams, first_fov, limbs, (death, knock), (zoom, combat, mut true_sights, scope, mut lens3d, lens_sway), (ahead, mut lunge, s1st, vats, inertia, mut blows)): (
+    (furniture, mut idles, mut seat, pip, cams, first_fov, limbs, (death, knock), (zoom, combat, mut true_sights, scope, mut lens3d, lens_sway), (ahead, mut lunge, s1st, vats, inertia, mut blows, wrist)): (
         Res<crate::furniture::BodyOverride>,
         ResMut<PlayerIdles>,
         ResMut<nvf_play::furniture::PlayerSeat>,
@@ -3211,7 +3232,10 @@ fn drive_body(
         Option<Res<nvf_play::combat::PlayerLimbs>>,
         (Res<crate::death_cam::DeathCam>, Res<crate::player_knockdown::PlayerKnockdown>),
         (Option<Res<nvf_play::aim_zoom::AimZoom>>, Option<Res<nvf_play::combat::Combat>>, Option<ResMut<nvf_play::aim_zoom::TrueSights>>, Option<Res<nvf_play::aim_zoom::Scope>>, Option<ResMut<nvf_play::aim_zoom::Scope3d>>, Option<Res<nvf_play::aim_zoom::LensSway>>),
-        (Res<crate::weapon_lower::Ahead>, ResMut<nvf_play::player::Lunge>, Option<Res<nvf_play::console::ShowFirstPerson>>, Option<Res<nvf_play::vats_mode::VatsMode>>, Option<Res<nvf_play::inertia::MovementInertia>>, Option<ResMut<PlayerBlows>>),
+        // `wrist`: the live wrist World Map asks for the same first-person hold, without
+        // the menus (nvf-play `wrist_arm`, `crate::wrist_screen`); `None` unless the
+        // player opted in. In this tuple because a system takes at most 16 parameters.
+        (Res<crate::weapon_lower::Ahead>, ResMut<nvf_play::player::Lunge>, Option<Res<nvf_play::console::ShowFirstPerson>>, Option<Res<nvf_play::vats_mode::VatsMode>>, Option<Res<nvf_play::inertia::MovementInertia>>, Option<ResMut<PlayerBlows>>, Option<Res<nvf_play::wrist_arm::WristLive>>),
     ),
     mut driven: ResMut<nvf_play::player::ViewDriven>,
 ) {
@@ -3637,7 +3661,11 @@ fn drive_body(
         // The character stays where the scene plays (and collides with nothing there).
         seat.hold = Some(h.feet);
     }
-    let pipboy = (pip.on_arm() && pip.warming.is_none()).then_some(pip.clip_time);
+    // The menus' raise, or the live wrist map's (nvf-play `wrist_arm`): the same hold on
+    // the same rig, and nothing of the menus' state. The live view's own rules keep it off
+    // whenever the menus, a weapon, a conversation or V.A.T.S. could want the arm, so the
+    // two can never ask at once.
+    let pipboy = (pip.on_arm() && pip.warming.is_none()).then_some(pip.clip_time).or_else(|| wrist.as_deref().and_then(|w| w.arm_clip_time()));
     // A heavier weapon in the hand sways slower and further, with its switch on.
     let gun_weight = combat.as_deref().filter(|_| m.hands.in_hand).and_then(|c| c.forms.weapons.get(&c.player_weapon()?)).map_or(0.0, |w| w.weight);
     let weight = gun_weight;
@@ -3838,11 +3866,27 @@ fn drive_body(
                 let normal = arms_magnification(v, first_fov);
                 normal + (arms_magnification(v, PIPBOY_FOV) - normal) * pipboy_ease(pip.clip_time)
             }
-            (false, Some(v)) => arms_magnification(v, first_fov),
+            // The live wrist map (`crate::wrist_screen`): with the menus down, `pipboy` is
+            // its clip time. A glance, not a menu: the arm is drawn through a wider view
+            // than the menus' own, so the device and its screen sit in the lower middle
+            // and the way ahead stays in sight.
+            (false, Some(v)) => {
+                let normal = arms_magnification(v, first_fov);
+                match pipboy {
+                    Some(t) => normal + (arms_magnification(v, WRIST_FOV) - normal) * pipboy_ease(t),
+                    None => normal,
+                }
+            }
             _ => 1.0,
         };
         let forward = Vec3::from_array(nvf_play::space::look_dir(player.heading, player.pitch));
-        place_lens(f, eye, forward, k, &mut transforms);
+        // The glance holds the arm lower than a menu would, so the road ahead is still
+        // read over the device (`WRIST_DROP`).
+        let drop = match (pip.on_arm() && pip.warming.is_none(), pipboy) {
+            (false, Some(t)) => wrist_drop() * pipboy_ease(t),
+            _ => 0.0,
+        };
+        place_lens(f, eye, forward, k, drop, &mut transforms);
         lens_k = k;
     }
     match first.and_then(|(_, v)| v) {

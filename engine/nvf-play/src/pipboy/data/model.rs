@@ -219,6 +219,18 @@ pub fn game_text(bytes: &[u8]) -> String {
     fnv_util::text::decode_z(bytes)
 }
 
+/// The live wrist World Map (`crate::wrist_live`) draws on the same picture and the same
+/// projection as the paused page: it adds no map maths of its own
+/// [design: spikes/001-live-wrist-world/README.md].
+impl crate::wrist_live::MapPicture for WorldMap {
+    fn map_texture(&self) -> &str {
+        &self.texture
+    }
+    fn map_uv(&self, x: f32, y: f32) -> [f32; 2] {
+        WorldMap::uv(self, x, y)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

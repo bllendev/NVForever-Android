@@ -935,7 +935,8 @@ impl Pictures {
 }
 
 /// A picture's own file: its path under the textures folder, in small letters.
-fn own_texture(path: &str) -> String {
+/// (Public: nvforever's live wrist map loads a worldspace's own picture, `wrist_screen`.)
+pub fn own_texture(path: &str) -> String {
     format!("textures\\{}", path.trim().trim_start_matches(['\\', '/']).to_ascii_lowercase())
 }
 

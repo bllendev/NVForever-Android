@@ -60,7 +60,8 @@
 //! plugin knows only [`draw`]).
 
 pub mod marker;
-mod model;
+// `WorldMap` and its projection are read by the live wrist map too (`crate::wrist_arm`).
+pub(crate) mod model;
 mod outline;
 pub(crate) mod read;
 pub mod travel;
@@ -127,8 +128,9 @@ const DOT: f32 = 8.0;
 /// (255 under it).
 const MARKER_GROW: f32 = 1.75;
 const MARKER_BRIGHTNESS: (f32, f32) = (220.0, 255.0);
-/// The map picture: alpha 128 at brightness 255.
-pub(crate) const MAP_ALPHA: f32 = 128.0;
+/// The map picture: alpha 128 at brightness 255. (Public: the live wrist map lays the
+/// same picture on the arm's own screen, nvforever `wrist_screen`.)
+pub const MAP_ALPHA: f32 = 128.0;
 /// The player's arrow: `glow_cursor.dds`, 1.28 times as high as wide.
 const CURSOR_FILE: &str = "Interface\\Icons\\Misc\\glow_cursor.dds";
 const CURSOR_ASPECT: f32 = 1.28;

@@ -238,6 +238,20 @@ Tweaks tab's rows (#1892) are listed in docs/design/settings-tweaks-layout.md.
 - Command-line switches: `--no-lip`
 - Registered in `engine/nvforever/src/settings.rs`
 
+## Gameplay › Pip-Boy
+
+### `wrist-map`: Glance at the Pip-Boy
+
+- On the page: On: holding the Pip-Boy key or button raises the arm with the world map
+  live on its screen, without opening the menus; a short tap opens the Pip-Boy as usual.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
+### `wrist-map-raise`: Glance key
+
+- On the page: Hold: the arm is up while the key is held. Toggle: a hold raises it and the
+  next hold puts it down.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
 ## Gameplay › Saving
 
 ### `autosave-travel`: Autosave after travel
