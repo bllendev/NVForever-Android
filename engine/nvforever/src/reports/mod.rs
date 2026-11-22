@@ -343,11 +343,18 @@ pub fn folders() -> Option<(PathBuf, PathBuf)> {
 pub fn log_filter() -> String {
     let ini = EngineHome::user().and_then(|h| std::fs::read_to_string(h.config_file()).ok()).unwrap_or_default();
     let extra = log_directives(&ini);
-    if extra.is_empty() {
-        return bevy::log::DEFAULT_FILTER.to_string();
+    if !extra.is_empty() {
+        eprintln!("setup: log levels from [Log]: {extra}");
     }
-    eprintln!("setup: log levels from [Log]: {extra}");
-    format!("{},{extra}", bevy::log::DEFAULT_FILTER)
+    // The Vulkan validation crash test, when it is on: its messages come from wgpu-hal, which
+    // Bevy's default filter holds at error (`vulkan_validation`). Nothing when it is off.
+    let validation = crate::vulkan_validation::log_directives().unwrap_or_default();
+    let mut filter = bevy::log::DEFAULT_FILTER.to_string();
+    for part in [extra.as_str(), validation].into_iter().filter(|p| !p.is_empty()) {
+        filter.push(',');
+        filter.push_str(part);
+    }
+    filter
 }
 
 /// `[Log]` names and the modules they turn up.

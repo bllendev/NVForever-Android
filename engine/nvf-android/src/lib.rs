@@ -18,6 +18,7 @@ mod logcat;
 mod paths;
 mod probe;
 mod touch;
+mod validation;
 
 /// The entry point. On Android `#[bevy_main]` generates the `android_main` function the
 /// activity calls (and stores the `AndroidApp` handle in `bevy::android::ANDROID_APP`).
@@ -47,6 +48,11 @@ pub fn main() {
     }
     if tests.skip_vats_outline {
         std::env::set_var(nvforever::NO_VATS_OUTLINE_ENV, "1");
+    }
+    // Crash test from the launcher: the Khronos Vulkan validation layer, loaded before the
+    // renderer's instance is made (validation.rs). Much slower; off unless asked for.
+    if tests.vulkan_validation {
+        validation::enable();
     }
     let line = match paths::restart_line(&paths::internal_files()) {
         Ok(Some(line)) => line,

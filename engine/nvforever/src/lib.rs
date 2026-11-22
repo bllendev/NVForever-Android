@@ -215,6 +215,7 @@ mod river_flow;
 mod underwater;
 mod underwater_caustics;
 mod vigor_view;
+mod vulkan_validation;
 mod walk_probe;
 mod water;
 mod window_icon;
@@ -1076,6 +1077,14 @@ pub const NO_PIPBOY_WARM_ENV: &str = "NVF_NO_PIPBOY_WARM";
 /// Android launcher offers (`vats_highlight`). V.A.T.S. itself is unchanged.
 pub const NO_VATS_OUTLINE_ENV: &str = "NVF_NO_VATS_OUTLINE";
 
+/// Set (any value) to run with the Khronos Vulkan validation layer: a crash test the Android
+/// launcher offers, much slower than a normal run (`vulkan_validation`).
+pub const VULKAN_VALIDATION_ENV: &str = "NVF_VULKAN_VALIDATION";
+
+/// What the platform shell (`nvf-android`) says it made of the validation layer's library,
+/// for the one line the run log gets (`vulkan_validation`). Unset elsewhere.
+pub const VULKAN_VALIDATION_LIB_ENV: &str = "NVF_VULKAN_VALIDATION_LIB";
+
 pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     // Started as this run's exit watcher (exit_watch.rs): wait for the game's process, no game.
     if exit_watch::run_if_watcher() {
@@ -1826,6 +1835,9 @@ pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     // The bounded GPU flight recorder, written only when the device is lost
     // (gpu_recorder/, the Odin 3's DeviceLost).
     .add_plugins(gpu_recorder::GpuRecorderPlugin)
+    // The Vulkan validation layer's crash-test switch: one startup line when it is on,
+    // nothing at all when it is off (vulkan_validation.rs).
+    .add_plugins(vulkan_validation::VulkanValidationPlugin)
     .insert_resource(StartPose {
         position: start,
         heading: args.heading,
