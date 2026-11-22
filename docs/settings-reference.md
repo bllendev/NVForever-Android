@@ -272,6 +272,20 @@ Tweaks tab's rows (#1892) are listed in docs/design/settings-tweaks-layout.md.
   Far: twice as much of the map either way.
 - Registered in `engine/nvf-play/src/wrist_arm.rs`
 
+### `wrist-hud`: HUD on the Pip-Boy
+
+- On the page: On: the health, action points, condition and ammo meters leave the screen
+  and are read on the Pip-Boy's own page instead. The compass, crosshair and messages
+  stay.
+- Registered in `engine/nvf-play/src/wrist_hud.rs`
+
+### `wrist-hud-flash`: Flash a hidden meter
+
+- On the page: On: a meter the row above hides comes back for a few seconds when it drops
+  — damage taken, action points spent, a round fired, the weapon wearing. Off: it never
+  comes back.
+- Registered in `engine/nvf-play/src/wrist_hud.rs`
+
 ## Gameplay › Saving
 
 ### `autosave-travel`: Autosave after travel

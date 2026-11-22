@@ -107,7 +107,7 @@ pub const SECTIONS: &[Section] = &[
     section("Gameplay", Some("Camera"), &["detached-camera", "true-iron-sights", "first-person-body", "weapon-lower", "gore-shake", "field-of-view", "viewmodel-field-of-view"]),
     section("Gameplay", Some("Dialogue"), &["dialogue-zoom", "dialogue-look", "dialogue-recentre", "menu-pause", "dialogue-goodbye-hint", "lip-sync"]),
     // The glance at the Pip-Boy (`nvf-play` `wrist_arm`): the device's own rows.
-    section("Gameplay", Some("Pip-Boy"), &["wrist-map", "wrist-map-raise", "wrist-map-style", "wrist-map-position", "wrist-map-zoom"]),
+    section("Gameplay", Some("Pip-Boy"), &["wrist-map", "wrist-map-raise", "wrist-map-style", "wrist-map-position", "wrist-map-zoom", "wrist-hud", "wrist-hud-flash"]),
     section("Gameplay", Some("Saving"), &["autosave-travel", "autosave-fast-travel", "autosave-wait", "autosave-sleep", "autosave-scripts"]),
     section("Gameplay", Some("Bug Reports"), &["send-reports", "reports-delete"]),
     section("Display", Some("Screen"), &["monitor", "resolution", "borderless"]),
@@ -950,6 +950,8 @@ pub const NEEDS: &[(&str, &str, &str)] = &[
     ("wrist-map-style", "wrist-map", "Needs Glance at the Pip-Boy."),
     ("wrist-map-position", "wrist-map", "Needs Glance at the Pip-Boy."),
     ("wrist-map-zoom", "wrist-map", "Needs Glance at the Pip-Boy."),
+    ("wrist-hud", "wrist-map", "Needs Glance at the Pip-Boy."),
+    ("wrist-hud-flash", "wrist-hud", "Needs HUD on the Pip-Boy."),
     ("aim-slowdown", "aim-assist", "Needs Aim Assist."),
     ("aim-lock", "aim-assist", "Needs Aim Assist."),
     ("shadow-filter", "sun-shadows", "Needs Sun Shadows."),
