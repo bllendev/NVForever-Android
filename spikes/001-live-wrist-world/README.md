@@ -2,7 +2,7 @@
 
 **Verdict: it works on the desktop with vanilla data — the map is legible on the arm; the player's arrow is not drawn yet.** The opt-in live World Map
 has all three of its parts in engine source — the rules, the arm pose and the screen
-material — `cargo test -p nvf-play --lib` and `cargo check -p nvforever --bin nvforever`
+material — `cargo test -p nvf-play --lib` and `cargo check -p nvforever --all-targets`
 both pass with no warnings, and the rules and the off-switch are covered by unit tests.
 It has been seen on a screen (below): the device is held low and facing the player with the
 worldspace's map on it in the interface's amber, north up, and it lets go as it should. The

@@ -19,8 +19,9 @@ gradle -p android assembleDebug
 The app is `android/app/build/outputs/apk/debug/app-debug.apk`. Gradle compiles
 the release Rust library before packaging it. `-PprebuiltRust` can skip that
 step when the matching library is already in `app/src/main/jniLibs/arm64-v8a/`.
-The desktop program remains available through its small binary entry point;
-the same engine now also exposes `odin::run_with` for platform plugins.
+The desktop program remains available through its small binary entry point
+(`engine/nvforever/src/desktop.rs`); the same engine, whose crate root is upstream's
+own `src/main.rs`, also exposes `odin::run_with` for platform plugins (fork.md).
 
 This build uses the separate application ID `org.nvforever.android.retroid`.
 It preserves that app's private settings and saves when installed with the same
