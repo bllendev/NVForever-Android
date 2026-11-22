@@ -40,7 +40,10 @@
 //! line ([`note_device_lost`]), and from then on a panic is the loss's consequence: its
 //! crash report says `graphics device lost` (with the panic under it), the player is told
 //! the driver stopped ([`DEVICE_LOST_TEXT`]) and the run ends. Without a panic,
-//! [`render_error`] writes the same report and says the same.
+//! [`render_error`] writes the same report and says the same. Both paths add the GPU flight
+//! recorder's last frames and, where the driver has `VK_EXT_device_fault`, what it says
+//! faulted: in the run log once, and in the crash report under the loss (`gpu_recorder/`,
+//! which records nothing else and writes nothing on a run that keeps its device).
 //!
 //! **Privacy.** Players send these files to us, so the player's home folder (which holds
 //! their account name: `C:\Users\<name>`) is written as `%USERPROFILE%` (`~` off Windows)
@@ -415,6 +418,9 @@ fn note_device_lost(line: &str) {
         if let Ok(mut lost) = DEVICE_LOST.try_lock() {
             lost.get_or_insert_with(|| if what.is_empty() { "no reason given".to_string() } else { what.to_string() });
         }
+        // Ask the driver what faulted while the device is still there (gpu_recorder/).
+        // Logs nothing: this runs inside the log writer.
+        crate::gpu_recorder::note_lost();
     }
 }
 
@@ -686,10 +692,12 @@ fn set_hook() {
                 }
             }
             error!("render: the graphics device was lost ({what}); the panic below is its consequence and the game stops");
+            // The flight recorder's frames and the driver's fault info, once (gpu_recorder/).
+            crate::gpu_recorder::log_dump_once(what);
         }
         let text = match &lost {
             Some(what) => {
-                report_text("the graphics driver", &lost_message(what), "reported by wgpu", &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), &lost_backtrace(&thread, &location, &message, &backtrace))
+                report_text("the graphics driver", &lost_message(what), "reported by wgpu", &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), &(lost_backtrace(&thread, &location, &message, &backtrace) + &crate::gpu_recorder::report_section()))
             }
             None => report_text(&thread, &message, &location, &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), &backtrace),
         };
@@ -735,7 +743,8 @@ fn set_hook() {
 /// message as the panic hook's, so both group together.
 fn write_lost_report(what: &str) {
     let place = PLACE.try_lock().map(|p| p.clone()).unwrap_or_default();
-    let text = report_text("the graphics driver", &lost_message(what), "reported by wgpu", &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), "none: no panic followed the loss");
+    let backtrace = "none: no panic followed the loss".to_string() + &crate::gpu_recorder::report_section();
+    let text = report_text("the graphics driver", &lost_message(what), "reported by wgpu", &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), &backtrace);
     let Some(dir) = LOG_DIR.get() else { return };
     let when = stamp(now_secs());
     let path = dir.join(format!("crash-{when}-{}.txt", std::process::id()));
@@ -794,6 +803,11 @@ fn render_error(error: &bevy::render::error_handler::RenderError, main: &mut Wor
         // No panic came first (#2934): the loss gets its crash report here, and the
         // player is told. Bevy asks again every frame until the game has stopped; once.
         let what = device_lost().unwrap_or_else(|| error.description.clone());
+        // wgpu may report the loss through this handler without a log line the console
+        // writer saw (`note_device_lost`): make sure the driver is asked what faulted
+        // before the dump, and that the dump is logged (gpu_recorder/).
+        crate::gpu_recorder::note_lost();
+        crate::gpu_recorder::log_dump_once(&what);
         write_lost_report(&what);
         tell_player_at_start(DEVICE_LOST_TEXT, false);
     }

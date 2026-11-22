@@ -1337,6 +1337,7 @@ pub(crate) fn ao_pass(
     if (ao.before_fsr && upscaled) || ao.lighting.is_some() {
         return;
     }
+    crate::gpu_recorder::mark(crate::gpu_recorder::ring::feature::AO);
     if !format_matches(target, ao.format) {
         return;
     }
@@ -1393,6 +1394,7 @@ pub(crate) fn ao_lighting_pass(
 ) {
     let (ao, index, prepass) = view.into_inner();
     let Some(lighting) = ao.lighting.as_ref() else { return };
+    crate::gpu_recorder::mark(crate::gpu_recorder::ring::feature::AO_LIGHTING);
     let diagnostics = ctx.diagnostic_recorder();
     let diagnostics = diagnostics.as_deref();
     let span = diagnostics.time_span(ctx.command_encoder(), "nvf_ambient_occlusion");

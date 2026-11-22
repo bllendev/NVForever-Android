@@ -114,6 +114,7 @@ mod limbs;
 mod lips;
 mod memory_budget;
 mod gpu_poll;
+mod gpu_recorder;
 mod pipeline_gate;
 mod pipeline_disk_cache;
 mod pipeline_prewarm;
@@ -1114,6 +1115,12 @@ pub fn run(line: Vec<String>) -> AppExit {
 /// [`run`], letting the platform shell add its own plugins to the configured game before it
 /// starts: Android's touch and controller input (`engine/nvf-android/src/lib.rs`). `extend`
 /// runs last, after every plugin and system this function adds, and just before `App::run`.
+/// Set (anything but `0`) to have every render-graph node write a GPU marker before and
+/// after its work, so a lost device names the node the GPU hung in: a crash test the Android
+/// launcher offers (`gpu_recorder::breadcrumbs`). Read in the vendored `bevy_render`
+/// (`bevy::render::gpu_breadcrumbs`) as well, which is where the markers are recorded.
+pub const GPU_BREADCRUMBS_ENV: &str = "NVF_GPU_BREADCRUMBS";
+
 pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     // Started as this run's exit watcher (exit_watch.rs): wait for the game's process, no game.
     if exit_watch::run_if_watcher() {
@@ -1745,6 +1752,12 @@ pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     // Asks for VK_AMD_anti_lag or VK_NV_low_latency2 when Bevy creates the device: before
     // DefaultPlugins (anti_lag.rs, nv_low_latency.rs).
     app.add_plugins(anti_lag::AntiLagInitPlugin);
+    // Asks for VK_EXT_device_fault the same way, so a lost device can say what faulted
+    // (gpu_recorder/fault.rs). Nothing is enabled on a driver without it.
+    {
+        let mut settings = app.world_mut().get_resource_or_init::<bevy::render::renderer::raw_vulkan_init::RawVulkanInitSettings>();
+        gpu_recorder::fault::ask_for_extension(&mut settings);
+    }
     // The upscaler this run starts with, before the renderer exists: Streamline must be loaded
     // and initialised before the Vulkan instance is made (dlss/, #2198), so the settings' INI is
     // read here by the rows' own rules and precedence, as `apply_stored` applies them at
@@ -1961,6 +1974,9 @@ pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App)) -> AppExit {
     // wgpu's clean-up of finished GPU work on a thread of its own, not the render thread's
     // queue submit (gpu_poll.rs, #1427).
     .add_plugins(gpu_poll::GpuPollPlugin)
+    // The bounded GPU flight recorder, written only when the device is lost
+    // (gpu_recorder/, the Odin 3's DeviceLost).
+    .add_plugins(gpu_recorder::GpuRecorderPlugin)
     .insert_resource(StartPose {
         position: start,
         heading: args.heading,

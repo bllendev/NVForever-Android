@@ -7929,7 +7929,7 @@ name = "device-lost-report"
 source = "#2934 (player report panic-18a26827d78d01c8): a lost graphics device ends the run as a lost device, not as the wgpu panic that follows it: the crash report is the loss's and the run stops there (engine/nvforever/src/crash.rs)"
 note = "The test aid destroys the device 10 s in; the next frames fail as in the player's log. wgpu does not announce a loss for a device destroyed this way, so the aid logs Bevy's loss line itself; the line's form is from the player's log (unit test a_lost_device_is_read_from_bevys_line_and_named_in_the_report). The message box is not shown in unattended runs."
 areas = ["crash"]
-paths = ["engine/nvforever/src/crash.rs"]
+paths = ["engine/nvforever/src/crash.rs", "engine/nvforever/src/gpu_recorder/mod.rs", "engine/nvforever/src/gpu_recorder/report.rs", "engine/nvforever/src/gpu_recorder/fault.rs"]
 env = { NVF_PLAY_TEST_DEVICE_LOST = "10" }
 args = ["--cell", "Goodsprings"]
 run_seconds = 30
@@ -7941,6 +7941,27 @@ expect = [
   { re = 'render: the graphics device was lost \(Destroyed by the test aid NVF_PLAY_TEST_DEVICE_LOST\); the panic below is its consequence and the game stops', label = "the loss named before the panic that followed it" },
   { re = 'panic on thread .* crash report written to .*crash-\d{8}-\d{6}-\d+\.txt', label = "one crash report, written by the first panic after the loss" },
   { text = "run log: the game exited normally", max = 0, label = "the run stops at the loss" },
+  # The GPU flight recorder's dump, written only here (gpu_recorder/).
+  { re = 'gpu recorder: the graphics device was lost \(Destroyed by the test aid NVF_PLAY_TEST_DEVICE_LOST\)', count = 1, label = "the flight recorder's dump, once" },
+  { re = 'gpu recorder: the last \d+ of \d+ frames of this run, oldest first', label = "the dump names the window it holds and how many frames the run recorded" },
+  { text = "frame  load s  frame ms writes  up MB  busy    asked   rb  features", label = "the dump's rows are headed" },
+  { re = 'gpu recorder: VK_EXT_device_fault', label = "the driver's fault info, or that there is none" },
+]
+
+[[scenario]]
+name = "gpu-recorder-quiet"
+source = "the AYN Odin 3's DeviceLost (Adreno 830): the bounded GPU flight recorder costs nothing per frame and writes nothing but one summary line every 10 s while the device is alive (engine/nvforever/src/gpu_recorder/)"
+note = "A run that keeps its device must never write a dump: no per-frame lines, no device-fault section. The start says whether VK_EXT_device_fault is available on this machine's driver, either way."
+areas = ["crash", "render"]
+paths = ["engine/nvforever/src/gpu_recorder/mod.rs"]
+args = ["--cell", "Goodsprings"]
+run_seconds = 25
+expect = [
+  { re = 'gpu recorder: VK_EXT_device_fault is (on|not available)', count = 1, label = "the start says whether a lost device could name its fault" },
+  { re = 'gpu recorder: last \d+ frames: [\d.]+ ms mean, [\d.]+ ms worst; uploads \d+ writes, [\d.]+ MB; pipelines busy at most \d+; readbacks at most \d+; ran ', label = "one summary line of the window the ring holds" },
+  { text = "gpu recorder: the graphics device was lost", max = 0, label = "no dump while the device is alive" },
+  { text = "gpu recorder: no frames recorded yet", max = 0, label = "the summary is not logged before there are frames" },
+  "run log: the game exited normally",
 ]
 
 [[scenario]]

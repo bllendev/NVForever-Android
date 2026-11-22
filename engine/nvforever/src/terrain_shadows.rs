@@ -164,7 +164,7 @@ use bevy::image::ImageSampler;
 use bevy::prelude::*;
 use bevy::render::diagnostic::RecordDiagnostics;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
-use bevy::render::gpu_readback::{ReadbackComplete, ReadbackOnce};
+use bevy::render::gpu_readback::{ReadbackComplete, ReadbackDiagnosticLabel, ReadbackOnce};
 use bevy::render::render_asset::RenderAssets;
 use bevy::render::render_resource::binding_types::{texture_2d, texture_storage_2d, uniform_buffer_sized};
 use bevy::render::render_resource::{
@@ -804,6 +804,7 @@ fn update_terrain_shadows(
     mut images: ResMut<Assets<Image>>,
 ) {
     let now = time.elapsed_secs();
+    crate::gpu_recorder::mark(crate::gpu_recorder::ring::feature::TERRAIN_SHADOWS);
     let producer = &mut *producer;
     // T0 started over (another worldspace, an interior, switched off and on): a published
     // map or a job in flight of the earlier heights describes other terrain. Drop both and
@@ -959,6 +960,7 @@ fn produce_terrain_shadows(
     if job.id <= pipe.last_dispatched {
         return;
     }
+    crate::gpu_recorder::mark(crate::gpu_recorder::ring::feature::TERRAIN_SHADOWS_GPU);
     let id = match pipe.id {
         Some(id) => id,
         None => {
@@ -1039,7 +1041,7 @@ fn dump_terrain_shadows(mut aid: ResMut<DumpAid>, out: Res<TerrainShadows>, fiel
     aid.asked = true;
     let mut snapshot = Some(DumpSnapshot { heights: field.heights.clone(), valid: field.valid.clone(), side: field.side, min: out.min, max: out.max, version: out.version });
     info!("terrain shadows: reading back v{} for {}", out.version, path.display());
-    commands.spawn((Name::new("Terrain shadow dump"), ReadbackOnce::texture(image))).observe(move |ev: On<ReadbackComplete>| {
+    commands.spawn((Name::new("Terrain shadow dump"), ReadbackOnce::texture(image), ReadbackDiagnosticLabel("terrain-shadow-dump"))).observe(move |ev: On<ReadbackComplete>| {
         if let Some(s) = snapshot.take() {
             write_dump(&path, &ev.data, &s);
         }
