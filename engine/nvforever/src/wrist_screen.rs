@@ -36,7 +36,6 @@ use bevy::math::Affine2;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::prelude::*;
 use nvf_assets::{GameData, NifMaterial};
-use nvf_play::interface::AMBER_RGB;
 use nvf_play::pipboy::device_screen::SCREEN_TINT;
 use nvf_play::pipboy::transition::ScreenLook;
 use nvf_play::wrist_arm::{WristBody, WristLive};
@@ -77,15 +76,18 @@ struct Worn {
 /// Up on a north-up map ([`window`]'s facing for a picture that does not turn).
 const NORTH: [f32; 2] = [0.0, -1.0];
 
-/// The ink the map picture is drawn in, as the paused page draws the very same picture:
-/// the interface's amber at the map's own alpha over the black screen
-/// (`pipboy::data::MAP_ALPHA`), through the screen's own gain (`SCREEN_TINT`, which is
-/// near neutral — the menus' amber is in their drawing, not in the tint, so a picture laid
-/// on the screen raw comes out grey). The player's own interface colour is not read yet.
+/// The ink the whole picture is drawn in: the Pip-Boy screens' own colour as the player
+/// set it (`interface::pipboy_rgb`, amber until they change it, green among its presets),
+/// through the screen's own gain (`SCREEN_TINT`, which is near neutral — the menus' amber
+/// is in their drawing, not in the tint, so a picture laid on the screen raw comes out
+/// grey). At full strength, so the player's mark and the compass letters come out as
+/// bright as the screen can draw them; the map under them is dimmed where it is laid out
+/// instead ([`Pic::gain`]).
 fn map_ink() -> LinearRgba {
-    let amber = Color::srgb_u8(AMBER_RGB[0], AMBER_RGB[1], AMBER_RGB[2]).to_linear();
-    let ([r, g, b], a) = (SCREEN_TINT, nvf_play::pipboy::data::MAP_ALPHA / 255.0);
-    LinearRgba::rgb(amber.red * r * a, amber.green * g * a, amber.blue * b * a)
+    let rgb = nvf_play::interface::pipboy_rgb();
+    let ink = Color::srgb_u8(rgb[0], rgb[1], rgb[2]).to_linear();
+    let [r, g, b] = SCREEN_TINT;
+    LinearRgba::rgb(ink.red * r, ink.green * g, ink.blue * b)
 }
 
 /// The screen's material with a worldspace's map on it, from the shape's own, as
@@ -160,7 +162,7 @@ fn wear_map(
     let win = window(shown.uv, NORTH, HALF_WINDOW, 1.0);
     if worn.window != Some((win, shown.forward)) {
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
-        compose(&mut out, CANVAS, &Pic { size, rgba: &rgba }, win, shown.forward);
+        compose(&mut out, CANVAS, &Pic { size, rgba: &rgba, gain: WORLD_GAIN }, win, shown.forward);
         if let Some(mut live) = images.get_mut(&picture) {
             live.data = Some(out);
         }
@@ -207,18 +209,29 @@ const LETTER_RING: f32 = 0.37;
 pub struct Pic<'a> {
     pub size: [u32; 2],
     pub rgba: &'a [u8],
+    /// How brightly this picture is drawn under the marks, as the paused Pip-Boy draws the
+    /// very same thing: the worldspace's own picture at the map's alpha
+    /// (`pipboy::data::MAP_ALPHA`), where the marks are at full ([`map_ink`]).
+    pub gain: f32,
 }
 
 impl Pic<'_> {
-    /// The texel at `uv`, clamped to the picture; black outside a usable picture.
-    fn at(&self, uv: [f32; 2]) -> [u8; 4] {
+    /// The texel at `uv` at this picture's own strength, clamped to the picture; black
+    /// outside a usable picture.
+    fn at(&self, uv: [f32; 2]) -> [u8; 3] {
         let (w, h) = (self.size[0].max(1), self.size[1].max(1));
         let x = ((uv[0] * w as f32) as i64).clamp(0, w as i64 - 1) as usize;
         let y = ((uv[1] * h as f32) as i64).clamp(0, h as i64 - 1) as usize;
         let i = (y * w as usize + x) * 4;
-        self.rgba.get(i..i + 4).map_or([0, 0, 0, 255], |p| [p[0], p[1], p[2], p[3]])
+        let gain = if self.gain.is_finite() { self.gain.clamp(0.0, 1.0) } else { 1.0 };
+        let texel = self.rgba.get(i..i + 3).map_or([0, 0, 0], |p| [p[0], p[1], p[2]]);
+        texel.map(|c| (f32::from(c) * gain) as u8)
     }
 }
+
+/// How brightly the worldspace's own map picture is drawn under the marks, as the paused
+/// World Map page draws it (`pipboy::data::MAP_ALPHA` of the screen's brightest).
+const WORLD_GAIN: f32 = nvf_play::pipboy::data::MAP_ALPHA / 255.0;
 
 /// Lay out the screen's picture: the map under the window, then the player's mark and the
 /// compass letters over it. North is up, so the letters stand still and the mark turns
@@ -229,10 +242,10 @@ pub fn compose(out: &mut [u8], side: u32, map: &Pic, win: Window, facing: [f32; 
     for y in 0..side {
         for x in 0..side {
             let uv = [(x as f32 + 0.5) / side as f32, (y as f32 + 0.5) / side as f32];
-            let texel = map.at(win.at(uv));
+            let [r, g, b] = map.at(win.at(uv));
             let i = ((y * side + x) * 4) as usize;
             if let Some(p) = out.get_mut(i..i + 4) {
-                p.copy_from_slice(&[texel[0], texel[1], texel[2], 255]);
+                p.copy_from_slice(&[r, g, b, 255]);
             }
         }
     }
@@ -397,7 +410,7 @@ mod tests {
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
         let map = grey();
         let win = window([0.5; 2], NORTH, 0.1, 1.0);
-        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map }, win, facing);
+        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, gain: WORLD_GAIN }, win, facing);
         out
     }
 
@@ -475,11 +488,29 @@ mod tests {
         }
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
         let win = window([0.5; 2], NORTH, 0.25, 1.0);
-        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map }, win, NORTH);
+        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, gain: WORLD_GAIN }, win, NORTH);
         // Clear of the compass letters and the mark in the middle.
         let top = out[((CANVAS / 4 * CANVAS + CANVAS / 4) * 4) as usize];
         let bottom = out[((CANVAS * 3 / 4 * CANVAS + CANVAS / 4) * 4) as usize];
-        assert!(top > 150 && bottom < 60, "the window is upside down or off: {top} over {bottom}");
+        assert!(top > 60 && bottom < 30 && top > bottom * 3, "the window is upside down or off: {top} over {bottom}");
+        // The map is drawn at its own strength, the marks over it at the screen's full.
+        assert!(top < MARK / 2, "the map is not dimmed under the marks: {top}");
+        assert!(brightest(&out, [0.5, 0.5], 0.05) == MARK, "the player's mark is not at full strength");
+    }
+
+    /// The ink is the Pip-Boy screens' own colour as the player set it, at full strength
+    /// (the picture carries the dimming), so a green device draws a green map.
+    #[test]
+    fn the_ink_is_the_screens_own_colour() {
+        let was = nvf_play::interface::pipboy_rgb();
+        for rgb in [[255u8, 182, 66], [26, 255, 128]] {
+            nvf_play::interface::set_pipboy_rgb(rgb);
+            let ink = map_ink();
+            let want = Color::srgb_u8(rgb[0], rgb[1], rgb[2]).to_linear();
+            let [r, g, b] = SCREEN_TINT;
+            assert!((ink.red - want.red * r).abs() < 1e-6 && (ink.green - want.green * g).abs() < 1e-6 && (ink.blue - want.blue * b).abs() < 1e-6, "{rgb:?}: {ink:?}");
+        }
+        nvf_play::interface::set_pipboy_rgb(was);
     }
 
     /// The regression the behaviour notes call for: whatever the live view wears, the
