@@ -49,10 +49,17 @@ pub fn main() {
     if tests.skip_vats_outline {
         std::env::set_var(nvforever::NO_VATS_OUTLINE_ENV, "1");
     }
+    // Crash test from the launcher: every render-graph node writes a GPU marker before and
+    // after its work, so a lost device names the node the GPU hung in
+    // (`nvforever::gpu_recorder::breadcrumbs`).
+    if tests.gpu_breadcrumbs {
+        std::env::set_var(nvforever::GPU_BREADCRUMBS_ENV, "1");
+    }
     // Crash test from the launcher: the Khronos Vulkan validation layer, loaded before the
-    // renderer's instance is made (validation.rs). Much slower; off unless asked for.
+    // renderer's instance is made (validation.rs). Much slower; off unless asked for. The two
+    // deeper checks are its own switches, and mean nothing without it.
     if tests.vulkan_validation {
-        validation::enable();
+        validation::enable(validation::deep_words(tests.vulkan_validation_sync, tests.vulkan_validation_gpuav));
     }
     let line = match paths::restart_line(&paths::internal_files()) {
         Ok(Some(line)) => line,
