@@ -831,6 +831,10 @@ pub struct HudHidden {
     pub ammo: bool,
     pub needs: bool,
     pub sneak: bool,
+    /// Quick Loot goes with the rest. Off by default (the Keep Quick Loot switch is on):
+    /// the owner wants "just the HUD gone but Quick Loot to stay", so a hidden HUD leaves
+    /// the list drawn and holding its keys [design: the owner, 2026-11-22].
+    pub quick_loot: bool,
 }
 
 impl HudHidden {
@@ -842,6 +846,13 @@ impl HudHidden {
         } else {
             Visibility::Inherited
         }
+    }
+
+    /// Whether the Hide HUD key takes Quick Loot with it: the key is on and that part is
+    /// its to hide. The one answer `crate::quick_loot` asks, for both whether the list is
+    /// drawn and whether it holds its keys, so the two can never differ.
+    pub fn hides_quick_loot(&self) -> bool {
+        self.on && self.quick_loot
     }
 }
 
@@ -1596,10 +1607,17 @@ mod tests {
 
     #[test]
     fn the_hide_hud_key_hides_only_its_chosen_parts() {
-        let mut h = HudHidden { on: false, compass: true, ammo: false, needs: true, sneak: true };
+        let mut h = HudHidden { on: false, compass: true, ammo: false, needs: true, sneak: true, quick_loot: false };
         assert_eq!((h.corner(h.compass), h.corner(h.ammo)), (Visibility::Inherited, Visibility::Inherited));
         h.on = true;
         assert_eq!((h.corner(h.compass), h.corner(h.ammo)), (Visibility::Hidden, Visibility::Inherited));
+        // Quick Loot is kept unless its own part is the key's to hide (Keep Quick Loot,
+        // on by default), and never while the key is off.
+        assert!(!h.hides_quick_loot(), "the HUD is gone and the list stays");
+        h.quick_loot = true;
+        assert!(h.hides_quick_loot());
+        h.on = false;
+        assert!(!h.hides_quick_loot(), "nothing is hidden with the key off");
     }
 
     #[test]
