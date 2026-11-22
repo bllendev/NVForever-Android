@@ -91,6 +91,10 @@ pub fn render_system(
     #[cfg(feature = "trace")]
     let _span = info_span!("main_render_schedule").entered();
 
+    // NVForever GPU breadcrumbs (`crate::gpu_breadcrumbs`): the frame every marker the graph
+    // is about to record belongs to. Does nothing with the switch off.
+    crate::gpu_breadcrumbs::begin_frame();
+
     world.run_schedule(RenderGraph);
 
     {

@@ -246,6 +246,27 @@ same behaviour (two relaxed atomic adds). `src/gpu_readback.rs` counts readbacks
 around `map_async`. The recorder cannot be a dependency of this crate, which is why the
 counters live here. Drop this patch if Bevy gains an upload/readback diagnostic of its own.
 
+GPU breadcrumbs for the same `DeviceLost` (`engine/nvforever/src/gpu_recorder/breadcrumbs.rs`,
+Debug 10). New module `src/gpu_breadcrumbs.rs`: a buffer of 1024 32-bit words in
+`HOST_VISIBLE | HOST_COHERENT` memory, allocated through raw Vulkan (`ash`, behind the
+`raw_vulkan_init` feature) and mapped for the whole run, plus a table saying what each slot
+means. `src/renderer/render_context.rs` records one `vkCmdFillBuffer` of a monotonic sequence
+number into the next slot immediately before each render-graph node's own command buffer
+(`begin_breadcrumb`, from `command_encoder` and `begin_tracked_render_pass`) and another
+immediately after it (`end_breadcrumb`, from `Drop for RenderContext` and
+`add_command_buffer`); `src/renderer/mod.rs` bumps the frame number at the top of
+`render_system`. Each marker is a command buffer of its own, because wgpu-core 30 panics
+("Mixing the wgpu encoding API with the raw encoding API is not permitted",
+`wgpu-core-30.0.1/src/command/mod.rs:568`) as soon as an encoder touched by
+`as_hal_mut` is used with an ordinary wgpu call [observed 2026-11-21, a desktop run with the
+switch on]; the marker encoder is used for the fill and nothing else, and the pending list
+keeps the order marker, node, marker. After a lost device the mapping still reads, so a slot holding the number its
+fill was told to write is a marker the GPU reached: the last begin with no matching end is
+the node that hung. The hook has to be in `RenderContext` — that is what every node records
+through — which is why this lives here and not in the game. All of it is behind
+`NVF_GPU_BREADCRUMBS`; unset, nothing is allocated and every function returns at its first
+line. Drop this patch if Bevy or wgpu gains breadcrumbs of its own.
+
 [documented: `src/render_resource/pipeline_cache.rs::create_pipeline_task`, #2317]
 `RENDER_DEVICE_API_GATE` gates pipeline creation on task threads (and synchronous creation).
 Each compilation holds its read side. NVForever's device poll thread shares it;

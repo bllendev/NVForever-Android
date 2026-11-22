@@ -61,6 +61,9 @@ pub mod extract_resource {
 }
 pub mod globals;
 pub mod gpu_component_array_buffer;
+// NVForever patch (`engine/vendor/README.md`): markers the GPU writes as it runs each
+// render-graph node, read back after a lost device.
+pub mod gpu_breadcrumbs;
 // NVForever patch (`engine/vendor/README.md`): counters a GPU flight recorder reads.
 pub mod gpu_counters;
 pub mod gpu_readback;

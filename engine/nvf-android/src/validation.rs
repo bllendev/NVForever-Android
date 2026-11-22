@@ -22,16 +22,49 @@
 /// The Khronos layer's library, the name the Vulkan loader and the linker both know it by.
 const LAYER_SONAME: &str = "libVkLayer_khronos_validation.so";
 
-/// Ask this run to validate. Call before the engine starts (`lib.rs`), not after.
-pub fn enable() {
+/// The deeper checks' two switches as the word list the engine reads
+/// ([`nvforever::VULKAN_VALIDATION_DEEP_ENV`]). Separate from [`enable`] so the launcher's
+/// switches are checked without a layer or a Vulkan loader.
+pub fn deep_words(sync: bool, gpuav: bool) -> String {
+    let mut words: Vec<&str> = Vec::new();
+    if sync {
+        words.push("sync");
+    }
+    if gpuav {
+        words.push("gpuav");
+    }
+    words.join(",")
+}
+
+/// Ask this run to validate. Call before the engine starts (`lib.rs`), not after. `deep` is
+/// [`deep_words`]: empty for the core checks alone.
+pub fn enable(deep: String) {
     let status = load_layer();
     // Edition 2021: `set_var` is safe to call; nothing else is running yet.
     std::env::set_var(nvforever::VULKAN_VALIDATION_ENV, "1");
     std::env::set_var(nvforever::VULKAN_VALIDATION_LIB_ENV, &status);
+    if !deep.is_empty() {
+        std::env::set_var(nvforever::VULKAN_VALIDATION_DEEP_ENV, &deep);
+    }
     // wgpu reads these itself (`InstanceFlags::with_env`): any value but "0" turns the flag on.
     std::env::set_var("WGPU_VALIDATION", "1");
     std::env::set_var("WGPU_DEBUG", "1");
-    eprintln!("Vulkan validation (crash test): on; {status}");
+    let deeper = if deep.is_empty() { "core checks only".to_string() } else { format!("deeper checks: {deep}") };
+    eprintln!("Vulkan validation (crash test): on ({deeper}); {status}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two launcher switches as the engine's word list.
+    #[test]
+    fn the_deep_validation_switches_become_the_engines_words() {
+        assert_eq!(deep_words(false, false), "");
+        assert_eq!(deep_words(true, false), "sync");
+        assert_eq!(deep_words(false, true), "gpuav");
+        assert_eq!(deep_words(true, true), "sync,gpuav");
+    }
 }
 
 /// Loads the layer library, and says what happened in the words the run log will carry.

@@ -20,6 +20,15 @@ pub struct ControlsConfig {
     /// Crash test (launcher switch): the run asks for the Khronos Vulkan validation layer
     /// (`nvforever::VULKAN_VALIDATION_ENV`, much slower).
     pub vulkan_validation: bool,
+    /// Crash test (launcher switch): with the layer on, its synchronization validation too
+    /// (`nvforever::VULKAN_VALIDATION_DEEP_ENV`).
+    pub vulkan_validation_sync: bool,
+    /// Crash test (launcher switch): with the layer on, GPU-assisted validation
+    /// (instrumented shaders) too. Slower again, and a load may not finish.
+    pub vulkan_validation_gpuav: bool,
+    /// Crash test (launcher switch): every render-graph node writes a GPU marker before and
+    /// after its work (`nvforever::GPU_BREADCRUMBS_ENV`), so a lost device names the node.
+    pub gpu_breadcrumbs: bool,
 }
 impl Default for ControlsConfig {
     /// What a phone without the file gets: touch controls, nothing else.
@@ -31,6 +40,9 @@ impl Default for ControlsConfig {
             skip_pipboy_warmup: false,
             skip_vats_outline: false,
             vulkan_validation: false,
+            vulkan_validation_sync: false,
+            vulkan_validation_gpuav: false,
+            gpu_breadcrumbs: false,
         }
     }
 }
@@ -61,6 +73,9 @@ impl ControlsConfig {
                 "skip-pipboy-warmup" => config.skip_pipboy_warmup = enabled,
                 "skip-vats-outline" => config.skip_vats_outline = enabled,
                 "vulkan-validation" => config.vulkan_validation = enabled,
+                "vulkan-validation-sync" => config.vulkan_validation_sync = enabled,
+                "vulkan-validation-gpuav" => config.vulkan_validation_gpuav = enabled,
+                "gpu-breadcrumbs" => config.gpu_breadcrumbs = enabled,
                 _ => {}
             }
         }
@@ -230,16 +245,20 @@ mod tests {
         let empty = ControlsConfig::parse("");
         assert!(!empty.controller && empty.touch && !empty.diagnostics);
         assert!(!empty.skip_pipboy_warmup && !empty.skip_vats_outline && !empty.vulkan_validation);
+        assert!(!empty.vulkan_validation_sync && !empty.vulkan_validation_gpuav && !empty.gpu_breadcrumbs);
 
         // What the launcher writes with every switch on (the comment line is ignored).
         let on = ControlsConfig::parse(
-            "# Applied when starting the game\ncontroller true\ntouch true\nskip-pipboy-warmup true\nskip-vats-outline true\nvulkan-validation true\n",
+            "# Applied when starting the game\ncontroller true\ntouch true\nskip-pipboy-warmup true\nskip-vats-outline true\nvulkan-validation true\n\
+             vulkan-validation-sync true\nvulkan-validation-gpuav true\ngpu-breadcrumbs true\n",
         );
         assert!(on.controller && on.touch && on.skip_pipboy_warmup && on.skip_vats_outline && on.vulkan_validation);
+        assert!(on.vulkan_validation_sync && on.vulkan_validation_gpuav && on.gpu_breadcrumbs);
 
         // The off state is the file saying false, not only the file being absent.
-        let off = ControlsConfig::parse("controller false\ntouch false\nvulkan-validation false\n");
+        let off = ControlsConfig::parse("controller false\ntouch false\nvulkan-validation false\nvulkan-validation-sync false\nvulkan-validation-gpuav false\ngpu-breadcrumbs false\n");
         assert!(!off.controller && !off.touch && !off.vulkan_validation);
+        assert!(!off.vulkan_validation_sync && !off.vulkan_validation_gpuav && !off.gpu_breadcrumbs);
 
         // 1/0 are accepted too; an unknown name, a missing or unreadable value and a blank
         // line change nothing.
