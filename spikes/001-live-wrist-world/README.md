@@ -237,6 +237,57 @@ screen's colour was set to Green in `NVForever.ini` for the shot).
   draws a plan of the rooms), the marker and door icons over the outline, and everything
   of the spec's §8 (lamp, knobs, needle, foley).
 
+## The owner's list after the first on-device run (2026-11-22)
+
+The first Odin 3 photo of build map.12 (1080p-ish 16:9 handheld) showed the mode working:
+the amber map on the glass with N/E/W/S and the player's triangle, the arm up in the
+middle right of the frame. What the owner asked for next, and where it stands:
+
+1. **Done — the glance opens with a weapon drawn.** `Play::weapon_out` is
+   `Play::aiming` now (`Block::WeaponOut` → `Block::Aiming`): the sights block it, a
+   weapon merely in hand does not. Nothing extra lowers the weapon, because the Pip-Boy
+   clip poses *both* arms at the hold and its tracks outrank the weapon's — which is
+   exactly what the menus' own raise does with a drawn weapon. The glance already holds
+   attack, aim, ready, activate and V.A.T.S. while the arm is up, so nothing fires or
+   zooms through it, and a press of any of them ends the glance on the frame of the
+   press, before the press is acted on. Nothing is holstered, so nothing has to be drawn
+   again when it goes down. **Not yet seen with a weapon in hand on the desktop.**
+2. **Done — every compass letter is whole inside the glass.** The shape the picture is
+   worn on runs under the device's own frame, so the S stood on the bottom edge with its
+   lower half under the button bar. `wrist_screen::letter_ring` places the four letters
+   inside a glass rect (`GLASS_INSET`, a tenth of the picture each side) with
+   `LETTER_MARGIN` to spare, across and down separately, never further out than the old
+   `LETTER_RING`. Seen at Goodsprings: N, W, E and S all clear of the frame.
+3. **Done — quest targets, map markers and doors on the map.** The HUD compass's own last
+   look (`compass::CompassNear`, ten times a second) rides on the sample as
+   `wrist_live::Mark`s in the picture's own coordinates; actors are left off. The screen
+   draws a diamond where one falls inside the window and a chevron held at the glass's
+   edge where it does not (`Window::of`, the window taken the other way about). Same CPU
+   overlay, same canvas, same sample cap, held to `MARKS_MOST`; the canvas is laid out
+   again only when the window, the facing, the base or the marks changed.
+4. **Done — the device is held low on the left.** `place_lens` takes a side offset beside
+   its drop (moving the lens node by `d` across the view leaves the rig `(1 − k)·d` from
+   where it was, and the glance's arms view has `k` under 1, so a positive side is to the
+   right and the glance passes a negative one). `WRIST_SIDE` is 14 units, fitted at
+   1920 × 1080 at Goodsprings: at 26 the device ran off the left edge; at 14 it is whole
+   in the lower left with the road ahead clear. `NVF_WRIST_SIDE` overrides it. The row
+   **Glance position** (`wrist-map-position`) chooses Lower left (the default) or Centre.
+5. **Done — a refused glance says why.** One info line per press, not repeated until the
+   key is let go, naming `Block::why()`: seen as
+   `wrist: the glance was asked for and did not open: the first-person arms are not drawn`
+   in the first second of a run.
+6. **Partly done — quality of life.** The menus' own raise and lower foley
+   (`UIPipBoyAccessUp` / `UIPipBoyAccessDown`, the load order's own SOUN records) plays
+   with the glance (`wrist_arm::foley`), and **Glance zoom** (`wrist-map-zoom`) shows
+   Near (the window the picture asks for) or Far (twice as much either way). **Interiors
+   are still not allowed** (`Block::Interior`): the outline producer draws a plan of the
+   rooms, but the glance's key is the worldspace and an interior would need the cell in
+   its place, with the worldspace picture gone as the base — a change of its own.
+
+Still open from this pass: the letters and the marks are drawn in the same ink as the
+outline and the outline's walls are brighter, so a letter over a building is hard to read;
+the device presets, the DATA lamp, the knobs and the rad needle of the notes' §8.
+
 ## Blockers for a desktop try
 
 1. **No clippy over the Bevy workspace yet.** Both crates compile warning-free under

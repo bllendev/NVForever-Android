@@ -243,6 +243,10 @@ pub struct Spot<'a> {
     pub feet: [f32; 2],
     pub heading: f32,
     pub marks: &'a [(MarkKind, [f32; 2])],
+    /// How much more of the picture the screen shows than the picture asks for: the Glance
+    /// zoom row (`crate::wrist_arm::Zoom`), 1 for Near. A number that is not one is
+    /// ignored.
+    pub zoom: f32,
 }
 
 impl<'a> Spot<'a> {
@@ -281,7 +285,9 @@ impl<'a> Spot<'a> {
                 }
             }
         }
-        Some(Draw { key, texture, uv, forward: [sin, -cos], half: self.map.half_window(), local, marks })
+        let zoom = if self.zoom.is_finite() && self.zoom > 0.0 { self.zoom } else { 1.0 };
+        let half = (self.map.half_window() * zoom).clamp(0.005, 0.5);
+        Some(Draw { key, texture, uv, forward: [sin, -cos], half, local, marks })
     }
 }
 
@@ -468,7 +474,7 @@ mod tests {
     }
 
     fn at(map: &Patch, x: f32, y: f32, heading: f32) -> Option<Spot<'_>> {
-        Some(Spot { map, feet: [x, y], heading, marks: &[] })
+        Some(Spot { map, feet: [x, y], heading, marks: &[], zoom: 1.0 })
     }
 
     #[test]
@@ -693,7 +699,7 @@ mod tests {
         marks.push((MarkKind::Door, [f32::NAN, 0.0]));
         marks.push((MarkKind::Found, [40.0 * CELL, 0.0]));
         let mut live = Live::default();
-        let drawn = live.step(t(0), true, true, &play(), || Some(Spot { map: &map, feet: [0.0, 0.0], heading: 0.0, marks: &marks })).draw.unwrap();
+        let drawn = live.step(t(0), true, true, &play(), || Some(Spot { map: &map, feet: [0.0, 0.0], heading: 0.0, marks: &marks, zoom: 1.0 })).draw.unwrap();
         assert_eq!(drawn.marks.len(), MARKS_MOST);
         assert_eq!(drawn.marks[0], Mark { kind: MarkKind::Quest, uv: [0.75, 0.25] }, "the quest's target comes first");
         assert!(drawn.marks[1..].iter().all(|m| m.kind == MarkKind::Place), "the rest in the order the compass found them");
@@ -703,8 +709,26 @@ mod tests {
         assert!(plain.marks.is_empty());
         // A mark off the picture rides along: the screen holds it at the window's edge.
         let far = &[(MarkKind::Found, [40.0 * CELL, 0.0])][..];
-        let out = live.step(t(200), true, false, &play(), || Some(Spot { map: &map, feet: [0.0, 0.0], heading: 0.0, marks: far })).draw.unwrap();
+        let out = live.step(t(200), true, false, &play(), || Some(Spot { map: &map, feet: [0.0, 0.0], heading: 0.0, marks: far, zoom: 1.0 })).draw.unwrap();
         assert!(out.marks[0].uv[0] > 1.0, "{:?}", out.marks);
+    }
+
+    /// The Glance zoom row widens the window the picture asks for, and a number that is
+    /// not one leaves it as it was.
+    #[test]
+    fn the_zoom_widens_the_window_the_picture_asks_for() {
+        let map = Patch("synthetic-owned-map.dds");
+        let at_zoom = |zoom| {
+            let mut live = Live::default();
+            live.step(t(0), true, true, &play(), || Some(Spot { map: &map, feet: [0.0, 0.0], heading: 0.0, marks: &[], zoom })).draw.unwrap().half
+        };
+        assert_eq!(at_zoom(1.0), HALF_WINDOW);
+        assert_eq!(at_zoom(2.0), HALF_WINDOW * 2.0);
+        for bad in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(at_zoom(bad), HALF_WINDOW, "{bad}");
+        }
+        // Never more of a picture than the whole of it.
+        assert_eq!(at_zoom(100.0), 0.5);
     }
 
     /// The window the other way about: a place on the map picture back to the canvas the
@@ -745,7 +769,7 @@ mod tests {
         let pic = |size: [u32; 2], n: usize| LocalPic { alpha: std::sync::Arc::new(vec![7; n]), size };
         let close = Close(pic([8, 8], 64));
         let mut live = Live::default();
-        let drawn = live.step(t(0), true, true, &play(), || Some(Spot { map: &close, feet: [0.0, 0.0], heading: 0.0, marks: &[] })).draw.unwrap();
+        let drawn = live.step(t(0), true, true, &play(), || Some(Spot { map: &close, feet: [0.0, 0.0], heading: 0.0, marks: &[], zoom: 1.0 })).draw.unwrap();
         assert_eq!((drawn.uv, drawn.half), ([0.5, 0.5], 0.26));
         assert!(drawn.local.is_some_and(|p| p.is(&close.0)), "the texels are the ones the picture was laid out in");
         // The whole picture at once is the default, as a worldspace's own picture is.
@@ -757,7 +781,7 @@ mod tests {
             assert!(!short.usable());
             let starved = Close(short);
             let mut live = Live::default();
-            assert!(live.step(t(0), true, true, &play(), || Some(Spot { map: &starved, feet: [0.0, 0.0], heading: 0.0, marks: &[] })).draw.is_none());
+            assert!(live.step(t(0), true, true, &play(), || Some(Spot { map: &starved, feet: [0.0, 0.0], heading: 0.0, marks: &[], zoom: 1.0 })).draw.is_none());
         }
         // Two pictures of the same samples are not the same picture.
         assert!(!pic([8, 8], 64).is(&pic([8, 8], 64)));

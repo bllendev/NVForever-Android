@@ -150,8 +150,9 @@ fn wrist_drop() -> f32 {
 /// Odin photo had the device in the middle right of a 16:9 picture, over the way ahead,
 /// where the reference framing keeps it low on the left with the world clear beside it
 /// [design: the owner, 2026-11-21]. Centre is 0. `NVF_WRIST_SIDE` overrides it while it
-/// is being fitted.
-const WRIST_SIDE: f32 = 26.0;
+/// is being fitted. Fitted on the desktop at Goodsprings, 1920 × 1080: at 26 the device
+/// ran off the left edge, at 14 it sits whole in the lower left with the road ahead clear.
+const WRIST_SIDE: f32 = 14.0;
 
 fn wrist_side() -> f32 {
     std::env::var("NVF_WRIST_SIDE").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(WRIST_SIDE)

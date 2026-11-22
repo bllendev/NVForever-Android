@@ -4,9 +4,11 @@
 //! [design: spikes/001-live-wrist-world/README.md].
 //!
 //! The player turns it on at Gameplay › Pip-Boy on the settings page (`wrist-map`, off
-//! until they do), chooses how its key works (`wrist-map-raise`: Hold or Toggle) and
+//! until they do), chooses how its key works (`wrist-map-raise`: Hold or Toggle),
 //! which picture its screen shows (`wrist-map-style`: Local, the place round them as the
-//! Local Map page draws it, or World, the worldspace's own picture).
+//! Local Map page draws it, or World, the worldspace's own picture), where in the frame
+//! the arm comes up (`wrist-map-position`: Lower left or Centre) and how much of the map
+//! the glass shows (`wrist-map-zoom`: Near or Far).
 //! `NVF_WRIST_LIVE=1` forces it on for a developer whatever the row says, and
 //! `NVF_WRIST_FORCE_RAISE=1` holds the glance up with no key at all so a screenshot can
 //! be taken of it. Both are developers' switches, named nowhere a player looks.
@@ -128,6 +130,42 @@ impl Position {
     }
 }
 
+/// How much of the map the glance's screen shows [design: the owner, 2026-11-21].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Zoom {
+    /// The window the picture itself asks for: about 175 m of the Local Map's outline
+    /// across the glass ([`crate::wrist_local::LOCAL_SPAN`]), or
+    /// [`crate::wrist_live::HALF_WINDOW`] of a worldspace's own picture.
+    #[default]
+    Near,
+    /// Twice as much of it either way, for finding the way rather than the next corner.
+    Far,
+}
+
+impl Zoom {
+    pub const NAMES: [&'static str; 2] = ["Near", "Far"];
+
+    /// How much more of the picture than it asks for ([`crate::wrist_live::Spot::zoom`]).
+    pub fn share(self) -> f32 {
+        match self {
+            Zoom::Near => 1.0,
+            Zoom::Far => 2.0,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        Zoom::NAMES[self as usize]
+    }
+
+    pub fn of(name: &str) -> Option<Zoom> {
+        match name {
+            "Near" => Some(Zoom::Near),
+            "Far" => Some(Zoom::Far),
+            _ => None,
+        }
+    }
+}
+
 /// The opt-in, and what the live view asks for this frame.
 #[derive(Resource, Debug, Default)]
 pub struct WristLive {
@@ -148,6 +186,8 @@ pub struct WristLive {
     /// Where in the frame it holds the device ([`Position`]), the settings page's fourth
     /// row.
     pub map_position: Position,
+    /// How much of the map its screen shows ([`Zoom`]), the settings page's fifth row.
+    pub map_zoom: Zoom,
     /// The player is asking for the glance now: the key is held past its moment
     /// ([`GLANCE_SECONDS`]) in Hold style, or the latch is on in Toggle style.
     pub asked: bool,
@@ -218,6 +258,17 @@ fn take_map_style(world: &mut World, name: &str) -> bool {
     match Style::of(name) {
         Some(style) => {
             world.resource_mut::<WristLive>().map_style = style;
+            true
+        }
+        None => false,
+    }
+}
+
+/// Take how much of the map the glance shows by name; false: not one of ours.
+fn take_zoom(world: &mut World, name: &str) -> bool {
+    match Zoom::of(name) {
+        Some(z) => {
+            world.resource_mut::<WristLive>().map_zoom = z;
             true
         }
         None => false,
@@ -394,7 +445,7 @@ impl Plugin for WristLivePlugin {
             .init_resource::<WristBody>()
             // After the Menu Mode key's hold is read, which is what asks for the glance
             // (`crate::flashlight::menu_key`).
-            .add_systems(Update, decide.in_set(crate::PlaySet::Input).after(crate::flashlight::menu_key));
+            .add_systems(Update, (decide, foley).chain().in_set(crate::PlaySet::Input).after(crate::flashlight::menu_key));
         let row = |key, label, note| Setting { key, group: crate::pause::GROUP_MENUS, label, note, switches: "", get: |_| false, set: |_, _| {}, slider: None };
         add_setting(
             app,
@@ -452,6 +503,48 @@ impl Plugin for WristLivePlugin {
                 ask_keep: false,
             },
         );
+        add_choice_list(
+            app,
+            row("wrist-map-zoom", "Glance zoom", "Near: the place about you, a couple of hundred metres across the glass. Far: twice as much of the map either way."),
+            ChoiceList {
+                names: |_| Zoom::NAMES.iter().map(|n| n.to_string()).collect(),
+                chosen: |w| w.resource::<WristLive>().map_zoom.name().to_string(),
+                pick: |w, n| take_zoom(w, n),
+                save: |w| w.resource::<WristLive>().map_zoom.name().to_string(),
+                load: |w, t| take_zoom(w, t),
+                ask_keep: false,
+            },
+        );
+    }
+}
+
+/// The Pip-Boy's own raise and lower foley for the glance: the very SOUN records the
+/// menus play when the device comes up and goes down (`crate::ui_sounds`:
+/// `UIPipBoyAccessUp`, `UIPipBoyAccessDown`), at the listener, one on each change of the
+/// arm's state [design: the clean-room notes §8; the owner, 2026-11-21]. Nothing of its
+/// own is added — the names are the load order's — and nothing sounds while the mode is
+/// off, since the arm is never up then.
+pub(crate) fn foley(
+    wrist: Res<WristLive>,
+    sfx: Option<Res<crate::sfx::Sfx>>,
+    mut out: MessageWriter<crate::sfx::PlaySound>,
+    mut was: Local<bool>,
+    mut names: Local<Option<std::collections::HashMap<String, fnv_sim::FormId>>>,
+) {
+    let up = wrist.live() && wrist.open.is_some();
+    if up == *was {
+        return;
+    }
+    *was = up;
+    let Some(sfx) = sfx else { return };
+    let name = if up { "UIPipBoyAccessUp" } else { "UIPipBoyAccessDown" };
+    let sounds = names.get_or_insert_with(|| sfx.forms.sounds.iter().filter_map(|(&id, s)| s.edid.clone().map(|e| (e, id))).collect());
+    match sounds.get(name) {
+        Some(&sound) => {
+            info!("wrist: the glance's foley: {name}");
+            out.write(crate::sfx::PlaySound { sound, at: None });
+        }
+        None => warn!("wrist: no SOUN {name} for the glance"),
     }
 }
 
@@ -566,13 +659,14 @@ pub(crate) fn decide(
         marks.extend(found.0.iter().filter_map(|n| Some((marked(n.mark)?, n.at))).take(MARKS_MOST * 2));
     }
     let marks = marks.as_slice();
+    let zoom = wrist.map_zoom.share();
     let frame = wrist.live.step(now, want_open, press, &play, || {
         let (feet, heading) = here?;
         let base: &dyn MapPicture = match outline {
             Some(close) => close,
             None => map?,
         };
-        Some(Spot { map: base, feet, heading, marks })
+        Some(Spot { map: base, feet, heading, marks, zoom })
     });
     if frame.clear.is_some() {
         wrist.shown = None;
@@ -703,8 +797,19 @@ mod tests {
     fn the_glances_systems_have_no_conflicting_parameters() {
         let mut world = World::new();
         let mut schedule = Schedule::default();
-        schedule.add_systems((decide, crate::wrist_local::build).chain());
+        schedule.add_systems((decide, foley, crate::wrist_local::build).chain());
         schedule.initialize(&mut world).expect("the schedule builds");
+    }
+
+    /// How much of the map the glance shows is the player's: Near by default (the window
+    /// the picture itself asks for), Far twice as much of it either way.
+    #[test]
+    fn the_glance_shows_the_near_window_until_the_player_asks_for_more() {
+        assert_eq!(Zoom::default(), Zoom::Near);
+        assert_eq!((Zoom::Near.share(), Zoom::Far.share()), (1.0, 2.0));
+        assert_eq!((Zoom::Near.name(), Zoom::Far.name()), ("Near", "Far"));
+        assert_eq!(Zoom::of("Far"), Some(Zoom::Far));
+        assert_eq!(Zoom::of("Furthest"), None);
     }
 
     /// Where the device is held is the player's: Lower left by default, Centre on asking,

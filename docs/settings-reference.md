@@ -266,6 +266,12 @@ Tweaks tab's rows (#1892) are listed in docs/design/settings-tweaks-layout.md.
   hold it.
 - Registered in `engine/nvf-play/src/wrist_arm.rs`
 
+### `wrist-map-zoom`: Glance zoom
+
+- On the page: Near: the place about you, a couple of hundred metres across the glass.
+  Far: twice as much of the map either way.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
 ## Gameplay › Saving
 
 ### `autosave-travel`: Autosave after travel
