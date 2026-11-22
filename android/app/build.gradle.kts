@@ -8,15 +8,17 @@ android {
     // The game data is read from any folder the player picks (default /storage/emulated/0/NVForever/Data).
     namespace = "org.nvforever.android"
     compileSdk = 35
+    buildFeatures { buildConfig = true }
 
     defaultConfig {
-        applicationId = "org.nvforever.android.retroid"
+        applicationId = "org.nvforever.android.odin"
         // 26 = Android 8.0. Vulkan 1.1 phones are the target; the manifest declares the
         // requirement, so the Play Store / installer hides the app from phones without it.
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.6.0-retroid.1"
+        val buildNumber = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull
+        versionCode = buildNumber?.toInt() ?: 1
+        versionName = "0.8.1-odin.${buildNumber ?: "local"}"
         // 64-bit ARM only (every phone sold in years). x86_64 (emulator) can be added later
         // with `-t x86_64` in the cargo-ndk call below and here.
         ndk { abiFilters += listOf("arm64-v8a") }
