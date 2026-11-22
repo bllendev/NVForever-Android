@@ -1,5 +1,12 @@
 # NVForever status map
 
+Android port: [build and lifecycle](android.md). The engine runs as a library
+(`engine/nvforever/src/lib.rs`), which the desktop binary and the Android activity both
+start; the APK carries the Android adapter (`engine/nvf-android`) and its Gradle app.
+Checked on RP5 / Android 13 on the fork's earlier base: load an older save, save from
+pause, load the new save, native stick movement and look, Pip-Boy sections, and return
+from background. Full-playthrough parity remains open.
+
 What is built, what is partly built and what is not started, per system. Built from the
 design and spec notes, [owner-review.md](owner-review.md), the script stubs audit
 ([design/script-stubs.md](design/script-stubs.md)), the script function coverage table
