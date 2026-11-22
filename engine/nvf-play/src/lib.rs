@@ -179,6 +179,7 @@ pub mod wait;
 pub mod world_sounds;
 pub mod wrist_arm;
 pub mod wrist_live;
+pub mod wrist_local;
 pub mod xp_meter;
 
 use bevy::prelude::*;
@@ -427,6 +428,7 @@ impl Plugin for PlayPlugin {
             // Off unless the player opts in (the `wrist-map` row, or `NVF_WRIST_LIVE=1`);
             // inert otherwise.
             .add_plugins(wrist_arm::WristLivePlugin)
+            .add_plugins(wrist_local::WristLocalPlugin)
             .add_plugins(terminal::TerminalPlugin)
             .add_plugins(tutorial_menu::TutorialMenuPlugin)
             .add_plugins(credits::CreditsPlugin)

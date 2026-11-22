@@ -35,7 +35,7 @@ use crate::control::PlayerControl;
 use crate::pipboy::data::model::WorldMap;
 use crate::pipboy::data::read;
 use crate::player::Player;
-use crate::wrist_live::{Key, Live, Play, Spot};
+use crate::wrist_live::{Key, Live, LocalPic, MapPicture, Play, Spot};
 use bevy::prelude::*;
 use std::time::Duration;
 
@@ -95,15 +95,34 @@ pub struct WristLive {
 
 /// One sample, as the screen's owner needs it: owned, so it outlives the frame that read
 /// the world.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Shown {
     pub key: Key,
-    /// The picture the load order owns for this worldspace, as the interface names it.
+    /// The picture the load order owns for this worldspace, as the interface names it, or
+    /// the name of one laid out here ([`Shown::local`]).
     pub texture: String,
     /// The player's place on it, and the way they face (clockwise from north, picture y
     /// down).
     pub uv: [f32; 2],
     pub forward: [f32; 2],
+    /// The share of the picture from the middle to an edge the screen shows
+    /// (`wrist_live::MapPicture::half_window`).
+    pub half: f32,
+    /// The texels of the Local Map's outline when that is the base
+    /// ([`crate::wrist_local`]); `None` for the worldspace's own picture.
+    pub local: Option<LocalPic>,
+}
+
+impl PartialEq for Shown {
+    /// The same picture of the same place: the outline's by its texels rather than by
+    /// every sample of them ([`LocalPic::is`]).
+    fn eq(&self, other: &Self) -> bool {
+        (self.key, &self.texture, self.uv, self.forward, self.half) == (other.key, &other.texture, other.uv, other.forward, other.half)
+            && match (&self.local, &other.local) {
+                (Some(a), Some(b)) => a.is(b),
+                (a, b) => a.is_none() == b.is_none(),
+            }
+    }
 }
 
 /// Take the glance key's style by name; false: not one of ours.
@@ -171,6 +190,12 @@ impl WristLive {
     pub fn arm_clip_time(&self) -> Option<f32> {
         self.open.filter(|_| self.live()).map(|_| self.arm)
     }
+
+    /// Whether the close picture is wanted now: the glance holds the arm, so
+    /// [`crate::wrist_local`] casts its rays only for a frame that will show them.
+    pub fn wants_local(&self) -> bool {
+        self.live() && self.open.is_some()
+    }
 }
 
 impl WristLive {
@@ -205,7 +230,7 @@ pub struct WristBody {
 /// The worldspace's picture and projection, read once per worldspace as the paused page's
 /// `data::map_for` caches it.
 #[derive(Default)]
-struct Maps {
+pub(crate) struct Maps {
     key: Option<(u64, u32)>,
     map: Option<WorldMap>,
 }
@@ -252,10 +277,11 @@ impl Plugin for WristLivePlugin {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn decide(
+pub(crate) fn decide(
     time: Res<Time<Real>>,
     mut wrist: ResMut<WristLive>,
     body: Res<WristBody>,
+    close: Option<Res<crate::wrist_local::WristMap>>,
     state: Res<State<crate::PlayState>>,
     input: ControlInput,
     (pip, control, active): (Option<Res<crate::pipboy::PipBoy>>, Option<Res<PlayerControl>>, Option<Res<crate::menu::ActiveMenu>>),
@@ -334,19 +360,30 @@ fn decide(
     }
     let map = maps.map.as_ref();
     let here = player.as_deref().map(|p| ([p.feet[0], p.feet[1]], p.heading));
+    // The base: the Local Map's outline of the place round the player where
+    // `crate::wrist_local` has one that covers the window, else the picture the load
+    // order owns for the worldspace, as the paused World Map page shows it.
+    let outline = match (exterior, here) {
+        (Some(w), Some((feet, _))) => close.as_deref().and_then(|c| c.ready.as_ref()).filter(|r| r.covers(None, w, feet)),
+        _ => None,
+    };
     // The key is the press: the rules open on its edge and close the moment it is
     // let go (`enabled` below), so nothing raises the arm by itself any more.
     let press = want_open && wrist.live.showing().is_none();
     let was = wrist.open;
     let frame = wrist.live.step(now, want_open, press, &play, || {
         let (feet, heading) = here?;
-        Some(Spot { map: map?, feet, heading })
+        let base: &dyn MapPicture = match outline {
+            Some(close) => close,
+            None => map?,
+        };
+        Some(Spot { map: base, feet, heading })
     });
     if frame.clear.is_some() {
         wrist.shown = None;
     }
     if let Some(draw) = frame.draw {
-        wrist.shown = Some(Shown { key: draw.key, texture: draw.texture.to_string(), uv: draw.uv, forward: draw.forward });
+        wrist.shown = Some(Shown { key: draw.key, texture: draw.texture.to_string(), uv: draw.uv, forward: draw.forward, half: draw.half, local: draw.local.cloned() });
     }
     if frame.pose.is_none() {
         // An interruption (a menu, a conversation, a weapon) drops the latch too, so the
@@ -372,6 +409,18 @@ mod tests {
         Key { session: 1, world: 0x0000_003C, screen: 7 }
     }
 
+    /// A sample of the worldspace's own picture, or of an outline laid out here.
+    fn shown_for(local: Option<LocalPic>) -> Shown {
+        Shown {
+            key: key(),
+            texture: "map.dds".to_string(),
+            uv: [0.5; 2],
+            forward: [0.0, -1.0],
+            half: crate::wrist_live::HALF_WINDOW,
+            local,
+        }
+    }
+
     /// Without the opt-in nothing asks for the arm or its screen, whatever the resource
     /// holds: both nvforever systems and `player_body`'s pose go through these two.
     #[test]
@@ -379,7 +428,7 @@ mod tests {
         let off = WristLive {
             on: false,
             open: Some(key()),
-            shown: Some(Shown { key: key(), texture: "map.dds".to_string(), uv: [0.5; 2], forward: [0.0, -1.0] }),
+            shown: Some(shown_for(None)),
             ..default()
         };
         assert_eq!(off.wants(), None);
@@ -459,10 +508,32 @@ mod tests {
     /// With the opt-in, the screen follows the open intent: no pose, no picture.
     #[test]
     fn the_screen_is_asked_for_only_while_the_arm_is_held() {
-        let shown = Shown { key: key(), texture: "map.dds".to_string(), uv: [0.5; 2], forward: [0.0, -1.0] };
+        let shown = shown_for(None);
         let closed = WristLive { on: true, open: None, shown: Some(shown.clone()), ..default() };
         assert_eq!((closed.wants(), closed.arm_clip_time()), (None, None));
         let open = WristLive { on: true, open: Some(key()), shown: Some(shown.clone()), arm: 0.25, ..default() };
         assert_eq!((open.wants(), open.arm_clip_time()), (Some(&shown), Some(0.25)));
+    }
+
+    /// The rays of the close picture are cast only for a frame that will show it: a
+    /// closed wrist, or the mode off, asks `crate::wrist_local` for nothing at all.
+    #[test]
+    fn the_close_picture_is_asked_for_only_while_the_arm_is_held() {
+        assert!(WristLive { on: true, open: Some(key()), ..default() }.wants_local());
+        assert!(WristLive { forced: true, open: Some(key()), ..default() }.wants_local());
+        for quiet in [WristLive { on: true, open: None, ..default() }, WristLive { on: false, open: Some(key()), ..default() }, WristLive::default()] {
+            assert!(!quiet.wants_local());
+        }
+    }
+
+    /// Two samples of the same outline are the same sample (the texels are compared by
+    /// what they are, not by every byte), and one of another outline is not.
+    #[test]
+    fn a_sample_of_the_same_outline_is_the_same_sample() {
+        let pic = || LocalPic { alpha: std::sync::Arc::new(vec![3; 64]), size: [8, 8] };
+        let (a, b) = (pic(), pic());
+        assert_eq!(shown_for(Some(a.clone())), shown_for(Some(a.clone())));
+        assert_ne!(shown_for(Some(a.clone())), shown_for(Some(b)), "another outline, however alike");
+        assert_ne!(shown_for(Some(a)), shown_for(None), "the worldspace's own picture is not it");
     }
 }

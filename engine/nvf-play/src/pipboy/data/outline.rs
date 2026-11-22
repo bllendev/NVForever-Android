@@ -223,6 +223,45 @@ impl Outline {
     }
 }
 
+/// The landscape surfaces the rays that land nowhere are answered by, by cell of the grid
+/// (`None` where a cell has no landscape), kept while one grid is cast: loading one is
+/// costly, and the heights are smoothed as the terrain the player walks on is
+/// (`crate::smooth_terrain`, #2149).
+pub type LandCache = std::collections::HashMap<(i32, i32), Option<fnv_world::land_surface::Surface>>;
+
+/// Cast the rays `o` still wants, for up to `budget` of this frame and `batch` at a time:
+/// straight down through the physics world, and outdoors the cell's landscape height
+/// where a ray lands nowhere (the physics world holds only the 3×3 cells round the
+/// player, `phys::cells`). `data` is the load order and the worldspace the grid is in,
+/// `None` in an interior, where there is no landscape to fall back on.
+///
+/// The Local Map page (`super::advance_outline`) and the live wrist map
+/// (`crate::wrist_local`) are both cast by this, each with its own grid, its own cache of
+/// surfaces and its own budget.
+pub fn cast(o: &mut Outline, phys: &mut crate::phys::PhysState, land: &mut LandCache, data: Option<(crate::PlayData, u32)>, budget: std::time::Duration, batch: usize) {
+    let grid = data.and_then(|(d, w)| d.index.worldspaces.get(&w)).map(|ws| &ws.grid);
+    let mut ground = |x: f32, y: f32| -> Option<f32> {
+        let ((d, _), grid) = (data?, grid?);
+        let g = ((x / super::model::CELL).floor() as i32, (y / super::model::CELL).floor() as i32);
+        // The surface the loaded collision has too, so the outline does not change where
+        // the rays leave the loaded cells.
+        let surface = land.entry(g).or_insert_with(|| {
+            let ids = fnv_world::land_surface::land_ids(g, |n| grid.get(&n).and_then(|c| d.index.cells.get(c)).and_then(|c| c.land));
+            fnv_world::land_surface::load_surface(d.lo, d.schema, &ids, crate::smooth_terrain::spec())
+        });
+        surface.as_ref()?.height_at(x - g.0 as f32 * super::model::CELL, y - g.1 as f32 * super::model::CELL)
+    };
+    let player_key = phys.player.as_ref().map(|c| c.key());
+    phys.world.update_queries();
+    let q = phys.world.queries();
+    let mut filter = fnv_phys::Filter { exclude_layers: fnv_phys::layers::character_ignores().union(fnv_phys::layers::actor_volumes()), no_dynamic: true, ..Default::default() };
+    filter.exclude.extend(player_key);
+    let started = std::time::Instant::now();
+    while !o.done() && started.elapsed() < budget {
+        o.advance(batch, |p, reach| q.ray(p, [0.0, 0.0, -1.0], reach, &filter).map(|h| h.point[2]).or_else(|| ground(p[0], p[1])));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

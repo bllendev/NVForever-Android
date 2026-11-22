@@ -6,10 +6,23 @@
 //! wears that picture on `pipboyscreen:0` through a copy of the shape's own material
 //! (`pipboy_arm::menus_material`). This file does the same thing with a different
 //! picture and no menus at all: a copy of the shape's own material whose base texture is
-//! the map picture the load order already owns for the worldspace the player is in, and
-//! whose UV transform is the window nvf-play's [`window`] computes — the player's place
-//! in the middle of the screen, the way they face up it. No render target, no second
-//! camera, no readback, and no shared NIF or texture asset is touched.
+//! the one picture this file lays out ([`CANVAS`] texels square, written in place at the
+//! live view's own rate), the player's place in the middle of it and the way they face up
+//! it. No render target, no second camera, no readback, and no shared NIF or texture
+//! asset is touched.
+//!
+//! What goes under the player's mark is one of two bases, whichever nvf-play's sample
+//! names ([`nvf_play::wrist_arm::Shown`]):
+//!
+//! - the Local Map's own outline of the place round the player, laid out on the processor
+//!   by `nvf_play::wrist_local` (one byte a sample) and taken as it is, as the paused
+//!   Local Map page draws the very same picture; or
+//! - the map picture the load order owns for the worldspace, read once and decoded here,
+//!   at the paused World Map page's own strength ([`WORLD_GAIN`]).
+//!
+//! Either way the window into it is the one nvf-play's [`window`] computes from the
+//! sample, and the picture is laid out again only when the window, the player's facing or
+//! the base itself changed.
 //!
 //! Ownership, each frame:
 //!
@@ -39,7 +52,7 @@ use nvf_assets::{GameData, NifMaterial};
 use nvf_play::pipboy::device_screen::SCREEN_TINT;
 use nvf_play::pipboy::transition::ScreenLook;
 use nvf_play::wrist_arm::{WristBody, WristLive};
-use nvf_play::wrist_live::{window, Window, HALF_WINDOW};
+use nvf_play::wrist_live::{window, LocalPic, Window};
 
 pub struct WristScreenPlugin;
 
@@ -64,13 +77,26 @@ struct Worn {
     /// Its own copy of the material, and the material it was made from.
     copy: Option<(Handle<NifMaterial>, Handle<NifMaterial>)>,
     /// The map the worldspace owns: the file it was read from, its size, and its texels
-    /// on the processor.
+    /// on the processor. Not read at all while the base is the local outline.
     source: Option<(String, [u32; 2], std::sync::Arc<Vec<u8>>)>,
     /// The picture the live view lays out and the screen wears.
     picture: Option<Handle<Image>>,
-    /// What was last laid out, so the work is done only when the view moved.
+    /// What was last laid out, so the work is done only when the view moved: the window,
+    /// the way the player faces, and the outline it was laid out from (held, so the same
+    /// texels are never mistaken for another picture at the same address).
     window: Option<(Window, [f32; 2])>,
-    said: bool,
+    base: Option<LocalPic>,
+    /// The picture the log line last named.
+    said: Option<String>,
+}
+
+/// Whether these are the same base: the same outline, or the worldspace's own picture
+/// both times (which the window itself then tells apart).
+fn same_base(now: Option<&LocalPic>, was: Option<&LocalPic>) -> bool {
+    match (now, was) {
+        (Some(a), Some(b)) => a.is(b),
+        (a, b) => a.is_none() == b.is_none(),
+    }
 }
 
 /// Up on a north-up map ([`window`]'s facing for a picture that does not turn).
@@ -133,7 +159,7 @@ fn wear_map(
                     m.0 = own;
                 }
             }
-            (worn.screen, worn.said) = (None, false);
+            (worn.screen, worn.said) = (None, None);
         }
     }
     let (Some(shown), Some((e, current))) = (want, screen) else { return };
@@ -141,32 +167,47 @@ fn wear_map(
     if shown.key.screen != e.to_bits() {
         return;
     }
-    let path = nvf_play::interface::own_texture(&shown.texture);
-    if worn.source.as_ref().is_none_or(|(p, ..)| *p != path) {
-        let Some(data) = data.as_deref() else { return };
-        // The map's own texels, on the processor: the live picture is laid out from them
-        // (`compose`), and the picture itself never goes to the GPU as it stands.
-        worn.source = read_picture(&path, data).map(|(size, rgba)| (path.clone(), size, rgba));
-        worn.window = None;
-        if worn.source.is_none() {
-            warn!("wrist: {path} could not be read for the live map");
-            return;
+    // The base: the local outline nvf-play laid out, or else the worldspace's own picture
+    // read from the load order and decoded once.
+    let name = match &shown.local {
+        Some(_) => shown.texture.clone(),
+        None => {
+            let path = nvf_play::interface::own_texture(&shown.texture);
+            if worn.source.as_ref().is_none_or(|(p, ..)| *p != path) {
+                let Some(data) = data.as_deref() else { return };
+                // The map's own texels, on the processor: the live picture is laid out
+                // from them (`compose`), and the picture itself never goes to the GPU as
+                // it stands.
+                worn.source = read_picture(&path, data).map(|(size, rgba)| (path.clone(), size, rgba));
+                worn.window = None;
+                if worn.source.is_none() {
+                    warn!("wrist: {path} could not be read for the live map");
+                    return;
+                }
+            }
+            path
         }
-    }
-    let Some((_, size, rgba)) = worn.source.clone() else { return };
+    };
     let picture = worn.picture.get_or_insert_with(|| images.add(blank())).clone();
     // The material the shape wears for itself: taken once, before the copy goes on.
     let own = worn.screen.as_ref().map_or(current, |(_, own)| own.clone());
     // North up, as the paused page's map is: the player's own mark turns instead
     // (`compose`), which is what a map on a wrist reads like.
-    let win = window(shown.uv, NORTH, HALF_WINDOW, 1.0);
-    if worn.window != Some((win, shown.forward)) {
+    let win = window(shown.uv, NORTH, shown.half, 1.0);
+    if worn.window != Some((win, shown.forward)) || !same_base(shown.local.as_ref(), worn.base.as_ref()) {
+        let made = match &shown.local {
+            // The outline's own: one byte a sample, drawn at full as the paused Local Map
+            // page draws the very same picture.
+            Some(pic) => Some(Pic { size: pic.size, rgba: &pic.alpha, stride: 1, gain: 1.0 }),
+            None => worn.source.as_ref().map(|(_, size, rgba)| Pic { size: *size, rgba, stride: 4, gain: WORLD_GAIN }),
+        };
+        let Some(base) = made else { return };
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
-        compose(&mut out, CANVAS, &Pic { size, rgba: &rgba, gain: WORLD_GAIN }, win, shown.forward);
+        compose(&mut out, CANVAS, &base, win, shown.forward);
         if let Some(mut live) = images.get_mut(&picture) {
             live.data = Some(out);
         }
-        worn.window = Some((win, shown.forward));
+        (worn.window, worn.base) = (Some((win, shown.forward)), shown.local.clone());
     }
     if worn.copy.as_ref().is_none_or(|(_, source)| *source != own) {
         let base = materials.get(&own).cloned().unwrap_or_default();
@@ -182,9 +223,9 @@ fn wear_map(
     if worn.screen.is_none() {
         worn.screen = Some((e, own));
     }
-    if !worn.said {
-        info!("wrist: the live World Map is on the arm's screen ({path})");
-        worn.said = true;
+    if worn.said.as_ref() != Some(&name) {
+        info!("wrist: the live map is on the arm's screen ({name})");
+        worn.said = Some(name);
     }
 }
 
@@ -205,13 +246,18 @@ const MARK_SHARE: f32 = 0.07;
 /// Where the compass letters sit, as a share of the picture from its middle.
 const LETTER_RING: f32 = 0.37;
 
-/// A picture to read texels from (rows of RGBA, top row first).
+/// A picture to read texels from (rows top first): the worldspace's own, four bytes a
+/// texel, or the local outline's, one.
 pub struct Pic<'a> {
     pub size: [u32; 2],
     pub rgba: &'a [u8],
+    /// Bytes a texel: 4 for a picture the load order owns, 1 for the outline's own (how
+    /// brightly each sample is drawn).
+    pub stride: usize,
     /// How brightly this picture is drawn under the marks, as the paused Pip-Boy draws the
     /// very same thing: the worldspace's own picture at the map's alpha
-    /// (`pipboy::data::MAP_ALPHA`), where the marks are at full ([`map_ink`]).
+    /// (`pipboy::data::MAP_ALPHA`), the outline at full, where the marks are at full
+    /// ([`map_ink`]).
     pub gain: f32,
 }
 
@@ -220,11 +266,16 @@ impl Pic<'_> {
     /// outside a usable picture.
     fn at(&self, uv: [f32; 2]) -> [u8; 3] {
         let (w, h) = (self.size[0].max(1), self.size[1].max(1));
+        let stride = self.stride.max(1);
         let x = ((uv[0] * w as f32) as i64).clamp(0, w as i64 - 1) as usize;
         let y = ((uv[1] * h as f32) as i64).clamp(0, h as i64 - 1) as usize;
-        let i = (y * w as usize + x) * 4;
+        let i = (y * w as usize + x) * stride;
         let gain = if self.gain.is_finite() { self.gain.clamp(0.0, 1.0) } else { 1.0 };
-        let texel = self.rgba.get(i..i + 3).map_or([0, 0, 0], |p| [p[0], p[1], p[2]]);
+        let texel = match self.rgba.get(i..i + stride.min(3)) {
+            Some([v]) => [*v; 3],
+            Some([r, g, b, ..]) => [*r, *g, *b],
+            _ => [0, 0, 0],
+        };
         texel.map(|c| (f32::from(c) * gain) as u8)
     }
 }
@@ -410,7 +461,7 @@ mod tests {
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
         let map = grey();
         let win = window([0.5; 2], NORTH, 0.1, 1.0);
-        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, gain: WORLD_GAIN }, win, facing);
+        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, facing);
         out
     }
 
@@ -488,7 +539,7 @@ mod tests {
         }
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
         let win = window([0.5; 2], NORTH, 0.25, 1.0);
-        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, gain: WORLD_GAIN }, win, NORTH);
+        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, NORTH);
         // Clear of the compass letters and the mark in the middle.
         let top = out[((CANVAS / 4 * CANVAS + CANVAS / 4) * 4) as usize];
         let bottom = out[((CANVAS * 3 / 4 * CANVAS + CANVAS / 4) * 4) as usize];
@@ -513,6 +564,30 @@ mod tests {
         nvf_play::interface::set_pipboy_rgb(was);
     }
 
+    /// The local outline's picture is one byte a sample, laid out at full strength as the
+    /// paused Local Map page draws the very same thing, and the marks go over it.
+    #[test]
+    fn the_local_outlines_own_texels_are_laid_out_as_they_are() {
+        // Two halves, a faint floor and the bright edge the producer draws walls in.
+        let (w, h) = (16usize, 16usize);
+        let alpha: Vec<u8> = (0..w * h).map(|i| if i / w < 8 { 200 } else { 20 }).collect();
+        let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
+        let win = window([0.5; 2], NORTH, 0.25, 1.0);
+        compose(&mut out, CANVAS, &Pic { size: [w as u32, h as u32], rgba: &alpha, stride: 1, gain: 1.0 }, win, NORTH);
+        let top = out[((CANVAS / 4 * CANVAS + CANVAS / 4) * 4) as usize];
+        let bottom = out[((CANVAS * 3 / 4 * CANVAS + CANVAS / 4) * 4) as usize];
+        assert_eq!((top, bottom), (200, 20), "the samples are drawn as they are, north up");
+        // Grey: the material's own ink gives it its colour.
+        let i = ((CANVAS / 4 * CANVAS + CANVAS / 4) * 4) as usize;
+        assert_eq!(&out[i..i + 4], &[200, 200, 200, 255]);
+        assert_eq!(brightest(&out, [0.5, 0.5], 0.05), MARK, "the player's mark is still the brightest");
+        // The same texels are the same base; another picture of the same bytes is not.
+        let pic = |a: &[u8]| LocalPic { alpha: std::sync::Arc::new(a.to_vec()), size: [w as u32, h as u32] };
+        let (a, b) = (pic(&alpha), pic(&alpha));
+        assert!(same_base(Some(&a), Some(&a.clone())) && !same_base(Some(&a), Some(&b)));
+        assert!(same_base(None, None) && !same_base(Some(&a), None));
+    }
+
     /// The regression the behaviour notes call for: whatever the live view wears, the
     /// screen is asked for only while the arm is held, so a yield gives the shape, the
     /// lit copy and the glow straight back to `pipboy_arm::show_screen`.
@@ -523,6 +598,8 @@ mod tests {
             texture: "map.dds".to_string(),
             uv: [0.5; 2],
             forward: NORTH,
+            half: nvf_play::wrist_live::HALF_WINDOW,
+            local: None,
         };
         let held = nvf_play::wrist_arm::WristLive::held_for_test(true, Some(shown.clone()));
         let let_go = nvf_play::wrist_arm::WristLive::held_for_test(false, Some(shown));

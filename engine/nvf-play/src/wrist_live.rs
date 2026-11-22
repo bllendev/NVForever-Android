@@ -157,14 +157,51 @@ impl Play {
     }
 }
 
-/// A worldspace's map picture and its projection, as the live view needs them.
+/// A picture laid out on the processor rather than one the load order owns: the Local
+/// Map's outline of the place round the player ([`crate::wrist_local`]), one byte a sample
+/// (how brightly it is drawn), rows from the north. Behind an `Arc`, so a sample costs no
+/// copy and the screen's owner holds it for as long as it shows it.
+#[derive(Clone, Debug)]
+pub struct LocalPic {
+    pub alpha: std::sync::Arc<Vec<u8>>,
+    pub size: [u32; 2],
+}
+
+impl LocalPic {
+    /// Whether it is a picture at all: a size with samples enough behind it.
+    pub fn usable(&self) -> bool {
+        let n = (self.size[0] as usize).checked_mul(self.size[1] as usize);
+        n.is_some_and(|n| n > 0 && self.alpha.len() >= n)
+    }
+
+    /// The same texels, not merely equal ones: what the screen's owner compares to tell
+    /// whether the picture it laid out is still the one to show (equality would compare
+    /// every sample, every frame).
+    pub fn is(&self, other: &LocalPic) -> bool {
+        std::sync::Arc::ptr_eq(&self.alpha, &other.alpha)
+    }
+}
+
+/// A map picture and its projection, as the live view needs them.
 /// `nvf-play`'s `pipboy::data::model::WorldMap` implements it with the projection the
-/// paused World Map page already uses; the live view adds no map maths of its own.
+/// paused World Map page already uses, and [`crate::wrist_local::Ready`] with the Local
+/// Map's own outline of the place; the live view adds no map maths of its own.
 pub trait MapPicture {
-    /// The picture as the interface names it (under `textures\`).
+    /// The picture as the interface names it (under `textures\`), or a picture laid out
+    /// here by its own name ([`MapPicture::local`]).
     fn map_texture(&self) -> &str;
     /// Where a position in this worldspace falls on the picture, in texture coordinates.
     fn map_uv(&self, x: f32, y: f32) -> [f32; 2];
+    /// The share of the picture from the middle to an edge the wrist shows: a slice of a
+    /// worldspace's own picture ([`HALF_WINDOW`]), or the window a closer picture was
+    /// made for.
+    fn half_window(&self) -> f32 {
+        HALF_WINDOW
+    }
+    /// The texels when the picture is laid out here; `None` for one the load order owns.
+    fn local(&self) -> Option<&LocalPic> {
+        None
+    }
 }
 
 /// Where the player is, for one sample: their feet in game space (x east, y north) and
@@ -178,9 +215,14 @@ pub struct Spot<'a> {
 impl<'a> Spot<'a> {
     fn draw(self, key: Key) -> Option<Draw<'a>> {
         let texture = self.map.map_texture();
-        // A broken or unloaded record, or a position the physics left as NaN: draw nothing
-        // rather than a picture of nowhere.
-        if texture.is_empty() || !self.heading.is_finite() || !self.feet.iter().all(|v| v.is_finite()) {
+        let local = self.map.local();
+        // A broken or unloaded record, an outline with no samples behind it, or a position
+        // the physics left as NaN: draw nothing rather than a picture of nowhere.
+        let picture = match local {
+            Some(pic) => pic.usable(),
+            None => !texture.is_empty(),
+        };
+        if !picture || !self.heading.is_finite() || !self.feet.iter().all(|v| v.is_finite()) {
             return None;
         }
         let uv = self.map.map_uv(self.feet[0], self.feet[1]);
@@ -190,18 +232,34 @@ impl<'a> Spot<'a> {
         // Clockwise from north on a picture whose y runs down, so the arrow points the way
         // the player faces.
         let (sin, cos) = self.heading.sin_cos();
-        Some(Draw { key, texture, uv, forward: [sin, -cos] })
+        Some(Draw { key, texture, uv, forward: [sin, -cos], half: self.map.half_window(), local })
     }
 }
 
-/// What to put on the arm's screen: the owned picture, the player's place on it, and the
-/// way they face.
-#[derive(Debug, PartialEq)]
+/// What to put on the arm's screen: the picture, the player's place on it, the way they
+/// face, and how much of the picture the screen shows.
+#[derive(Debug)]
 pub struct Draw<'a> {
     pub key: Key,
     pub texture: &'a str,
     pub uv: [f32; 2],
     pub forward: [f32; 2],
+    /// [`MapPicture::half_window`]: the share of the picture from the middle to an edge.
+    pub half: f32,
+    /// The texels when the picture was laid out here ([`MapPicture::local`]).
+    pub local: Option<&'a LocalPic>,
+}
+
+impl PartialEq for Draw<'_> {
+    /// The same request: the same place on the same picture, the outline's by its texels
+    /// rather than by every sample of them ([`LocalPic::is`]).
+    fn eq(&self, other: &Self) -> bool {
+        (self.key, self.texture, self.uv, self.forward, self.half) == (other.key, other.texture, other.uv, other.forward, other.half)
+            && match (self.local, other.local) {
+                (Some(a), Some(b)) => a.is(b),
+                (a, b) => a.is_none() == b.is_none(),
+            }
+    }
 }
 
 /// One frame's requests, in the order the caller applies them.
@@ -556,6 +614,46 @@ mod tests {
         let w = window(uv, [0.0, -1.0], half, extent);
         assert!(about(w.at([extent, extent / 2.0]), [uv[0] + half, uv[1]]));
         assert!(about(w.at([extent / 2.0, extent]), [uv[0], uv[1] + half]));
+    }
+
+    /// A picture laid out here (the Local Map's outline) is shown like any other: its own
+    /// window, its own projection, and the same rules about what cannot be drawn.
+    #[test]
+    fn a_picture_laid_out_here_carries_its_own_window() {
+        struct Close(LocalPic);
+        impl MapPicture for Close {
+            fn map_texture(&self) -> &str {
+                "the local map's outline"
+            }
+            fn map_uv(&self, x: f32, y: f32) -> [f32; 2] {
+                [0.5 + x / (4.0 * CELL), 0.5 - y / (4.0 * CELL)]
+            }
+            fn half_window(&self) -> f32 {
+                0.26
+            }
+            fn local(&self) -> Option<&LocalPic> {
+                Some(&self.0)
+            }
+        }
+        let pic = |size: [u32; 2], n: usize| LocalPic { alpha: std::sync::Arc::new(vec![7; n]), size };
+        let close = Close(pic([8, 8], 64));
+        let mut live = Live::default();
+        let drawn = live.step(t(0), true, true, &play(), || Some(Spot { map: &close, feet: [0.0, 0.0], heading: 0.0 })).draw.unwrap();
+        assert_eq!((drawn.uv, drawn.half), ([0.5, 0.5], 0.26));
+        assert!(drawn.local.is_some_and(|p| p.is(&close.0)), "the texels are the ones the picture was laid out in");
+        // The whole picture at once is the default, as a worldspace's own picture is.
+        let map = Patch("synthetic-owned-map.dds");
+        let whole = live.step(t(100), true, false, &play(), || at(&map, 0.0, 0.0, 0.0)).draw.unwrap();
+        assert_eq!((whole.half, whole.local.is_none()), (HALF_WINDOW, true));
+        // Too few samples for its size: nothing is drawn rather than a picture of nowhere.
+        for short in [pic([8, 8], 63), pic([0, 8], 64), pic([8, 0], 64)] {
+            assert!(!short.usable());
+            let starved = Close(short);
+            let mut live = Live::default();
+            assert!(live.step(t(0), true, true, &play(), || Some(Spot { map: &starved, feet: [0.0, 0.0], heading: 0.0 })).draw.is_none());
+        }
+        // Two pictures of the same samples are not the same picture.
+        assert!(!pic([8, 8], 64).is(&pic([8, 8], 64)));
     }
 
     #[test]
