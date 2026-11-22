@@ -1336,7 +1336,7 @@ pub struct ControlInput<'w, 's> {
     pub kill_cam: Option<Res<'w, crate::kill_cam::KillCam>>,
     /// The live wrist map holds the hands' controls while its arm is up
     /// (`crate::wrist_arm`).
-    pub wrist: Option<Res<'w, crate::wrist_arm::WristLive>>,
+    pub wrist: Option<Res<'w, crate::wrist_arm::WristHolding>>,
     /// A text field has the keyboard ([`KeyboardCapture`]).
     pub capture: Option<Res<'w, KeyboardCapture>>,
 }
@@ -1390,7 +1390,7 @@ impl ControlInput<'_, '_> {
         // attack cannot fire or draw through it and the sights cannot zoom. Read from the
         // glance's open intent every frame and never latched: the frame the arm goes down
         // they are all back (`crate::wrist_arm::holds`).
-        if crate::wrist_arm::holds(c) && self.wrist.as_ref().is_some_and(|w| w.live() && w.open.is_some()) {
+        if crate::wrist_arm::holds(c) && self.wrist.as_ref().is_some_and(|w| w.0) {
             return true;
         }
         self.kill_cam.as_ref().is_some_and(|k| k.active())

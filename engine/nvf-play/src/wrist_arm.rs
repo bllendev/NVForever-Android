@@ -127,6 +127,20 @@ pub const GLANCE_SECONDS: f32 = 0.25;
 /// The Pip-Boy's key is not among them: it is the glance's own key, and the menus must
 /// stay reachable. Derived from [`WristLive::open`] every frame and never latched, so the
 /// controls are back the frame the arm goes down.
+/// Whether the glance holds the hands' controls this frame: published by [`publish_holding`]
+/// from [`WristLive`] right after [`decide`], and read by [`crate::bindings::ControlInput`].
+/// A resource of its own so `decide` (which writes `WristLive` and reads `ControlInput`)
+/// does not borrow `WristLive` twice (Bevy error B0002).
+#[derive(Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WristHolding(pub bool);
+
+fn publish_holding(wrist: Res<WristLive>, mut holding: ResMut<WristHolding>) {
+    let now = wrist.live() && wrist.open.is_some();
+    if holding.0 != now {
+        holding.0 = now;
+    }
+}
+
 pub fn holds(c: Control) -> bool {
     matches!(c, Control::Use | Control::Block | Control::ReadyItem | Control::Activate | Control::Vats)
 }
@@ -220,9 +234,13 @@ impl Plugin for WristLivePlugin {
         }
         app.insert_resource(WristLive { forced, ..default() })
             .init_resource::<WristBody>()
+            .init_resource::<WristHolding>()
             // After the Menu Mode key's hold is read, which is what asks for the glance
             // (`crate::flashlight::menu_key`).
-            .add_systems(Update, decide.in_set(crate::PlaySet::Input).after(crate::flashlight::menu_key));
+            .add_systems(
+                Update,
+                (decide, publish_holding).chain().in_set(crate::PlaySet::Input).after(crate::flashlight::menu_key),
+            );
         let row = |key, label, note| Setting { key, group: crate::pause::GROUP_MENUS, label, note, switches: "", get: |_| false, set: |_, _| {}, slider: None };
         add_setting(
             app,
@@ -257,7 +275,7 @@ fn decide(
     mut wrist: ResMut<WristLive>,
     body: Res<WristBody>,
     state: Res<State<crate::PlayState>>,
-    input: ControlInput,
+    mut input: ControlInput,
     (pip, control, active): (Option<Res<crate::pipboy::PipBoy>>, Option<Res<PlayerControl>>, Option<Res<crate::menu::ActiveMenu>>),
     (location, world, player): (Option<Res<crate::Location>>, Option<Res<crate::PlayWorld>>, Option<Res<Player>>),
     (vats, kill_cam): (Option<Res<crate::vats_mode::VatsMode>>, Option<Res<crate::kill_cam::KillCam>>),
@@ -266,6 +284,9 @@ fn decide(
     mut was_menus: Local<bool>,
     mut latched: Local<bool>,
 ) {
+    // The glance reads the hands' controls as pressed, not as it holds them: an attack
+    // pressed while the arm is up must still be seen, to end the glance.
+    input.wrist = None;
     if !wrist.live() {
         // Off: it asks for nothing, and anything it asked for before is withdrawn. The
         // Pip-Boy's key is left entirely alone, so the menus behave as they always did.
@@ -366,6 +387,18 @@ fn decide(
 
 #[cfg(test)]
 mod tests {
+    /// Every wrist system's parameters must initialize: a doubled borrow (B0002) panics the
+    /// game before its first frame, which no logic test notices.
+    #[test]
+    fn systems_initialize_without_conflicting_access() {
+        use bevy::ecs::system::System;
+        let mut world = World::new();
+        let mut d = IntoSystem::into_system(super::decide);
+        d.initialize(&mut world);
+        let mut p = IntoSystem::into_system(super::publish_holding);
+        p.initialize(&mut world);
+    }
+
     use super::*;
 
     fn key() -> Key {
