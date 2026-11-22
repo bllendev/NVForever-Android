@@ -19,7 +19,7 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
 
     <application
-        android:label="NVForever Retroid"
+        android:label="NVForever Odin Debug"
         android:allowBackup="false"
         android:isGame="true"
         android:appCategory="game"
