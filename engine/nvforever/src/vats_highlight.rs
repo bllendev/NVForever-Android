@@ -193,6 +193,12 @@ pub struct VatsHighlightPlugin;
 
 impl Plugin for VatsHighlightPlugin {
     fn build(&self, app: &mut App) {
+        if std::env::var_os(crate::NO_VATS_OUTLINE_ENV).is_some() {
+            // A player's crash test (the Android launcher's switch): no outline, so no mask
+            // camera; V.A.T.S. targeting and its menu are untouched.
+            info!("vats highlight: off ({}, crash test)", crate::NO_VATS_OUTLINE_ENV);
+            return;
+        }
         bevy::asset::embedded_asset!(app, "vats_mask.wesl");
         app.add_plugins(bevy::ui_render::UiMaterialPlugin::<PartMaskMaterial>::default())
             .init_resource::<Glow>()

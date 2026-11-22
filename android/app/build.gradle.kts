@@ -35,6 +35,18 @@ android {
     }
 
     sourceSets["main"].jniLibs.srcDir("src/main/jniLibs")
+
+    // The debug APK also carries the Khronos Vulkan validation layer when CI put it in
+    // jniLibs (the launcher's "Crash test: Vulkan validation (slow)"; docs/odin-debug.md).
+    // Android's Vulkan loader finds a layer as a *file* in the app's native library folder,
+    // so the libraries are extracted at install time (extractNativeLibs=true) instead of
+    // being mapped straight out of the APK, which would leave that folder empty. Nothing
+    // about the game changes; both libraries are 16 KB-page aligned either way.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------

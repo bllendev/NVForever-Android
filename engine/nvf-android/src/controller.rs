@@ -13,18 +13,50 @@ pub struct ControlsConfig {
     pub controller: bool,
     pub touch: bool,
     pub diagnostics: bool,
+    /// Crash test (launcher switch): the Pip-Boy's hidden warm-up during a load is skipped.
+    pub skip_pipboy_warmup: bool,
+    /// Crash test (launcher switch): no V.A.T.S. part-outline mask camera.
+    pub skip_vats_outline: bool,
+    /// Crash test (launcher switch): the run asks for the Khronos Vulkan validation layer
+    /// (`nvforever::VULKAN_VALIDATION_ENV`, much slower).
+    pub vulkan_validation: bool,
+    /// Crash test (launcher switch): with the layer on, its synchronization validation too
+    /// (`nvforever::VULKAN_VALIDATION_DEEP_ENV`).
+    pub vulkan_validation_sync: bool,
+    /// Crash test (launcher switch): with the layer on, GPU-assisted validation
+    /// (instrumented shaders) too. Slower again, and a load may not finish.
+    pub vulkan_validation_gpuav: bool,
+    /// Crash test (launcher switch): every render-graph node writes a GPU marker before and
+    /// after its work (`nvforever::GPU_BREADCRUMBS_ENV`), so a lost device names the node.
+    pub gpu_breadcrumbs: bool,
 }
-impl ControlsConfig {
-    pub fn load() -> Self {
-        let mut config = Self {
+impl Default for ControlsConfig {
+    /// What a phone without the file gets: touch controls, nothing else.
+    fn default() -> Self {
+        Self {
             controller: false,
             touch: true,
             diagnostics: false,
-        };
-        for line in crate::paths::option_file("nvforever-controls.txt")
-            .unwrap_or_default()
-            .lines()
-        {
+            skip_pipboy_warmup: false,
+            skip_vats_outline: false,
+            vulkan_validation: false,
+            vulkan_validation_sync: false,
+            vulkan_validation_gpuav: false,
+            gpu_breadcrumbs: false,
+        }
+    }
+}
+impl ControlsConfig {
+    pub fn load() -> Self {
+        Self::parse(&crate::paths::option_file("nvforever-controls.txt").unwrap_or_default())
+    }
+
+    /// `nvforever-controls.txt`: one `name value` a line, the launcher's switches
+    /// (LauncherActivity.java `saveControls`). A line that is blank, a comment, short of a
+    /// value, or carries anything but true/false/1/0 leaves its setting as it was.
+    fn parse(text: &str) -> Self {
+        let mut config = Self::default();
+        for line in text.lines() {
             let mut words = line.split_whitespace();
             let (Some(name), Some(value)) = (words.next(), words.next()) else {
                 continue;
@@ -38,6 +70,12 @@ impl ControlsConfig {
                 "controller" => config.controller = enabled,
                 "touch" => config.touch = enabled,
                 "diagnostics" => config.diagnostics = enabled,
+                "skip-pipboy-warmup" => config.skip_pipboy_warmup = enabled,
+                "skip-vats-outline" => config.skip_vats_outline = enabled,
+                "vulkan-validation" => config.vulkan_validation = enabled,
+                "vulkan-validation-sync" => config.vulkan_validation_sync = enabled,
+                "vulkan-validation-gpuav" => config.vulkan_validation_gpuav = enabled,
+                "gpu-breadcrumbs" => config.gpu_breadcrumbs = enabled,
                 _ => {}
             }
         }
@@ -203,6 +241,33 @@ mod tests {
     };
 
     #[test]
+    fn controls_file_defaults_and_every_switch_it_can_set() {
+        let empty = ControlsConfig::parse("");
+        assert!(!empty.controller && empty.touch && !empty.diagnostics);
+        assert!(!empty.skip_pipboy_warmup && !empty.skip_vats_outline && !empty.vulkan_validation);
+        assert!(!empty.vulkan_validation_sync && !empty.vulkan_validation_gpuav && !empty.gpu_breadcrumbs);
+
+        // What the launcher writes with every switch on (the comment line is ignored).
+        let on = ControlsConfig::parse(
+            "# Applied when starting the game\ncontroller true\ntouch true\nskip-pipboy-warmup true\nskip-vats-outline true\nvulkan-validation true\n\
+             vulkan-validation-sync true\nvulkan-validation-gpuav true\ngpu-breadcrumbs true\n",
+        );
+        assert!(on.controller && on.touch && on.skip_pipboy_warmup && on.skip_vats_outline && on.vulkan_validation);
+        assert!(on.vulkan_validation_sync && on.vulkan_validation_gpuav && on.gpu_breadcrumbs);
+
+        // The off state is the file saying false, not only the file being absent.
+        let off = ControlsConfig::parse("controller false\ntouch false\nvulkan-validation false\nvulkan-validation-sync false\nvulkan-validation-gpuav false\ngpu-breadcrumbs false\n");
+        assert!(!off.controller && !off.touch && !off.vulkan_validation);
+        assert!(!off.vulkan_validation_sync && !off.vulkan_validation_gpuav && !off.gpu_breadcrumbs);
+
+        // 1/0 are accepted too; an unknown name, a missing or unreadable value and a blank
+        // line change nothing.
+        let mixed = ControlsConfig::parse("vulkan-validation 1\ndiagnostics 0\n\nnonsense true\nvulkan-validation\ntouch maybe\n");
+        assert!(mixed.vulkan_validation && !mixed.diagnostics && mixed.touch);
+        assert!(!ControlsConfig::parse("vulkan-validation 0").vulkan_validation);
+    }
+
+    #[test]
     fn legacy_migration_is_idempotent_and_preserves_custom_bindings() {
         let mut bindings = Bindings::game_defaults();
         assert!(!migrate_legacy_dpad(&mut bindings));
@@ -241,11 +306,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(InputPlugin)
             .insert_resource(Bindings::game_defaults())
-            .insert_resource(ControlsConfig {
-                controller: true,
-                touch: false,
-                diagnostics: false,
-            })
+            .insert_resource(ControlsConfig { controller: true, touch: false, ..default() })
             .add_plugins(ControllerPlugin)
             .add_plugins(nvf_play::pad::PadPlugin)
             .insert_resource(State::new(nvf_play::PlayState::Menu));

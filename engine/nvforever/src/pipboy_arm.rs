@@ -119,7 +119,11 @@ impl Plugin for PipBoyArmPlugin {
             .add_systems(Update, (follow_pointer.in_set(nvf_play::pipboy::PointerSet).before(nvf_play::pipboy::flat_pointer), (show_screen, crate::pipboy_controls::turn_controls.run_if(|pip: Res<PipBoy>| pip.warming.is_none())).chain().after(follow_pointer).after(nvf_play::player::BodySet).before(nvf_play::PlaySet::Ui)))
             .add_systems(Update, measure_raise.in_set(nvf_play::pipboy::WarmSet))
             .add_systems(Update, requeue_raise.after(show_screen).before(nvf_play::PlaySet::Ui));
-        if std::env::var_os("NVF_PLAY_TEST_NO_PIPBOY_WARM").is_none() {
+        if std::env::var_os(crate::NO_PIPBOY_WARM_ENV).is_some() {
+            // A player's crash test (the Android launcher's switch), not a test aid: the run
+            // stays attended (`nvf_play::test_aid::drives_run` does not see this name).
+            info!("pipboy: hidden warm-up disabled ({}, crash test)", crate::NO_PIPBOY_WARM_ENV);
+        } else if std::env::var_os("NVF_PLAY_TEST_NO_PIPBOY_WARM").is_none() {
             app.add_systems(Update, warm_up.in_set(nvf_play::pipboy::WarmSet).before(measure_raise));
         } else {
             info!("test aid NVF_PLAY_TEST_NO_PIPBOY_WARM: hidden warm-up disabled");

@@ -18,6 +18,7 @@ mod logcat;
 mod paths;
 mod probe;
 mod touch;
+mod validation;
 
 /// The entry point. On Android `#[bevy_main]` generates the `android_main` function the
 /// activity calls (and stores the `AndroidApp` handle in `bevy::android::ANDROID_APP`).
@@ -39,6 +40,27 @@ pub fn main() {
         return diag::run(why);
     }
     paths::set_environment(&home, &schemas);
+    // Crash test from the launcher: no hidden Pip-Boy warm-up while a load is covered
+    // (`nvforever::pipboy_arm`). Set before the engine starts any thread.
+    let tests = controller::ControlsConfig::load();
+    if tests.skip_pipboy_warmup {
+        std::env::set_var(nvforever::NO_PIPBOY_WARM_ENV, "1");
+    }
+    if tests.skip_vats_outline {
+        std::env::set_var(nvforever::NO_VATS_OUTLINE_ENV, "1");
+    }
+    // Crash test from the launcher: every render-graph node writes a GPU marker before and
+    // after its work, so a lost device names the node the GPU hung in
+    // (`nvforever::gpu_recorder::breadcrumbs`).
+    if tests.gpu_breadcrumbs {
+        std::env::set_var(nvforever::GPU_BREADCRUMBS_ENV, "1");
+    }
+    // Crash test from the launcher: the Khronos Vulkan validation layer, loaded before the
+    // renderer's instance is made (validation.rs). Much slower; off unless asked for. The two
+    // deeper checks are its own switches, and mean nothing without it.
+    if tests.vulkan_validation {
+        validation::enable(validation::deep_words(tests.vulkan_validation_sync, tests.vulkan_validation_gpuav));
+    }
     let line = match paths::restart_line(&paths::internal_files()) {
         Ok(Some(line)) => line,
         Ok(None) => paths::command_line(&data, &schemas, &paths::user_args()),
