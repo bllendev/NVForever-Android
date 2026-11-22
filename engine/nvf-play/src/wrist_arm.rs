@@ -846,9 +846,14 @@ pub(crate) fn decide(
             }
         };
     let exterior = location.as_deref().filter(|l| l.interior.is_none()).map(|l| l.world);
+    // Where the player is, for the outline producer: the cell indoors, the worldspace out.
+    let place = location.as_deref().map(|l| (l.interior, l.world));
     let play = Play {
         session: wrist.session,
-        world: exterior,
+        // Indoors the binding is the interior cell's own FormID: the glance opens there
+        // too (its STATUS and QUESTS pages need no map at all, and the MAP page shows the
+        // room plan the Local Map page draws) [design: the owner, 2026-11-21].
+        world: place.map(|(interior, world)| interior.unwrap_or(world)),
         screen: body.screen,
         playing: *state.get() == crate::PlayState::Playing,
         first_person: body.first_person_drawn,
@@ -880,8 +885,8 @@ pub(crate) fn decide(
     // The base: the Local Map's outline of the place round the player where
     // `crate::wrist_local` has one that covers the window, else the picture the load
     // order owns for the worldspace, as the paused World Map page shows it.
-    let outline = match (exterior, here, wrist.map_style) {
-        (Some(w), Some((feet, _)), Style::Local) => close.as_deref().and_then(|c| c.ready.as_ref()).filter(|r| r.covers(None, w, feet)),
+    let outline = match (place, here, wrist.map_style) {
+        (Some((interior, world)), Some((feet, _)), Style::Local) => close.as_deref().and_then(|c| c.ready.as_ref()).filter(|r| r.covers(interior, world, feet)),
         _ => None,
     };
     // The key is the press: the rules open on its edge and close the moment it is
@@ -1069,6 +1074,18 @@ mod tests {
         assert!(!wrist.wants_local());
         wrist.page = Page::Map;
         assert!(wrist.wants_local());
+    }
+
+    /// Indoors the glance opens too: the binding is the interior cell's own FormID, and
+    /// walking through a door re-keys it as travel between worldspaces does.
+    #[test]
+    fn the_glance_opens_indoors_on_the_cells_own_binding() {
+        let outside = Play { session: 1, world: Some(0x3C), screen: Some(7), playing: true, first_person: true, ..Play::default() };
+        assert_eq!(outside.eligible().map(|k| k.world), Ok(0x3C));
+        let inside = Play { world: Some(0x0001_6BD2), ..outside };
+        assert_eq!(inside.eligible().map(|k| k.world), Ok(0x0001_6BD2));
+        // Nowhere at all (no location read yet) still keeps it shut.
+        assert_eq!(Play { world: None, ..outside }.eligible(), Err(crate::wrist_live::Block::NoPlace));
     }
 
     /// The STATUS and QUESTS pages dress the screen on the arm alone; the MAP page waits

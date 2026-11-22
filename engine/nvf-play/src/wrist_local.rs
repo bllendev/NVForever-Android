@@ -38,15 +38,30 @@ pub const BUDGET: Duration = Duration::from_micros(1500);
 pub const BATCH: usize = 64;
 
 /// The window the grid is asked for, in the canvas units and the scale the producer
-/// measures them in: outdoors anything smaller clamps to the 5×5 cells round the player
+/// measures them in. Outdoors anything smaller clamps to the 5×5 cells round the player
 /// (`outline`'s own span), which is all the physics world and the landscape can answer
-/// for, so the wrist asks for the least and takes that square.
-const ASK: (Vec2, f32) = (Vec2::ONE, 1.0);
+/// for. Indoors there is no such floor, and the rays are cast four times as close
+/// (`outline::INTERIOR_STEP`), so the wrist asks for the room it shows and no more:
+/// a bigger ask would cast tens of thousands of rays for a picture of empty space.
+fn ask(interior: bool) -> (Vec2, f32) {
+    (Vec2::splat(shown_span(interior)), 1.0)
+}
 
-/// What the screen shows of the grid, across, in game units [design: about 175 m, a few
-/// hundred feet of road either way, close enough that a building reads as a building at
-/// the glass's size and far enough that the way ahead is on it].
+/// What the screen shows of the grid, across, in game units [design: about 175 m
+/// outdoors, a few hundred feet of road either way, close enough that a building reads as
+/// a building at the glass's size and far enough that the way ahead is on it; indoors the
+/// rooms about the player, which is as much as an interior holds].
 pub const LOCAL_SPAN: f32 = 12288.0;
+pub const LOCAL_SPAN_INDOORS: f32 = 2048.0;
+
+/// The one of the two this place shows.
+pub fn shown_span(interior: bool) -> f32 {
+    if interior {
+        LOCAL_SPAN_INDOORS
+    } else {
+        LOCAL_SPAN
+    }
+}
 
 /// The feet's height the grid is anchored to, in steps of this many game units: the
 /// producer makes a new grid for every step of its own (another floor, indoors), and
@@ -112,7 +127,7 @@ impl MapPicture for Ready {
     }
 
     fn half_window(&self) -> f32 {
-        (LOCAL_SPAN / 2.0 / self.span()[0].max(1.0)).clamp(0.01, 0.5)
+        (shown_span(self.key.0.is_some()) / 2.0 / self.span()[0].max(1.0)).clamp(0.01, 0.5)
     }
 
     fn local(&self) -> Option<&LocalPic> {
@@ -145,26 +160,43 @@ pub(crate) fn build(
         return;
     }
     let (Some(loc), Some(player), Some(data)) = (location.as_deref(), player.as_deref(), world.as_deref()) else { return };
-    // Indoors the producer draws a plan of the rooms; the glance itself does not open
-    // there yet (`wrist_live::Block::Interior`), so nothing is cast for one.
-    if loc.interior.is_some() {
-        return;
-    }
+    // Indoors the producer draws a plan of the rooms, keyed by the cell: the glance opens
+    // there too [design: the owner, 2026-11-21].
     let feet = [player.feet[0], player.feet[1]];
     if !feet.iter().all(|v| v.is_finite()) || !player.feet[2].is_finite() {
         return;
     }
-    let anchor = (player.feet[2] / FEET_STEP).round() * FEET_STEP;
-    let key = Outline::key_for(None, loc.world, feet, anchor, ASK.0, ASK.1);
+    // Outdoors the rays start thousands of units over the player, so the height the grid
+    // is anchored to is coarse and walking up a hill does not throw a finished grid away.
+    // Indoors they start a little over their head (`outline::INTERIOR_START`): the anchor
+    // is the floor they are on, or the rays would begin under it and land on nothing. The
+    // producer's own key still snaps it to a floor at a time (`outline::FEET_SNAP`).
+    let anchor = match loc.interior {
+        Some(_) => player.feet[2],
+        None => (player.feet[2] / FEET_STEP).round() * FEET_STEP,
+    };
+    let ask = ask(loc.interior.is_some());
+    let key = Outline::key_for(loc.interior, loc.world, feet, anchor, ask.0, ask.1);
     let m = &mut *map;
     if m.grid.as_ref().is_none_or(|g| g.key != key) {
-        m.grid = Some(Outline::new(None, loc.world, feet, anchor, ASK.0, ASK.1));
+        m.grid = Some(Outline::new(loc.interior, loc.world, feet, anchor, ask.0, ask.1));
         m.land.clear();
     }
     let Some(grid) = m.grid.as_mut().filter(|g| !g.done()) else { return };
     let Some(mut phys) = phys else { return };
-    outline::cast(grid, &mut phys, &mut m.land, Some((data.0, loc.world)), BUDGET, BATCH);
+    // The landscape under the rays is the worldspace's; an interior has none.
+    let land_of = loc.interior.is_none().then_some((data.0, loc.world));
+    outline::cast(grid, &mut phys, &mut m.land, land_of, BUDGET, BATCH);
     if !grid.done() {
+        return;
+    }
+    if grid.hits() == 0 {
+        // Nothing at all under the rays: the place's collision was not loaded yet when
+        // the grid was begun (an interior the player has only just walked into). Throw it
+        // away and begin again rather than keep a picture of nowhere and never look
+        // again — the next grid costs no more of a frame than this one did, and only
+        // while the glance is up [design].
+        m.grid = None;
         return;
     }
     let size = [grid.size[0] as u32, grid.size[1] as u32];
@@ -209,7 +241,7 @@ mod tests {
     #[test]
     fn a_picture_is_used_only_while_it_covers_the_window() {
         // The grid the producer makes outdoors: the 5×5 cells round the player.
-        let grid = Outline::new(None, 7, [0.0, 0.0], 0.0, ASK.0, ASK.1);
+        let grid = Outline::new(None, 7, [0.0, 0.0], 0.0, ask(false).0, ask(false).1);
         assert!(grid.size[0] as f32 * grid.step >= 5.0 * 4096.0, "{:?} by {}", grid.size, grid.step);
         assert_eq!(grid.size[0], grid.size[1], "a square grid, so one window fits both ways");
         let r = ready(grid.origin, grid.size, grid.step);
@@ -227,11 +259,30 @@ mod tests {
         assert!(!empty.covers(None, 7, [0.0, 0.0]));
     }
 
+    /// Indoors the grid is the room about the player, cast at the producer's close step:
+    /// small enough that the glance makes it in a second or two, where a grid of the
+    /// outdoor span would be tens of thousands of rays for a picture of empty space.
+    #[test]
+    fn an_interiors_grid_is_the_room_about_the_player_and_not_the_whole_outdoors() {
+        let inside = Outline::new(Some(3), 7, [0.0, 0.0], 0.0, ask(true).0, ask(true).1);
+        let outside = Outline::new(None, 7, [0.0, 0.0], 0.0, ask(false).0, ask(false).1);
+        let rays = |o: &Outline| o.size[0] * o.size[1];
+        assert!(rays(&inside) > 1, "a grid of one sample is no picture: {:?}", inside.size);
+        assert!(rays(&inside) < rays(&outside), "{:?} indoors against {:?} out", inside.size, outside.size);
+        // Close enough that a doorway reads: the producer's own interior step.
+        assert_eq!(inside.step, outline::INTERIOR_STEP);
+        assert!(inside.size[0] as f32 * inside.step >= LOCAL_SPAN_INDOORS, "{:?} covers less than the window", inside.size);
+        // And the window it shows is the whole of what it covers at the most.
+        let r = Ready { key: inside.key, origin: inside.origin, step: inside.step, size: inside.size, pic: LocalPic { alpha: std::sync::Arc::new(vec![0; rays(&inside)]), size: [inside.size[0] as u32, inside.size[1] as u32] } };
+        assert!(r.half_window() > 0.01 && r.half_window() <= 0.5);
+        assert!((r.half_window() * 2.0 * r.span()[0] - LOCAL_SPAN_INDOORS).abs() < inside.step);
+    }
+
     /// The anchor the grid is made for: walking about keeps it, walking off it makes
     /// another, and an ordinary hill does not.
     #[test]
     fn walking_keeps_the_grid_and_a_hill_does_not_throw_it_away() {
-        let key = |x: f32, y: f32, z: f32| Outline::key_for(None, 7, [x, y], (z / FEET_STEP).round() * FEET_STEP, ASK.0, ASK.1);
+        let key = |x: f32, y: f32, z: f32| Outline::key_for(None, 7, [x, y], (z / FEET_STEP).round() * FEET_STEP, ask(false).0, ask(false).1);
         let here = key(0.0, 0.0, 0.0);
         assert_eq!(here, key(2000.0, -2000.0, 0.0), "a few hundred metres of walking keeps it");
         // The producer's own height step would make a new grid for every 128 units; the

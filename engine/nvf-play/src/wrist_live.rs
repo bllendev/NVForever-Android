@@ -19,8 +19,9 @@
 //!
 //! - Off by default, and closed when off. The mode opens only on a rising edge of its own
 //!   action, in a frame that is eligible ([`Play::eligible`]): ordinary first-person play,
-//!   the sights down (a drawn weapon is allowed), an exterior worldspace, and an arm with
-//!   a screen shape of its own. The same press closes it again.
+//!   the sights down (a drawn weapon is allowed), somewhere to bind to (the exterior
+//!   worldspace, or the interior cell indoors), and an arm with a screen shape of its own.
+//!   The same press closes it again.
 //! - Every frame is judged afresh and fails closed. An ineligible frame (a menu, the
 //!   normal Pip-Boy, a conversation, a loading screen, V.A.T.S., suppressed input, third
 //!   person, a rig or session that was replaced) gives the pose and the screen back and
@@ -30,10 +31,10 @@
 //!   live view costs a bounded amount of work and never catches up on missed frames.
 //! - A sample that cannot be used (no picture, a position off the picture, a heading or a
 //!   position that is not a number) clears what was drawn rather than leaving a stale one.
-//! - Travel to another worldspace in the same session clears at once but keeps the
-//!   player's open intent, so the wrist goes blank until the next allowed sample instead
-//!   of showing the map of where they were. Crossing a cell boundary inside one
-//!   worldspace changes nothing.
+//! - Travel to another place in the same session (another worldspace, or through a door
+//!   into an interior) clears at once but keeps the player's open intent, so the wrist
+//!   goes blank until the next allowed sample instead of showing the map of where they
+//!   were. Crossing a cell boundary inside one worldspace changes nothing.
 //! - The caller applies [`Frame::clear`] before [`Frame::draw`], and restores only what
 //!   [`Live::owns`] still says is its own.
 
@@ -68,7 +69,7 @@ pub enum Block {
     Acting,
     Taken,
     Cooldown,
-    Interior,
+    NoPlace,
     NoScreen,
 }
 
@@ -86,7 +87,7 @@ impl Block {
             Block::Acting => "the player is doing something with their hands",
             Block::Taken => "another owner holds the arm",
             Block::Cooldown => "the Pip-Boy has only just gone down",
-            Block::Interior => "there is no exterior worldspace here",
+            Block::NoPlace => "there is nowhere to show yet",
             Block::NoScreen => "the arm's model has no screen shape",
         }
     }
@@ -98,8 +99,10 @@ impl Block {
 pub struct Play {
     /// The loaded game's generation (see [`Key::session`]).
     pub session: u64,
-    /// The exterior worldspace the player is in (nvf-play `pipboy::data`'s location),
-    /// `None` in an interior.
+    /// The place the glance binds to: the exterior worldspace the player is in
+    /// (nvf-play `pipboy::data`'s location), or the interior cell indoors. Both are
+    /// FormIDs of the load order and never the same number, so walking through a door
+    /// re-keys the binding either way. `None` only while there is no location at all.
     pub world: Option<u32>,
     /// The first-person arm's screen shape (`PipBoyPart::Screen`, nvforever
     /// `pipboy_arm.rs`), as a number that changes when the rig is rebuilt; `None` when
@@ -156,7 +159,7 @@ impl Play {
         if let Some(why) = blockers.into_iter().find_map(|(blocked, why)| blocked.then_some(why)) {
             return Err(why);
         }
-        Ok(Key { session: self.session, world: self.world.ok_or(Block::Interior)?, screen: self.screen.ok_or(Block::NoScreen)? })
+        Ok(Key { session: self.session, world: self.world.ok_or(Block::NoPlace)?, screen: self.screen.ok_or(Block::NoScreen)? })
     }
 }
 
@@ -500,7 +503,7 @@ mod tests {
             (Play { first_person: false, ..play() }, Block::NotFirstPerson),
             (Play { aiming: true, ..play() }, Block::Aiming),
             (Play { taken: true, ..play() }, Block::Taken),
-            (Play { world: None, ..play() }, Block::Interior),
+            (Play { world: None, ..play() }, Block::NoPlace),
             (Play { screen: None, ..play() }, Block::NoScreen),
         ];
         for (blocked, why) in cases {
