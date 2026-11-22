@@ -43,6 +43,7 @@ use crate::pipboy::data::model::WorldMap;
 use crate::pipboy::data::read;
 use crate::player::Player;
 use crate::wrist_live::{Key, Live, LocalPic, MapPicture, Mark, MarkKind, Play, Spot, MARKS_MOST};
+use crate::wrist_page::{Facts, Page, Row};
 use bevy::prelude::*;
 use std::time::Duration;
 
@@ -130,6 +131,35 @@ impl Position {
     }
 }
 
+/// Which way up the glance holds its map [design: the owner, 2026-11-21].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Turning {
+    /// Heading up: the picture turns under the player, their own mark points up the
+    /// glass, and the compass letters orbit the inside of the glass. What a map held in
+    /// the hand reads like.
+    #[default]
+    WithMe,
+    /// North stays at the top of the glass and the player's mark turns on it, as the
+    /// paused World Map page draws it.
+    NorthUp,
+}
+
+impl Turning {
+    pub const NAMES: [&'static str; 2] = ["With me", "North up"];
+
+    pub fn name(self) -> &'static str {
+        Turning::NAMES[self as usize]
+    }
+
+    pub fn of(name: &str) -> Option<Turning> {
+        match name {
+            "With me" => Some(Turning::WithMe),
+            "North up" => Some(Turning::NorthUp),
+            _ => None,
+        }
+    }
+}
+
 /// How much of the map the glance's screen shows [design: the owner, 2026-11-21].
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Zoom {
@@ -188,6 +218,8 @@ pub struct WristLive {
     pub map_position: Position,
     /// How much of the map its screen shows ([`Zoom`]), the settings page's fifth row.
     pub map_zoom: Zoom,
+    /// Which way up it holds the map ([`Turning`]), the settings page's sixth row.
+    pub map_rotate: Turning,
     /// The player is asking for the glance now: the key is held past its moment
     /// ([`GLANCE_SECONDS`]) in Hold style, or the latch is on in Toggle style.
     pub asked: bool,
@@ -196,6 +228,15 @@ pub struct WristLive {
     /// The picture its screen should show, until the next sample replaces it. `None`
     /// means give the screen back.
     pub shown: Option<Shown>,
+    /// Which page its screen shows ([`Page`]), remembered between glances and across a
+    /// load: the player comes back to the page they left [design: the owner, 2026-11-21].
+    pub page: Page,
+    /// The rows that page draws ([`crate::wrist_page::rows`]), laid out at the glance's
+    /// own rate and never per frame; empty on the MAP page, whose picture is the glass.
+    pub rows: Vec<Row>,
+    /// Seconds since the page was flipped, for the screen's flicker; `None` once the
+    /// flicker is over or the glance is down.
+    pub flick: Option<f32>,
     /// Bumped whenever the loaded game is replaced, so no binding outlives its session.
     session: u64,
     /// Seconds the arm has been coming up, as [`crate::pipboy::HOLD_SECONDS`] measures
@@ -275,6 +316,17 @@ fn take_zoom(world: &mut World, name: &str) -> bool {
     }
 }
 
+/// Take which way up the glance holds its map by name; false: not one of ours.
+fn take_rotate(world: &mut World, name: &str) -> bool {
+    match Turning::of(name) {
+        Some(t) => {
+            world.resource_mut::<WristLive>().map_rotate = t;
+            true
+        }
+        None => false,
+    }
+}
+
 /// Take where the glance holds the device by name; false: not one of ours.
 fn take_position(world: &mut World, name: &str) -> bool {
     match Position::of(name) {
@@ -315,8 +367,29 @@ fn set_glance_holds(on: bool) {
 /// The Pip-Boy's key is not among them: it is the glance's own key, and the menus must
 /// stay reachable. Derived from [`WristLive::open`] every frame and never latched, so the
 /// controls are back the frame the arm goes down.
+/// The D-Pad's own two controls are among them while the arm is up: left and right turn
+/// the device's pages instead of working the hotkey and the ammo swap they are bound to
+/// ([`page_turn`]). Taken the same way as the rest — derived from the open intent, never
+/// latched — so the frame the arm goes down they do their own job again.
 pub fn holds(c: Control) -> bool {
-    matches!(c, Control::Use | Control::Block | Control::ReadyItem | Control::Activate | Control::Vats)
+    matches!(c, Control::Use | Control::Block | Control::ReadyItem | Control::Activate | Control::Vats | Control::AmmoSwap | Control::Hotkey4)
+}
+
+/// How long the screen flickers after a page is flipped: a scan across the glass and a
+/// dimming, as a screen that has just been switched over [design: the owner's "a quick
+/// screen flicker/scan transition", 2026-11-21].
+pub const FLICK_SECONDS: f32 = 0.33;
+
+/// The page flip the player asked for this frame: the device's own D-Pad left and right
+/// (`GamepadButton::DPadLeft`, `DPadRight`, whatever they are bound to — the glance holds
+/// those controls while it owns the wrist), and the arrow keys for a keyboard, which no
+/// play control uses. Read raw and only on a frame the glance owns the wrist, so nothing
+/// is swallowed while the arm is down [design: the owner, 2026-11-21].
+fn page_turn(input: &ControlInput) -> i32 {
+    let pad = |b: GamepadButton| input.pads.iter().any(|g| g.just_pressed(b));
+    let left = pad(GamepadButton::DPadLeft) || input.keys.just_pressed(KeyCode::ArrowLeft);
+    let right = pad(GamepadButton::DPadRight) || input.keys.just_pressed(KeyCode::ArrowRight);
+    i32::from(right) - i32::from(left)
 }
 
 /// What the player does with their hands: pressed or just pressed, any of these ends the
@@ -384,11 +457,33 @@ impl WristLive {
         self.map_position == Position::Centre
     }
 
-    /// Whether the close picture is wanted now: the glance holds the arm and the player
-    /// chose Local, so [`crate::wrist_local`] casts its rays only for a frame that will
-    /// show them.
+    /// Whether the close picture is wanted now: the glance holds the arm, the player
+    /// chose Local, and the MAP page is the one up, so [`crate::wrist_local`] casts its
+    /// rays only for a frame that will show them.
     pub fn wants_local(&self) -> bool {
-        self.live() && self.open.is_some() && self.map_style == Style::Local
+        self.live() && self.open.is_some() && self.map_style == Style::Local && self.page == Page::Map
+    }
+
+    /// The screen the glance dresses this frame, whatever page it shows: the MAP page
+    /// needs a sample of the world to show anything, the other two need only the arm.
+    /// `None` means give the shape its own material back.
+    pub fn screen_key(&self) -> Option<Key> {
+        match self.page {
+            Page::Map => self.wants().map(|s| s.key),
+            _ => self.open.filter(|_| self.live()),
+        }
+    }
+
+    /// Whether the map turns with the player (`wrist-map-rotate`), for nvforever's
+    /// screen: the picture turns under a mark that points up the glass, and the compass
+    /// letters orbit its edge.
+    pub fn rotate_map(&self) -> bool {
+        self.map_rotate == Turning::WithMe
+    }
+
+    /// How far the flicker of a page flip has run, 0 to 1; `None` while none runs.
+    pub fn flicker(&self) -> Option<f32> {
+        self.flick.map(|t| (t / FLICK_SECONDS).clamp(0.0, 1.0))
     }
 }
 
@@ -441,11 +536,17 @@ impl Plugin for WristLivePlugin {
         if held_up {
             info!("wrist: the glance is held up (NVF_WRIST_FORCE_RAISE=1, a developer's switch for screenshots), as though its key were never let go");
         }
-        app.insert_resource(WristLive { forced, held_up, ..default() })
+        // A developer's switch for a screenshot of one page: not a row, and named nowhere
+        // a player looks.
+        let page = std::env::var_os("NVF_WRIST_PAGE").and_then(|v| Page::of(&v.to_string_lossy())).unwrap_or_default();
+        if page != Page::default() {
+            info!("wrist: the glance opens on the {} page (NVF_WRIST_PAGE, a developer's switch)", page.name());
+        }
+        app.insert_resource(WristLive { forced, held_up, page, ..default() })
             .init_resource::<WristBody>()
             // After the Menu Mode key's hold is read, which is what asks for the glance
             // (`crate::flashlight::menu_key`).
-            .add_systems(Update, (decide, foley).chain().in_set(crate::PlaySet::Input).after(crate::flashlight::menu_key));
+            .add_systems(Update, (decide, read_pages, foley).chain().in_set(crate::PlaySet::Input).after(crate::flashlight::menu_key));
         let row = |key, label, note| Setting { key, group: crate::pause::GROUP_MENUS, label, note, switches: "", get: |_| false, set: |_, _| {}, slider: None };
         add_setting(
             app,
@@ -505,6 +606,18 @@ impl Plugin for WristLivePlugin {
         );
         add_choice_list(
             app,
+            row("wrist-map-rotate", "Glance map turns", "With me: the map turns as you do, your mark points up the glass and N, E, S and W ride round its edge. North up: north stays at the top and your mark turns."),
+            ChoiceList {
+                names: |_| Turning::NAMES.iter().map(|n| n.to_string()).collect(),
+                chosen: |w| w.resource::<WristLive>().map_rotate.name().to_string(),
+                pick: |w, n| take_rotate(w, n),
+                save: |w| w.resource::<WristLive>().map_rotate.name().to_string(),
+                load: |w, t| take_rotate(w, t),
+                ask_keep: false,
+            },
+        );
+        add_choice_list(
+            app,
             row("wrist-map-zoom", "Glance zoom", "Near: the place about you, a couple of hundred metres across the glass. Far: twice as much of the map either way."),
             ChoiceList {
                 names: |_| Zoom::NAMES.iter().map(|n| n.to_string()).collect(),
@@ -529,15 +642,26 @@ pub(crate) fn foley(
     sfx: Option<Res<crate::sfx::Sfx>>,
     mut out: MessageWriter<crate::sfx::PlaySound>,
     mut was: Local<bool>,
+    mut page: Local<Page>,
     mut names: Local<Option<std::collections::HashMap<String, fnv_sim::FormId>>>,
 ) {
     let up = wrist.live() && wrist.open.is_some();
-    if up == *was {
+    // The device's own tab click when the page is flipped while the arm is up
+    // (`crate::pipboy::sounds`' `UIPipBoyTab`, the very record the menus' tabs play).
+    let turned = up && *was && *page != wrist.page;
+    *page = wrist.page;
+    if up == *was && !turned {
         return;
     }
     *was = up;
     let Some(sfx) = sfx else { return };
-    let name = if up { "UIPipBoyAccessUp" } else { "UIPipBoyAccessDown" };
+    let name = if turned {
+        "UIPipBoyTab"
+    } else if up {
+        "UIPipBoyAccessUp"
+    } else {
+        "UIPipBoyAccessDown"
+    };
     let sounds = names.get_or_insert_with(|| sfx.forms.sounds.iter().filter_map(|(&id, s)| s.edid.clone().map(|e| (e, id))).collect());
     match sounds.get(name) {
         Some(&sound) => {
@@ -546,6 +670,117 @@ pub(crate) fn foley(
         }
         None => warn!("wrist: no SOUN {name} for the glance"),
     }
+}
+
+/// The STATUS and QUESTS pages' facts, read off state the engine already keeps, at the
+/// live view's own rate ([`crate::wrist_live::INTERVAL`], ten times a second) and only
+/// while the glance holds the arm on a page that needs them. A closed wrist, the MAP page
+/// and the mode off all read nothing at all.
+///
+/// The numbers are the HUD's own ([`crate::hud::HudView`]'s shares against the whole the
+/// game keeps), so the page and the meters it replaces can never differ.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn read_pages(
+    time: Res<Time<Real>>,
+    mut wrist: ResMut<WristLive>,
+    view: Option<Res<crate::hud::HudView>>,
+    limbs: Option<Res<crate::combat::PlayerLimbs>>,
+    data: Option<Res<crate::pipboy::data::DataState>>,
+    script: Option<ResMut<crate::script::ScriptState>>,
+    mut last: Local<Option<Duration>>,
+    mut was: Local<Page>,
+    mut facts: Local<Facts>,
+) {
+    if !wrist.live() || wrist.open.is_none() || wrist.page == Page::Map {
+        if !wrist.rows.is_empty() {
+            wrist.rows.clear();
+        }
+        // The next page that wants them reads at once rather than waiting its turn.
+        *last = None;
+        return;
+    }
+    let now = time.elapsed();
+    let flipped = *was != wrist.page;
+    *was = wrist.page;
+    if !flipped && wrist.rows.is_empty() {
+        // The first frame of a page: read now.
+    } else if !flipped && last.is_some_and(|t| now.saturating_sub(t) < crate::wrist_live::INTERVAL) {
+        return;
+    }
+    *last = Some(now);
+    *facts = read_facts(script, view.as_deref(), limbs.as_deref(), data.as_deref());
+    let rows = crate::wrist_page::rows(wrist.page, &facts);
+    if wrist.rows != rows {
+        wrist.rows = rows;
+    }
+}
+
+/// The player's condition codes, as [`crate::wrist_page::LIMBS`] lists them.
+const LIMB_CODES: [u16; 6] = [25, 26, 27, 28, 29, 30];
+
+/// Total rads, the actor value the Pip-Boy's own dial shows (`pipboy_controls.rs`).
+const RADS: u16 = 54;
+
+/// What the pages show, from what the engine already keeps. Nothing is simulated here and
+/// nothing is written: the game is borrowed mutably only because reading an actor value
+/// is a mutable call.
+fn read_facts(
+    script: Option<ResMut<crate::script::ScriptState>>,
+    view: Option<&crate::hud::HudView>,
+    limbs: Option<&crate::combat::PlayerLimbs>,
+    data: Option<&crate::pipboy::data::DataState>,
+) -> Facts {
+    let mut f = Facts::default();
+    if let Some(v) = view {
+        f.condition = v.weapon.condition;
+        f.ammo = v.weapon.ammo;
+        f.ammo_label.clone_from(&v.weapon.abbrev);
+    }
+    if let Some(l) = limbs {
+        f.crippled = LIMB_CODES.map(|c| l.crippled(c));
+    }
+    let Some(mut script) = script else { return f };
+    // Reading needs the game mutably; nothing is changed.
+    let Some(rt) = script.bypass_change_detection().rt.as_mut() else { return f };
+    let me = fnv_sim::FormId::PLAYER_REF;
+    let temporary = |g: &fnv_game::Game, code| fnv_game::functions::actor_value_temporary(g, me, code);
+    // The whole each bar is a share of, as `crate::hud::gather` measures it: an aid item's
+    // temporary modifier raises the maximum with the value.
+    let health_whole = rt.game.max_health(me) + temporary(&rt.game, fnv_game::actor_values::HEALTH);
+    f.health = view.map(|v| ((f64::from(v.health) * health_whole).max(0.0), health_whole));
+    if let Ok([base, modifier, _]) = fnv_game::functions::actor_value_parts(&mut rt.game, me, fnv_game::actor_values::ACTION_POINTS) {
+        let whole = base + modifier + temporary(&rt.game, fnv_game::actor_values::ACTION_POINTS);
+        f.action_points = view.map(|v| ((f64::from(v.action_points) * whole).max(0.0), whole));
+    }
+    if let Ok([base, modifier, damage]) = fnv_game::functions::actor_value_parts(&mut rt.game, me, RADS) {
+        f.rads = Some((base + modifier + temporary(&rt.game, RADS) - damage).max(0.0));
+    }
+    // The active quest and the objective the player is on: the latest one shown and not
+    // done, as the paused DATA page orders them (`pipboy::data::model::sort_objectives`).
+    let Some(quest) = data.and_then(|d| d.active_quest(Some(&rt.game))) else { return f };
+    let id = fnv_sim::FormId(quest);
+    let Some(def) = rt.game.data.quests.get(&id) else { return f };
+    f.quest.clone_from(&def.name);
+    let Some(state) = rt.game.quests.get(&id) else { return f };
+    let mut best: Option<(i32, String)> = None;
+    for (i, o) in &state.objectives {
+        if !o.displayed || o.completed || def.objectives.get(i).is_none() {
+            continue;
+        }
+        if best.as_ref().is_some_and(|(at, _)| at >= i) {
+            continue;
+        }
+        // SetObjectiveText's own words first (`fnv_game::nvse_jip10`), the load order's
+        // otherwise; nothing of the original's screen is transcribed here.
+        if let Some(text) = rt.game.objective_text(id, *i) {
+            let text = rt.game.expand_codes(&text);
+            if !text.trim().is_empty() {
+                best = Some((*i, text.trim().to_string()));
+            }
+        }
+    }
+    f.objective = best.map(|(_, text)| text);
+    f
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -574,7 +809,8 @@ pub(crate) fn decide(
         // Pip-Boy's key is left entirely alone, so the menus behave as they always did.
         if wrist.open.is_some() || wrist.shown.is_some() || wrist.asked || *latched {
             (wrist.open, wrist.shown, wrist.arm, wrist.asked, wrist.live) = (None, None, 0.0, false, Live::default());
-            (*latched, *refused) = (false, false);
+            (wrist.flick, *latched, *refused) = (None, false, false);
+            wrist.rows.clear();
         }
         return;
     }
@@ -681,6 +917,22 @@ pub(crate) fn decide(
     }
     wrist.open = frame.pose;
     wrist.arm = raised(wrist.arm, time.delta_secs(), frame.pose.is_some());
+    // Pages are flipped only while the glance owns the wrist, and the flicker runs itself
+    // out in real time: nothing here is latched, so the arm going down takes both with it.
+    let dt = time.delta_secs();
+    if frame.pose.is_some() {
+        let turn = page_turn(&input);
+        if turn != 0 {
+            wrist.page = wrist.page.step(turn);
+            wrist.flick = Some(0.0);
+            info!("wrist: the glance turned to the {} page", wrist.page.name());
+        } else {
+            wrist.flick = wrist.flick.map(|t| t + dt.max(0.0)).filter(|t| *t < FLICK_SECONDS);
+        }
+    } else if wrist.flick.is_some() || !wrist.rows.is_empty() {
+        wrist.flick = None;
+        wrist.rows.clear();
+    }
     // What the glance holds for the rest of this frame, from its own decision.
     set_glance_holds(frame.pose.is_some());
     // One line on each change, so a log says when the live view held the arm and why it
@@ -797,8 +1049,51 @@ mod tests {
     fn the_glances_systems_have_no_conflicting_parameters() {
         let mut world = World::new();
         let mut schedule = Schedule::default();
-        schedule.add_systems((decide, foley, crate::wrist_local::build).chain());
+        schedule.add_systems((decide, read_pages, foley, crate::wrist_local::build).chain());
         schedule.initialize(&mut world).expect("the schedule builds");
+    }
+
+    /// The D-Pad's two controls are the glance's while the arm is up, so a flip does not
+    /// also swap ammo or fire a hotkey; the moment it is down they are theirs again.
+    #[test]
+    fn the_dpad_turns_the_pages_only_while_the_arm_is_up() {
+        for c in [Control::AmmoSwap, Control::Hotkey4] {
+            assert!(holds(c), "{c:?} turns a page while looking");
+        }
+        // The pages themselves run round and the glance remembers the one it was left on.
+        let mut wrist = WristLive { on: true, open: Some(key()), ..default() };
+        assert_eq!(wrist.page, Page::Map);
+        wrist.page = wrist.page.step(1);
+        assert_eq!(wrist.page, Page::Status);
+        // The close picture is cast for the MAP page alone: a page of letters needs none.
+        assert!(!wrist.wants_local());
+        wrist.page = Page::Map;
+        assert!(wrist.wants_local());
+    }
+
+    /// The STATUS and QUESTS pages dress the screen on the arm alone; the MAP page waits
+    /// for a sample of the world, as it always did.
+    #[test]
+    fn a_page_of_letters_needs_no_sample_of_the_world() {
+        let open = WristLive { on: true, open: Some(key()), ..default() };
+        assert_eq!(open.screen_key(), None, "the MAP page with nothing sampled shows nothing");
+        let with_map = WristLive { on: true, open: Some(key()), shown: Some(shown_for(None)), ..default() };
+        assert_eq!(with_map.screen_key(), Some(key()));
+        let status = WristLive { on: true, open: Some(key()), page: Page::Status, ..default() };
+        assert_eq!(status.screen_key(), Some(key()), "a page of letters dresses the screen at once");
+        // Nothing at all while the arm is down or the mode is off.
+        assert_eq!(WristLive { on: true, page: Page::Status, ..default() }.screen_key(), None);
+        assert_eq!(WristLive { open: Some(key()), page: Page::Status, ..default() }.screen_key(), None);
+    }
+
+    /// The flicker of a page flip runs itself out in real time and is never latched.
+    #[test]
+    fn the_flip_flickers_once_and_runs_out() {
+        let fresh = WristLive { flick: Some(0.0), ..default() };
+        assert_eq!(fresh.flicker(), Some(0.0));
+        assert_eq!(WristLive { flick: Some(FLICK_SECONDS / 2.0), ..default() }.flicker(), Some(0.5));
+        assert_eq!(WristLive { flick: Some(FLICK_SECONDS * 2.0), ..default() }.flicker(), Some(1.0));
+        assert_eq!(WristLive::default().flicker(), None);
     }
 
     /// How much of the map the glance shows is the player's: Near by default (the window

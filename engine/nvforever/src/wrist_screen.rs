@@ -53,6 +53,7 @@ use nvf_play::pipboy::device_screen::SCREEN_TINT;
 use nvf_play::pipboy::transition::ScreenLook;
 use nvf_play::wrist_arm::{WristBody, WristLive};
 use nvf_play::wrist_live::{window, LocalPic, Mark, MarkKind, Window};
+use nvf_play::wrist_page::{Page, Row};
 
 pub struct WristScreenPlugin;
 
@@ -88,6 +89,14 @@ struct Worn {
     window: Option<(Window, [f32; 2])>,
     marks: Vec<Mark>,
     base: Option<LocalPic>,
+    /// The page of letters last laid out and the step of its flicker; `None` while the
+    /// MAP page's picture is on the screen (so turning back to it lays the map out again).
+    page: Option<(Page, u32)>,
+    /// The rows that page was laid out from.
+    rows: Vec<Row>,
+    /// The game's own Pip-Boy font and its letters' texels, read once: the outer `None`
+    /// means it has not been looked for yet, the inner that it could not be read.
+    face: Option<Option<PageFont>>,
     /// The picture the log line last named.
     said: Option<String>,
 }
@@ -148,13 +157,13 @@ fn wear_map(
     mut parts: Query<(Entity, &PipBoyPart, &mut MeshMaterial3d<NifMaterial>)>,
     mut worn: Local<Worn>,
 ) {
-    let want = wrist.as_deref().and_then(|w| w.wants());
+    let want = wrist.as_deref().and_then(|w| w.screen_key());
     let screen = parts.iter().find(|(_, p, _)| **p == PipBoyPart::Screen).map(|(e, _, m)| (e, m.0.clone()));
     // Give the screen back first, so the frame a menu takes it never copies our picture.
     if let Some((e, own)) = worn.screen.clone() {
         let ours = worn.copy.as_ref().map(|c| c.0.clone());
         let still = screen.as_ref().is_some_and(|(s, m)| *s == e && ours.as_ref() == Some(m));
-        let keep = want.is_some_and(|s| s.key.screen == e.to_bits()) && still;
+        let keep = want.is_some_and(|k| k.screen == e.to_bits()) && still;
         if !keep {
             if still {
                 if let Ok((_, _, mut m)) = parts.get_mut(e) {
@@ -164,55 +173,78 @@ fn wear_map(
             (worn.screen, worn.said) = (None, None);
         }
     }
-    let (Some(shown), Some((e, current))) = (want, screen) else { return };
+    let (Some(live), Some(key), Some((e, current))) = (wrist.as_deref(), want, screen) else { return };
     // The body's facts are a frame old: wait until they name the shape that is there now.
-    if shown.key.screen != e.to_bits() {
+    if key.screen != e.to_bits() {
         return;
     }
-    // The base: the local outline nvf-play laid out, or else the worldspace's own picture
-    // read from the load order and decoded once.
-    let name = match &shown.local {
-        Some(_) => shown.texture.clone(),
-        None => {
-            let path = nvf_play::interface::own_texture(&shown.texture);
-            if worn.source.as_ref().is_none_or(|(p, ..)| *p != path) {
-                let Some(data) = data.as_deref() else { return };
-                // The map's own texels, on the processor: the live picture is laid out
-                // from them (`compose`), and the picture itself never goes to the GPU as
-                // it stands.
-                worn.source = read_picture(&path, data).map(|(size, rgba)| (path.clone(), size, rgba));
-                worn.window = None;
-                if worn.source.is_none() {
-                    warn!("wrist: {path} could not be read for the live map");
-                    return;
-                }
-            }
-            path
-        }
-    };
     let picture = worn.picture.get_or_insert_with(|| images.add(blank())).clone();
     // The material the shape wears for itself: taken once, before the copy goes on.
     let own = worn.screen.as_ref().map_or(current, |(_, own)| own.clone());
-    // North up, as the paused page's map is: the player's own mark turns instead
-    // (`compose`), which is what a map on a wrist reads like.
-    let win = window(shown.uv, NORTH, shown.half, 1.0);
-    if worn.window != Some((win, shown.forward)) || worn.marks != shown.marks || !same_base(shown.local.as_ref(), worn.base.as_ref()) {
-        let made = match &shown.local {
-            // The outline's own: one byte a sample, drawn at full as the paused Local Map
-            // page draws the very same picture.
-            Some(pic) => Some(Pic { size: pic.size, rgba: &pic.alpha, stride: 1, gain: 1.0 }),
-            None => worn.source.as_ref().map(|(_, size, rgba)| Pic { size: *size, rgba, stride: 4, gain: WORLD_GAIN }),
+    let name = if live.page == Page::Map {
+        let Some(shown) = live.wants() else { return };
+        // The base: the local outline nvf-play laid out, or else the worldspace's own
+        // picture read from the load order and decoded once.
+        let name = match &shown.local {
+            Some(_) => shown.texture.clone(),
+            None => {
+                let path = nvf_play::interface::own_texture(&shown.texture);
+                if worn.source.as_ref().is_none_or(|(p, ..)| *p != path) {
+                    let Some(data) = data.as_deref() else { return };
+                    // The map's own texels, on the processor: the live picture is laid out
+                    // from them (`compose`), and the picture itself never goes to the GPU
+                    // as it stands.
+                    worn.source = read_picture(&path, data).map(|(size, rgba)| (path.clone(), size, rgba));
+                    worn.window = None;
+                    if worn.source.is_none() {
+                        warn!("wrist: {path} could not be read for the live map");
+                        return;
+                    }
+                }
+                path
+            }
         };
-        let Some(base) = made else { return };
-        let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
-        compose(&mut out, CANVAS, &base, win, shown.forward, &shown.marks);
-        if let Some(mut live) = images.get_mut(&picture) {
-            live.data = Some(out);
+        // The player's Map turns row: With me (the picture turns under a mark that points
+        // up the glass) or North up (the picture stands still and the mark turns).
+        let facing = if live.rotate_map() { shown.forward } else { NORTH };
+        let win = window(shown.uv, facing, shown.half, 1.0);
+        if worn.window != Some((win, shown.forward)) || worn.marks != shown.marks || worn.page.is_some() || !same_base(shown.local.as_ref(), worn.base.as_ref()) {
+            let made = match &shown.local {
+                // The outline's own: one byte a sample, drawn at full as the paused Local
+                // Map page draws the very same picture.
+                Some(pic) => Some(Pic { size: pic.size, rgba: &pic.alpha, stride: 1, gain: 1.0 }),
+                None => worn.source.as_ref().map(|(_, size, rgba)| Pic { size: *size, rgba, stride: 4, gain: WORLD_GAIN }),
+            };
+            let Some(base) = made else { return };
+            let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
+            compose(&mut out, CANVAS, &base, win, shown.forward, &shown.marks, live.rotate_map());
+            if let Some(mut live) = images.get_mut(&picture) {
+                live.data = Some(out);
+            }
+            (worn.window, worn.base, worn.page) = (Some((win, shown.forward)), shown.local.clone(), None);
+            worn.marks.clear();
+            worn.marks.extend_from_slice(&shown.marks);
         }
-        (worn.window, worn.base) = (Some((win, shown.forward)), shown.local.clone());
-        worn.marks.clear();
-        worn.marks.extend_from_slice(&shown.marks);
-    }
+        name
+    } else {
+        // A page of letters: nothing of the world is read for it, and it is laid out
+        // again only when its rows or the flicker's step changed.
+        let step = flick_step(live.flicker());
+        if worn.page != Some((live.page, step)) || worn.rows != live.rows {
+            {
+                let face = worn.face.get_or_insert_with(|| data.as_deref().and_then(page_font)).as_ref();
+                let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
+                compose_page(&mut out, CANVAS, &live.rows, face, live.flicker());
+                if let Some(mut image) = images.get_mut(&picture) {
+                    image.data = Some(out);
+                }
+            }
+            (worn.page, worn.window, worn.base) = (Some((live.page, step)), None, None);
+            worn.rows.clear();
+            worn.rows.extend_from_slice(&live.rows);
+        }
+        live.page.name().to_string()
+    };
     if worn.copy.as_ref().is_none_or(|(_, source)| *source != own) {
         let base = materials.get(&own).cloned().unwrap_or_default();
         let made = materials.add(map_material(&base, picture.clone()));
@@ -317,7 +349,7 @@ const WORLD_GAIN: f32 = nvf_play::pipboy::data::MAP_ALPHA / 255.0;
 /// compass letters over it. North is up, so the letters stand still and the mark turns
 /// ([`facing`] as [`nvf_play::wrist_arm::Shown`] gives it, map space with v southward).
 /// The marks are drawn white: the screen's own ink colours them (`map_ink`).
-pub fn compose(out: &mut [u8], side: u32, map: &Pic, win: Window, facing: [f32; 2], marks: &[Mark]) {
+pub fn compose(out: &mut [u8], side: u32, map: &Pic, win: Window, facing: [f32; 2], marks: &[Mark], rotate: bool) {
     let side = side.max(1);
     for y in 0..side {
         for x in 0..side {
@@ -329,9 +361,29 @@ pub fn compose(out: &mut [u8], side: u32, map: &Pic, win: Window, facing: [f32; 
             }
         }
     }
-    draw_marks(out, side, win, marks);
-    draw_letters(out, side);
-    draw_mark(out, side, facing);
+    // Heading up: the picture itself was turned under the player ([`window`] was given
+    // their facing), so the letters ride round the glass by the way they face and their
+    // own mark points straight up. North up: the letters stand still and the mark turns.
+    let turn = if rotate { heading_of(facing) } else { 0.0 };
+    let arrow = if rotate { NORTH } else { facing };
+    // Every dark pad first, then every mark and letter over them, so one thing's pad
+    // never eats another thing's ink where the two meet at the glass's edge.
+    for pad in [true, false] {
+        draw_marks(out, side, win, marks, pad);
+        draw_letters(out, side, turn, pad);
+        draw_mark(out, side, arrow, pad);
+    }
+}
+
+/// The player's heading in radians, clockwise from north, from the facing
+/// [`nvf_play::wrist_arm::Shown`] carries (map space, v southward).
+fn heading_of(facing: [f32; 2]) -> f32 {
+    let n = (facing[0] * facing[0] + facing[1] * facing[1]).sqrt();
+    if n.is_finite() && n > 1e-6 {
+        facing[0].atan2(-facing[1])
+    } else {
+        0.0
+    }
 }
 
 /// What the map's marks are drawn in: a step under the compass letters, so the player's
@@ -348,7 +400,7 @@ const PIN_SHARE: f32 = 0.035;
 /// inside the window, else a chevron held at the glass's edge pointing the way it lies
 /// [design: the owner, 2026-11-21]. North is up, as the map under them is, so a mark's
 /// place on the canvas is the window taken the other way about ([`Window::of`]).
-fn draw_marks(out: &mut [u8], side: u32, win: Window, marks: &[Mark]) {
+fn draw_marks(out: &mut [u8], side: u32, win: Window, marks: &[Mark], pad: bool) {
     let s = side as f32;
     let r = s * PIN_SHARE;
     // The glass, with room for the mark itself, so nothing is drawn under the device's
@@ -365,6 +417,10 @@ fn draw_marks(out: &mut [u8], side: u32, win: Window, marks: &[Mark]) {
         }
         let held = [at[0].clamp(lo, hi), at[1].clamp(lo, hi)];
         let (ink, size) = if m.kind >= MarkKind::Quest { (MARK, r) } else { (PIN, r * 0.75) };
+        if pad {
+            knock_disc(out, side, held, size * KNOCK_REACH);
+            continue;
+        }
         let away = [at[0] - held[0], at[1] - held[1]];
         if away[0].abs() < 1e-3 && away[1].abs() < 1e-3 {
             diamond(out, side, held, size, ink);
@@ -396,13 +452,17 @@ fn chevron(out: &mut [u8], side: u32, at: [f32; 2], away: [f32; 2], r: f32, ink:
 }
 
 /// The player's own mark: a triangle at the middle, its point the way they face.
-fn draw_mark(out: &mut [u8], side: u32, facing: [f32; 2]) {
+fn draw_mark(out: &mut [u8], side: u32, facing: [f32; 2], pad: bool) {
     let n = (facing[0] * facing[0] + facing[1] * facing[1]).sqrt();
     let [fx, fy] = if n.is_finite() && n > 1e-6 { [facing[0] / n, facing[1] / n] } else { NORTH };
     let mid = side as f32 / 2.0;
     let r = side as f32 * MARK_SHARE;
     // The point, and the two back corners a little either side of the tail.
     let point = [mid + fx * r, mid + fy * r];
+    if pad {
+        knock_disc(out, side, [mid, mid], r * KNOCK_REACH);
+        return;
+    }
     // A long point and a short tail, so which way it points is read at a glance.
     let (bx, by) = (-fx * r * 0.55, -fy * r * 0.55);
     let (sx, sy) = (-fy * r * 0.5, fx * r * 0.5);
@@ -429,11 +489,15 @@ fn fill_triangle(out: &mut [u8], side: u32, a: [f32; 2], b: [f32; 2], c: [f32; 2
 
 /// The compass letters, at the four sides of a north-up picture, every one of them whole
 /// inside the glass ([`letter_ring`]).
-fn draw_letters(out: &mut [u8], side: u32) {
+fn draw_letters(out: &mut [u8], side: u32, turn: f32, pad: bool) {
     let mid = side as f32 / 2.0;
     let [across, down] = letter_ring(side).map(|r| r * side as f32);
-    for (glyph, at) in [(N_GLYPH, [mid, mid - down]), (E_GLYPH, [mid + across, mid]), (S_GLYPH, [mid, mid + down]), (W_GLYPH, [mid - across, mid])] {
-        draw_glyph(out, side, glyph, at);
+    let turn = if turn.is_finite() { turn } else { 0.0 };
+    for (i, glyph) in [N_GLYPH, E_GLYPH, S_GLYPH, W_GLYPH].into_iter().enumerate() {
+        // The letter's own bearing, less the way the player faces: north stands at the
+        // top of a north-up picture and swings round the glass as they turn.
+        let (sin, cos) = (i as f32 * std::f32::consts::FRAC_PI_2 - turn).sin_cos();
+        draw_glyph(out, side, glyph, [mid + across * sin, mid - down * cos], pad);
     }
 }
 
@@ -445,11 +509,17 @@ const S_GLYPH: [u8; 7] = [0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 
 const W_GLYPH: [u8; 7] = [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001];
 
 /// A letter, drawn about `at`, as many texels a dot as the picture can spare.
-fn draw_glyph(out: &mut [u8], side: u32, glyph: [u8; 7], at: [f32; 2]) {
+fn draw_glyph(out: &mut [u8], side: u32, glyph: [u8; 7], at: [f32; 2], pad: bool) {
     let dot = glyph_dot(side);
     let (w, h) = (5 * dot, 7 * dot);
     let x0 = at[0] as i64 - (w / 2) as i64;
     let y0 = at[1] as i64 - (h / 2) as i64;
+    // The dark pad under it, so a letter reads over the outline's own bright walls
+    // [design: the owner, 2026-11-21].
+    if pad {
+        knock_box(out, side, x0 - i64::from(dot), y0 - i64::from(dot), w + 2 * dot, h + 2 * dot);
+        return;
+    }
     for (row, bits) in glyph.iter().enumerate() {
         for col in 0..5u32 {
             if bits & (1 << (4 - col)) == 0 {
@@ -471,6 +541,317 @@ fn put(out: &mut [u8], side: u32, x: u32, y: u32, ink: u8) {
     let i = ((y * side + x) * 4) as usize;
     if let Some(p) = out.get_mut(i..i + 4) {
         p.copy_from_slice(&[ink, ink, ink, 255]);
+    }
+}
+
+/// The brightest of what is there and `ink`: a letter of a page drawn over its ground.
+fn put_over(out: &mut [u8], side: u32, x: u32, y: u32, ink: u8) {
+    let i = ((y * side + x) * 4) as usize;
+    if let Some(p) = out.get_mut(i..i + 4) {
+        let v = p[0].max(ink);
+        p.copy_from_slice(&[v, v, v, 255]);
+    }
+}
+
+/// How much of what is under a letter or a mark is left showing, and how far past the
+/// thing itself its dark pad reaches [design: the owner, 2026-11-21 — the letters and the
+/// marks must read over the outline's own bright walls].
+const KNOCKOUT: f32 = 0.22;
+const KNOCK_REACH: f32 = 1.35;
+
+/// Take the picture down to [`KNOCKOUT`] of itself in a box, so what is drawn over it
+/// reads. Nothing is added: a dark place stays dark, and the map is never brightened.
+fn knock_box(out: &mut [u8], side: u32, x0: i64, y0: i64, w: u32, h: u32) {
+    for y in y0.max(0)..(y0 + i64::from(h)).min(i64::from(side)) {
+        for x in x0.max(0)..(x0 + i64::from(w)).min(i64::from(side)) {
+            knock_at(out, side, x as u32, y as u32);
+        }
+    }
+}
+
+/// The same in a disc about `at`.
+fn knock_disc(out: &mut [u8], side: u32, at: [f32; 2], r: f32) {
+    if !at.iter().all(|v| v.is_finite()) || !r.is_finite() || r <= 0.0 {
+        return;
+    }
+    let (x0, x1) = ((at[0] - r).floor().max(0.0) as u32, (at[0] + r).ceil().clamp(0.0, side as f32) as u32);
+    let (y0, y1) = ((at[1] - r).floor().max(0.0) as u32, (at[1] + r).ceil().clamp(0.0, side as f32) as u32);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let (dx, dy) = (x as f32 + 0.5 - at[0], y as f32 + 0.5 - at[1]);
+            if dx * dx + dy * dy <= r * r {
+                knock_at(out, side, x, y);
+            }
+        }
+    }
+}
+
+fn knock_at(out: &mut [u8], side: u32, x: u32, y: u32) {
+    let i = ((y * side + x) * 4) as usize;
+    if let Some(p) = out.get_mut(i..i + 3) {
+        for c in p {
+            *c = (f32::from(*c) * KNOCKOUT) as u8;
+        }
+    }
+}
+
+// ---- the pages of letters (STATUS, QUESTS) ---------------------------------------------
+
+/// The font the pages are set in: the game's own plain monofonto, the one the menus and
+/// the HUD already load (`nvf_play::interface::FONT_FILES`, the install's own file for it
+/// where its INI names one). No new asset is shipped for this [design].
+const PAGE_FONT: &str = "textures\\fonts\\monofonto_large.fnt";
+
+/// The game's Pip-Boy font and its letters' texels on the processor, read once a run: the
+/// pages are rasterised here, where the map is, so the screen stays one picture and no
+/// second render target or readback is needed.
+pub struct PageFont {
+    pub font: fnv_font::Font,
+    /// The letters' picture: its size, and one byte a texel (how brightly it is drawn).
+    pub size: [u32; 2],
+    pub ink: Vec<u8>,
+}
+
+impl PageFont {
+    fn at(&self, x: usize, y: usize) -> u8 {
+        let w = self.size[0].max(1) as usize;
+        self.ink.get(y * w + x).copied().unwrap_or(0)
+    }
+}
+
+/// How brightly each texel of a letters' picture is drawn: its own colour through its
+/// cover, so a font whose letters are white with an alpha and one whose letters are drawn
+/// in the picture both come out the same.
+fn ink_of(rgba: &[u8]) -> Vec<u8> {
+    rgba.chunks_exact(4).map(|p| ((u32::from(p[0].max(p[1]).max(p[2])) * u32::from(p[3])) / 255) as u8).collect()
+}
+
+/// Read [`PAGE_FONT`] and its letters' picture from the load order: the `.tex` a localized
+/// install leaves beside the glyph table, else the `.dds` the table names.
+fn page_font(data: &GameData) -> Option<PageFont> {
+    let path = nvf_play::interface::font_file(PAGE_FONT);
+    let bytes = data.read(&path)?;
+    let font = match fnv_font::Font::parse(&bytes) {
+        Ok(font) => font,
+        Err(e) => {
+            warn!("wrist: {path}: {e}; the glance's pages are drawn without letters");
+            return None;
+        }
+    };
+    let tex = data.read(&font.tex_path()).and_then(|b| fnv_font::Tex::parse(&b).ok()).map(|t| ([t.width, t.height], ink_of(&t.rgba)));
+    let (size, ink) = match tex.or_else(|| read_picture(&font.texture_path(), data).map(|(size, rgba)| (size, ink_of(&rgba)))) {
+        Some(found) => found,
+        None => {
+            warn!("wrist: {} could not be read; the glance's pages are drawn without letters", font.texture_path());
+            return None;
+        }
+    };
+    info!("wrist: the glance's pages are set in {path} ({} x {} texels)", size[0], size[1]);
+    Some(PageFont { font, size, ink })
+}
+
+/// The page's own look on the glass: a dark ground, a bright heading over a rule, labels
+/// a step under the readings, and the stock bar — a dim ground with a bright fill
+/// [design: this file; the paused Pip-Boy pages' own look].
+const PAGE_BACK: u8 = 14;
+const PAGE_HEAD: u8 = 255;
+const PAGE_LABEL: u8 = 195;
+const PAGE_VALUE: u8 = 245;
+const PAGE_RULE: u8 = 165;
+const PAGE_BAR: u8 = 225;
+const PAGE_GROUND: u8 = 55;
+
+/// One line of a page, the pad inside the glass and a bar's height, as shares of the
+/// picture [design: about ten lines fit the glass at [`CANVAS`]].
+const PAGE_LINE: f32 = 0.075;
+const PAGE_PAD: f32 = 0.025;
+const PAGE_BAR_HEIGHT: f32 = 0.018;
+/// How much of the font's own line height a page's line is set at, so the letters have
+/// air round them at the glass's size.
+const PAGE_TEXT: f32 = 0.78;
+
+/// How many steps the flicker of a page flip is laid out in, so the glass is not composed
+/// afresh every frame of it [design].
+const FLICK_STEPS: f32 = 6.0;
+
+/// Which step of the flicker a share of it is; `u32::MAX` for no flicker at all, so a
+/// page with none never matches one being flipped.
+pub fn flick_step(flicker: Option<f32>) -> u32 {
+    match flicker {
+        Some(f) if f.is_finite() => (f.clamp(0.0, 1.0) * FLICK_STEPS) as u32,
+        Some(_) => 0,
+        None => u32::MAX,
+    }
+}
+
+/// Lay out a page of letters on the glass. `face` is the game's own font; without it the
+/// rules and the bars still draw, so a run with no data still shows a page.
+pub fn compose_page(out: &mut [u8], side: u32, rows: &[Row], face: Option<&PageFont>, flicker: Option<f32>) {
+    let side = side.max(1);
+    for y in 0..side {
+        for x in 0..side {
+            put(out, side, x, y, PAGE_BACK);
+        }
+    }
+    let s = side as f32;
+    let (lo, hi) = ((GLASS_INSET + PAGE_PAD) * s, (1.0 - GLASS_INSET - PAGE_PAD) * s);
+    let line = PAGE_LINE * s;
+    let width = hi - lo;
+    if width <= 0.0 || line <= 0.0 {
+        return;
+    }
+    let scale = face.map_or(1.0, |f| line * PAGE_TEXT / f.font.size.max(1.0));
+    // The first line's baseline, a line below the top of the glass.
+    let mut y = lo + line;
+    for row in rows {
+        if y > hi {
+            break;
+        }
+        match row {
+            Row::Head(text) => {
+                draw_text(out, side, face, text, lo, y, scale, PAGE_HEAD);
+                rule(out, side, lo, hi, y + line * 0.22, PAGE_RULE);
+                y += line * 1.35;
+            }
+            Row::Pair(label, value) => {
+                draw_text(out, side, face, label, lo, y, scale, PAGE_LABEL);
+                draw_text(out, side, face, value, hi - text_width(face, value, scale), y, scale, PAGE_VALUE);
+                y += line;
+            }
+            Row::Bar(label, share, value) => {
+                draw_text(out, side, face, label, lo, y, scale, PAGE_LABEL);
+                draw_text(out, side, face, value, hi - text_width(face, value, scale), y, scale, PAGE_VALUE);
+                bar(out, side, lo, width, y + line * 0.16, PAGE_BAR_HEIGHT * s, *share);
+                y += line * 1.5;
+            }
+            Row::Text(text) => {
+                for one in wrapped(face, text, width, scale) {
+                    if y > hi {
+                        break;
+                    }
+                    draw_line(out, side, face, &one, lo, y, scale, PAGE_VALUE);
+                    y += line;
+                }
+            }
+            Row::Gap => y += line * 0.5,
+        }
+    }
+    if let Some(at) = flicker {
+        scan(out, side, at);
+    }
+}
+
+/// The lines a text is set in, wrapped to `width` texels of the glass.
+fn wrapped(face: Option<&PageFont>, text: &str, width: f32, scale: f32) -> Vec<fnv_font::Line> {
+    match face {
+        Some(f) if scale > 0.0 => f.font.lines(text, Some(width / scale)),
+        _ => Vec::new(),
+    }
+}
+
+/// How wide a text is set, in texels of the glass.
+fn text_width(face: Option<&PageFont>, text: &str, scale: f32) -> f32 {
+    face.map_or(0.0, |f| f.font.width(text) * scale)
+}
+
+/// One line of text, starting at `x` and standing on `base`.
+fn draw_text(out: &mut [u8], side: u32, face: Option<&PageFont>, text: &str, x: f32, base: f32, scale: f32, ink: u8) {
+    let Some(face) = face else { return };
+    if let Some(line) = face.font.lines(text, None).first() {
+        draw_line(out, side, Some(face), line, x, base, scale, ink);
+    }
+}
+
+fn draw_line(out: &mut [u8], side: u32, face: Option<&PageFont>, line: &fnv_font::Line, x: f32, base: f32, scale: f32, ink: u8) {
+    let Some(face) = face else { return };
+    for placed in &line.glyphs {
+        let glyph = *face.font.glyph(placed.code);
+        blit_glyph(out, side, face, &glyph, x + placed.x * scale, base, scale, ink);
+    }
+}
+
+/// One letter of the game's font, from its place on the font's own picture onto the
+/// glass. Two samples each way, so the letters do not break up where they are drawn
+/// smaller than the picture holds them.
+fn blit_glyph(out: &mut [u8], side: u32, face: &PageFont, glyph: &fnv_font::Glyph, x: f32, base: f32, scale: f32, ink: u8) {
+    if !glyph.drawn() || !scale.is_finite() || scale <= 0.0 {
+        return;
+    }
+    let (left, top) = (x + glyph.before * scale, base - glyph.ascent * scale);
+    let (w, h) = (glyph.width * scale, glyph.height * scale);
+    if !(w > 0.0 && h > 0.0) || !left.is_finite() || !top.is_finite() {
+        return;
+    }
+    let (aw, ah) = (face.size[0].max(1) as f32, face.size[1].max(1) as f32);
+    let [u0, v0, u1, v1] = glyph.uv;
+    let x0 = left.floor().clamp(0.0, side as f32) as u32;
+    let x1 = (left + w).ceil().clamp(0.0, side as f32) as u32;
+    let y0 = top.floor().clamp(0.0, side as f32) as u32;
+    let y1 = (top + h).ceil().clamp(0.0, side as f32) as u32;
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let mut sum = 0u32;
+            for (ox, oy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+                let fx = (px as f32 + ox - left) / w;
+                let fy = (py as f32 + oy - top) / h;
+                if !(0.0..1.0).contains(&fx) || !(0.0..1.0).contains(&fy) {
+                    continue;
+                }
+                let sx = ((u0 + (u1 - u0) * fx) * aw).clamp(0.0, aw - 1.0) as usize;
+                let sy = ((v0 + (v1 - v0) * fy) * ah).clamp(0.0, ah - 1.0) as usize;
+                sum += u32::from(face.at(sx, sy));
+            }
+            let value = (sum / 4) * u32::from(ink) / 255;
+            if value > 0 {
+                put_over(out, side, px, py, value.min(255) as u8);
+            }
+        }
+    }
+}
+
+/// The rule under a heading: a line from `lo` to `hi` at `y`.
+fn rule(out: &mut [u8], side: u32, lo: f32, hi: f32, y: f32, ink: u8) {
+    let thick = (side / 128).max(1);
+    let y0 = y.max(0.0) as u32;
+    for row in y0..(y0 + thick).min(side) {
+        for x in lo.max(0.0) as u32..(hi.max(0.0) as u32).min(side) {
+            put(out, side, x, row, ink);
+        }
+    }
+}
+
+/// A page's bar: the stock dim ground with a bright fill over it.
+fn bar(out: &mut [u8], side: u32, x: f32, width: f32, top: f32, height: f32, share: f32) {
+    let share = if share.is_finite() { share.clamp(0.0, 1.0) } else { 0.0 };
+    let (x0, y0) = (x.max(0.0) as u32, top.max(0.0) as u32);
+    let x1 = (x + width).max(0.0).min(side as f32) as u32;
+    let y1 = (top + height.max(1.0)).max(0.0).min(side as f32) as u32;
+    let lit = x0 + ((x1.saturating_sub(x0)) as f32 * share) as u32;
+    for y in y0..y1 {
+        for px in x0..x1 {
+            put(out, side, px, y, if px < lit { PAGE_BAR } else { PAGE_GROUND });
+        }
+    }
+}
+
+/// The flip's flicker: the glass dims and comes back while a bright scan runs down it
+/// [design: the owner's "a quick screen flicker/scan transition", 2026-11-21].
+fn scan(out: &mut [u8], side: u32, at: f32) {
+    let at = if at.is_finite() { at.clamp(0.0, 1.0) } else { return };
+    let dim = 0.35 + 0.65 * at;
+    let band = at * side as f32;
+    let reach = (side as f32 * 0.05).max(1.0);
+    for y in 0..side {
+        let near = (y as f32 + 0.5 - band).abs() <= reach;
+        for x in 0..side {
+            let i = ((y * side + x) * 4) as usize;
+            if let Some(p) = out.get_mut(i..i + 3) {
+                for c in p {
+                    let v = (f32::from(*c) * dim) as u8;
+                    *c = if near { v.max(150) } else { v };
+                }
+            }
+        }
     }
 }
 
@@ -507,7 +888,7 @@ fn blank() -> Image {
 /// Hide the lit copy of the screen while the live view owns the screen. `show_screen` sets
 /// it every frame from the menus' own state, so letting go needs nothing here.
 fn hide_lit(wrist: Option<Res<WristLive>>, parts: Query<(Entity, &PipBoyPart)>, mut visibility: Query<&mut Visibility>) {
-    if wrist.as_deref().and_then(|w| w.wants()).is_none() {
+    if wrist.as_deref().and_then(|w| w.screen_key()).is_none() {
         return;
     }
     for (e, _) in parts.iter().filter(|(_, p)| **p == PipBoyPart::ScreenLit) {
@@ -553,7 +934,7 @@ mod tests {
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
         let map = grey();
         let win = window([0.5; 2], NORTH, 0.1, 1.0);
-        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, facing, &[]);
+        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, facing, &[], false);
         out
     }
 
@@ -626,7 +1007,7 @@ mod tests {
         for side in [64u32, 128, CANVAS, 512] {
             let mut out = vec![0u8; (side * side * 4) as usize];
             let map = vec![0u8; 16 * 16];
-            compose(&mut out, side, &Pic { size: [16, 16], rgba: &map, stride: 1, gain: 1.0 }, window([0.5; 2], NORTH, 0.1, 1.0), NORTH, &[]);
+            compose(&mut out, side, &Pic { size: [16, 16], rgba: &map, stride: 1, gain: 1.0 }, window([0.5; 2], NORTH, 0.1, 1.0), NORTH, &[], false);
             let (lo, hi) = ((GLASS_INSET * side as f32) as u32, ((1.0 - GLASS_INSET) * side as f32) as u32);
             for y in 0..side {
                 for x in 0..side {
@@ -655,7 +1036,7 @@ mod tests {
         }
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
         let win = window([0.5; 2], NORTH, 0.25, 1.0);
-        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, NORTH, &[]);
+        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, NORTH, &[], false);
         // Clear of the compass letters and the mark in the middle.
         let top = out[((CANVAS / 4 * CANVAS + CANVAS / 4) * 4) as usize];
         let bottom = out[((CANVAS * 3 / 4 * CANVAS + CANVAS / 4) * 4) as usize];
@@ -689,7 +1070,7 @@ mod tests {
         let alpha: Vec<u8> = (0..w * h).map(|i| if i / w < 8 { 200 } else { 20 }).collect();
         let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
         let win = window([0.5; 2], NORTH, 0.25, 1.0);
-        compose(&mut out, CANVAS, &Pic { size: [w as u32, h as u32], rgba: &alpha, stride: 1, gain: 1.0 }, win, NORTH, &[]);
+        compose(&mut out, CANVAS, &Pic { size: [w as u32, h as u32], rgba: &alpha, stride: 1, gain: 1.0 }, win, NORTH, &[], false);
         let top = out[((CANVAS / 4 * CANVAS + CANVAS / 4) * 4) as usize];
         let bottom = out[((CANVAS * 3 / 4 * CANVAS + CANVAS / 4) * 4) as usize];
         assert_eq!((top, bottom), (200, 20), "the samples are drawn as they are, north up");
@@ -715,7 +1096,7 @@ mod tests {
         let win = window([0.5; 2], NORTH, 0.25, 1.0);
         let laid = |marks: &[Mark]| {
             let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
-            compose(&mut out, CANVAS, &pic(), win, NORTH, marks);
+            compose(&mut out, CANVAS, &pic(), win, NORTH, marks, false);
             out
         };
         // Inside: three quarters across and halfway down the canvas.
@@ -738,6 +1119,156 @@ mod tests {
         let place = laid(&[Mark { kind: MarkKind::Place, uv: [0.625, 0.5] }]);
         assert_eq!(brightest(&place, [0.75, 0.5], 0.01), PIN);
         assert_eq!(laid(&[Mark { kind: MarkKind::Quest, uv: [f32::NAN, 0.5] }]), laid(&[]), "a place that is not a number draws nothing at all");
+    }
+
+    /// A font with no game data behind it: one white texel and a glyph for every code
+    /// that covers it, so every letter is a solid block and a test can see where the
+    /// letters fall. The real one is the game's own ([`page_font`]).
+    fn test_face() -> PageFont {
+        let glyph = fnv_font::Glyph { uv: [0.0, 0.0, 1.0, 1.0], width: 10.0, height: 14.0, before: 1.0, after: 1.0, ascent: 14.0 };
+        let font = fnv_font::Font { size: 20.0, texture: String::new(), glyphs: vec![glyph; 256], extra: Default::default() };
+        PageFont { font, size: [2, 2], ink: vec![255; 4] }
+    }
+
+    /// The brightest texel in a box of the picture.
+    fn max_in(out: &[u8], x0: u32, y0: u32, x1: u32, y1: u32) -> u8 {
+        let mut best = 0;
+        for y in y0..y1.min(CANVAS) {
+            for x in x0..x1.min(CANVAS) {
+                best = best.max(out[((y * CANVAS + x) * 4) as usize]);
+            }
+        }
+        best
+    }
+
+    fn page(rows: &[Row], face: Option<&PageFont>, flicker: Option<f32>) -> Vec<u8> {
+        let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
+        compose_page(&mut out, CANVAS, rows, face, flicker);
+        out
+    }
+
+    /// A page of letters is set in the game's own font, inside the glass, with the
+    /// heading over its rule, the label at the left and the reading at the right.
+    #[test]
+    fn a_page_is_set_in_the_games_own_font_inside_the_glass() {
+        let face = test_face();
+        let rows = [Row::Head("STATUS".into()), Row::Pair("HP".into(), "120/150".into())];
+        let out = page(&rows, Some(&face), None);
+        let (lo, hi) = ((GLASS_INSET * CANVAS as f32) as u32, ((1.0 - GLASS_INSET) * CANVAS as f32) as u32);
+        // Nothing at all under the device's own frame.
+        for y in 0..CANVAS {
+            for x in 0..CANVAS {
+                if !(lo..=hi).contains(&x) || !(lo..=hi).contains(&y) {
+                    assert!(out[((y * CANVAS + x) * 4) as usize] <= PAGE_BACK, "a page's ink at {x},{y} is under the device's frame");
+                }
+            }
+        }
+        // The heading at the top left, its rule under it, the label below that and the
+        // reading over at the right.
+        assert_eq!(max_in(&out, lo, lo, lo + 60, lo + 24), PAGE_HEAD, "no heading");
+        assert_eq!(max_in(&out, CANVAS / 2, lo + 20, CANVAS / 2 + 4, lo + 32), PAGE_RULE, "no rule under the heading");
+        assert_eq!(max_in(&out, lo, lo + 30, lo + 30, lo + 56), PAGE_LABEL, "no label");
+        assert_eq!(max_in(&out, hi - 60, lo + 30, hi, lo + 56), PAGE_VALUE, "no reading at the right");
+        // The ground between the rows is the screen's own dark, not black.
+        assert_eq!(out[((CANVAS - 4) * CANVAS * 4) as usize], PAGE_BACK);
+    }
+
+    /// A bar fills by its share, with the stock dim ground beyond it.
+    #[test]
+    fn a_pages_bar_fills_by_its_share() {
+        let face = test_face();
+        for share in [0.0, 0.25, 0.5, 1.0] {
+            let out = page(&[Row::Bar("HP".into(), share, "x".into())], Some(&face), None);
+            let count = |ink: u8| out.chunks_exact(4).filter(|p| p[0] == ink).count();
+            let (lit, dim) = (count(PAGE_BAR), count(PAGE_GROUND));
+            assert!(lit + dim > 0, "{share}: no bar at all");
+            let drawn = lit as f32 / (lit + dim) as f32;
+            assert!((drawn - share).abs() < 0.05, "{share}: the bar is {drawn} full");
+        }
+        // A share that is not a number draws an empty bar rather than a broken one.
+        let odd = page(&[Row::Bar("HP".into(), f32::NAN, "x".into())], Some(&face), None);
+        assert_eq!(odd.chunks_exact(4).filter(|p| p[0] == PAGE_BAR).count(), 0);
+    }
+
+    /// Without the game's font the page still draws its rules and bars, so a run with no
+    /// data shows a page rather than a blank screen.
+    #[test]
+    fn a_page_without_the_games_font_still_draws_its_rules_and_bars() {
+        let out = page(&[Row::Head("STATUS".into()), Row::Bar("HP".into(), 1.0, "x".into())], None, None);
+        assert!(out.chunks_exact(4).any(|p| p[0] == PAGE_RULE));
+        assert!(out.chunks_exact(4).any(|p| p[0] == PAGE_BAR));
+    }
+
+    /// The flip's flicker dims the glass and runs a bright scan down it, in a bounded
+    /// number of steps so the picture is not laid out afresh every frame.
+    #[test]
+    fn the_flip_flickers_in_a_bounded_number_of_steps() {
+        assert_eq!(flick_step(None), u32::MAX);
+        assert_eq!(flick_step(Some(0.0)), 0);
+        assert_eq!(flick_step(Some(1.0)), FLICK_STEPS as u32);
+        assert_eq!(flick_step(Some(f32::NAN)), 0);
+        let face = test_face();
+        let rows = [Row::Head("STATUS".into())];
+        let still = page(&rows, Some(&face), None);
+        let flicking = page(&rows, Some(&face), Some(0.0));
+        assert!(max_in(&flicking, 0, 0, CANVAS, CANVAS) >= 150, "the scan is not bright");
+        let sum = |out: &[u8]| out.chunks_exact(4).map(|p| u32::from(p[0])).sum::<u32>();
+        assert!(sum(&flicking) < sum(&still), "the glass does not dim while it flickers");
+        // And it is over by the end, leaving the page as it stands.
+        assert_eq!(page(&rows, Some(&face), Some(1.0)).len(), still.len());
+    }
+
+    /// Heading up: the map turns under the player, their own mark points up the glass and
+    /// the compass letters ride round its edge.
+    #[test]
+    fn the_map_turns_with_the_player_and_the_letters_ride_round() {
+        let map = grey();
+        let laid_turning = |facing: [f32; 2]| {
+            let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
+            // The window the glance itself computes for a turning map: the facing up it.
+            let win = window([0.5; 2], facing, 0.1, 1.0);
+            compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: WORLD_GAIN }, win, facing, &[], true);
+            out
+        };
+        let [across, down] = letter_ring(CANVAS);
+        // Facing north: as a north-up picture, N at the top.
+        let north = laid_turning(NORTH);
+        assert!(brightest(&north, [0.5, 0.5 - down], 0.03) >= LETTER, "N is not at the top facing north");
+        // Facing east: north now lies to the player's left, so the N rides to the left.
+        let east = laid_turning([1.0, 0.0]);
+        assert!(brightest(&east, [0.5 - across, 0.5], 0.03) >= LETTER, "N did not ride round facing east");
+        // Facing north east no letter stands at a side at all: they ride between them.
+        let diagonal = laid_turning([std::f32::consts::FRAC_1_SQRT_2, -std::f32::consts::FRAC_1_SQRT_2]);
+        assert!(brightest(&diagonal, [0.5, 0.5 - down], 0.03) < LETTER, "a letter stayed at the top");
+        let d = std::f32::consts::FRAC_1_SQRT_2;
+        assert!(brightest(&diagonal, [0.5 - across * d, 0.5 - down * d], 0.03) >= LETTER, "N is not half way round");
+        // And the player's own mark points straight up the glass whichever way they face.
+        for facing in [NORTH, [1.0, 0.0], [0.0, 1.0], [-0.6, 0.8]] {
+            let p = point_of_mark(&laid_turning(facing));
+            assert!(p[1] < 0.0 && p[0].abs() < 1.5, "facing {facing:?}: the mark points {p:?}");
+        }
+    }
+
+    /// A dark pad under every letter and every mark, so they read over the outline's own
+    /// bright walls; nothing of the map is brightened by it.
+    #[test]
+    fn a_letter_and_a_mark_keep_a_dark_pad_under_them() {
+        // A map drawn at its brightest everywhere, so only a pad can darken it.
+        let map = vec![255u8; 16 * 16 * 4];
+        let mut out = vec![0u8; (CANVAS * CANVAS * 4) as usize];
+        let win = window([0.5; 2], NORTH, 0.25, 1.0);
+        let marks = [Mark { kind: MarkKind::Quest, uv: [0.625, 0.5] }];
+        compose(&mut out, CANVAS, &Pic { size: [16, 16], rgba: &map, stride: 4, gain: 1.0 }, win, NORTH, &marks, false);
+        let at = |x: f32, y: f32| out[(((y * CANVAS as f32) as u32 * CANVAS + (x * CANVAS as f32) as u32) * 4) as usize];
+        // Clear of everything: the map at its own strength.
+        assert_eq!(at(0.2, 0.8), 255);
+        // Just outside the player's mark, and just outside the quest's: the pad.
+        let dark = ((255.0 * KNOCKOUT) as u8).max(1);
+        assert!(at(0.5, 0.5 + MARK_SHARE * 1.2) <= dark, "no pad under the player's mark");
+        assert!(at(0.75 + PIN_SHARE * 1.2, 0.5) <= dark, "no pad under the quest's mark");
+        // Under a compass letter too.
+        let [_, down] = letter_ring(CANVAS);
+        assert!(at(0.5, 0.5 - down) <= dark || brightest(&out, [0.5, 0.5 - down], 0.01) == LETTER);
     }
 
     /// Every system this file adds, in one schedule: a parameter that holds what another

@@ -272,6 +272,12 @@ Tweaks tab's rows (#1892) are listed in docs/design/settings-tweaks-layout.md.
   Far: twice as much of the map either way.
 - Registered in `engine/nvf-play/src/wrist_arm.rs`
 
+### `wrist-map-rotate`: Glance map turns
+
+- On the page: With me: the map turns as you do, your mark points up the glass and N, E, S
+  and W ride round its edge. North up: north stays at the top and your mark turns.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
 ### `wrist-hud`: HUD on the Pip-Boy
 
 - On the page: On: the health, action points, condition and ammo meters leave the screen

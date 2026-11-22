@@ -180,6 +180,7 @@ pub mod world_sounds;
 pub mod wrist_arm;
 pub mod wrist_hud;
 pub mod wrist_live;
+pub mod wrist_page;
 pub mod wrist_local;
 pub mod xp_meter;
 
