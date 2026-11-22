@@ -29,7 +29,34 @@
 use crate::pipboy::data::outline::{self, Outline, OutlineKey};
 use crate::wrist_live::{LocalPic, MapPicture};
 use bevy::prelude::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+/// Which of the glance's two caches a total is for ([`note_cache`]).
+#[derive(Clone, Copy, Debug)]
+pub enum Cache {
+    /// The outline grid being cast and the picture it finished ([`WristMap`]).
+    Outline,
+    /// The pictures the arm's screen wears (nvforever `wrist_screen`): the worldspace's
+    /// own map texels, the canvas it lays out, and the Pip-Boy font's letters.
+    Screen,
+}
+
+/// What each cache holds now, bytes.
+static CACHE_BYTES: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+
+/// Say what a cache holds now. Atomics and not a resource: the run log's memory line is
+/// written in `Last` by nvforever's GPU recorder, which sees neither owner's state, and
+/// the cost is one relaxed store when a cache changes [design: the owner's out-of-memory
+/// abort of 2026-11-22 — a leak has to show as a rising number somewhere].
+pub fn note_cache(which: Cache, bytes: u64) {
+    CACHE_BYTES[which as usize].store(bytes, Ordering::Relaxed);
+}
+
+/// What the glance's caches hold in all, bytes: 0 while it has never been raised.
+pub fn cache_bytes() -> u64 {
+    CACHE_BYTES.iter().map(|b| b.load(Ordering::Relaxed)).sum()
+}
 
 /// How long the wrist's grid may cast rays in a frame, and how many at a time [design:
 /// about a tenth of a frame at 60 Hz, so a whole grid is made in about a second of
@@ -81,6 +108,18 @@ pub struct WristMap {
     /// The last grid that finished, as the glance shows it.
     pub ready: Option<Ready>,
     said: Option<OutlineKey>,
+}
+
+impl WristMap {
+    /// What this cache holds, bytes: the grid's own samples (where each ray landed) and
+    /// the texels of the picture that finished. The landscape under the rays is the Local
+    /// Map producer's own cache and is left out: it is cleared the moment a grid finishes
+    /// ([`build`]), so it cannot be what grows.
+    fn bytes(&self) -> u64 {
+        let grid = self.grid.as_ref().map_or(0, |g| g.heights.len() * std::mem::size_of::<Option<f32>>());
+        let ready = self.ready.as_ref().map_or(0, |r| r.pic.alpha.len());
+        (grid + ready) as u64
+    }
 }
 
 /// A finished outline: where it lies in the world, and its texels.
@@ -181,6 +220,7 @@ pub(crate) fn build(
     if m.grid.as_ref().is_none_or(|g| g.key != key) {
         m.grid = Some(Outline::new(loc.interior, loc.world, feet, anchor, ask.0, ask.1));
         m.land.clear();
+        note_cache(Cache::Outline, m.bytes());
     }
     let Some(grid) = m.grid.as_mut().filter(|g| !g.done()) else { return };
     let Some(mut phys) = phys else { return };
@@ -205,6 +245,7 @@ pub(crate) fn build(
     m.ready = Some(Ready { key, origin, step, size: grid.size, pic });
     // The surfaces were for this grid; the next one loads the cells it needs itself.
     m.land.clear();
+    note_cache(Cache::Outline, m.bytes());
     if m.said != Some(key) {
         m.said = Some(key);
         info!("wrist: the local map's outline is made for the glance: {}x{} samples {step} apart, {hits} landed", size[0], size[1]);

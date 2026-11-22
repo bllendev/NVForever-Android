@@ -101,6 +101,24 @@ struct Worn {
     said: Option<String>,
 }
 
+impl Worn {
+    /// What this cache holds, bytes: the worldspace's map texels on the processor, the
+    /// canvas the screen wears, and the Pip-Boy font's letters. Told to
+    /// `nvf_play::wrist_local` whenever one of them changes, for the run log's memory line
+    /// (nvforever `gpu_recorder`): nothing here may grow with the length of a session.
+    fn bytes(&self) -> u64 {
+        let source = self.source.as_ref().map_or(0, |(path, _, texels)| path.len() + texels.len());
+        let canvas = self.picture.as_ref().map_or(0, |_| (CANVAS * CANVAS * 4) as usize);
+        let face = self.face.as_ref().and_then(|f| f.as_ref()).map_or(0, |f| f.ink.len());
+        (source + canvas + face) as u64
+    }
+
+    /// Say what it holds now ([`nvf_play::wrist_local::note_cache`]).
+    fn note(&self) {
+        nvf_play::wrist_local::note_cache(nvf_play::wrist_local::Cache::Screen, self.bytes());
+    }
+}
+
 /// Whether these are the same base: the same outline, or the worldspace's own picture
 /// both times (which the window itself then tells apart).
 fn same_base(now: Option<&LocalPic>, was: Option<&LocalPic>) -> bool {
@@ -179,6 +197,7 @@ fn wear_map(
         return;
     }
     let picture = worn.picture.get_or_insert_with(|| images.add(blank())).clone();
+    worn.note();
     // The material the shape wears for itself: taken once, before the copy goes on.
     let own = worn.screen.as_ref().map_or(current, |(_, own)| own.clone());
     let name = if live.page == Page::Map {
@@ -196,6 +215,7 @@ fn wear_map(
                     // as it stands.
                     worn.source = read_picture(&path, data).map(|(size, rgba)| (path.clone(), size, rgba));
                     worn.window = None;
+                    worn.note();
                     if worn.source.is_none() {
                         warn!("wrist: {path} could not be read for the live map");
                         return;
@@ -239,6 +259,7 @@ fn wear_map(
                     image.data = Some(out);
                 }
             }
+            worn.note();
             (worn.page, worn.window, worn.base) = (Some((live.page, step)), None, None);
             worn.rows.clear();
             worn.rows.extend_from_slice(&live.rows);

@@ -39,6 +39,7 @@
 use crate::bindings::{Control, ControlInput};
 use crate::settings::{add_choice_list, add_setting, ChoiceList, Setting};
 use crate::control::PlayerControl;
+use crate::pad::PadInput;
 use crate::pipboy::data::model::WorldMap;
 use crate::pipboy::data::read;
 use crate::player::Player;
@@ -228,9 +229,13 @@ pub struct WristLive {
     /// The picture its screen should show, until the next sample replaces it. `None`
     /// means give the screen back.
     pub shown: Option<Shown>,
-    /// Which page its screen shows ([`Page`]), remembered between glances and across a
-    /// load: the player comes back to the page they left [design: the owner, 2026-11-21].
+    /// Which page its screen shows ([`Page`]), kept only for as long as the glance is up:
+    /// every raise opens on [`WristLive::opens_on`] again [design: the owner's Odin
+    /// feedback on map.14, 2026-11-22; it was remembered between glances until then].
     pub page: Page,
+    /// The page every raise opens on: MAP, unless a developer set `NVF_WRIST_PAGE` to
+    /// take a screenshot of another.
+    pub opens_on: Page,
     /// The rows that page draws ([`crate::wrist_page::rows`]), laid out at the glance's
     /// own rate and never per frame; empty on the MAP page, whose picture is the glass.
     pub rows: Vec<Row>,
@@ -362,17 +367,57 @@ fn set_glance_holds(on: bool) {
     GLANCE_HOLDS.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Forget what the glance held last frame, before anything reads this frame's input.
+///
+/// [`decide`] clears the flag itself and sets it again from its own decision, but it runs
+/// in [`crate::PlaySet::Input`]: a system that reads a control *earlier* in the frame
+/// would otherwise see the frame before's answer, and the frame after the arm went down
+/// that answer is "held" — a press of the player's own D-Pad swallowed by a glance that is
+/// no longer up [design: the owner's Odin feedback on map.14, 2026-11-22]. Held is the
+/// answer that takes a press away, so it is the one that may never be stale: cleared at
+/// the top of the frame, a control is at worst free for the one frame the arm comes up on,
+/// which costs nothing (the glance lets go of the arm before such a press is acted on
+/// anyway).
+pub(crate) fn forget_holds() {
+    set_glance_holds(false);
+}
+
 /// The controls the glance holds while the arm is up, so an attack cannot fire or draw a
 /// weapon through it and the sights cannot zoom [design: the behaviour notes' own list].
 /// The Pip-Boy's key is not among them: it is the glance's own key, and the menus must
 /// stay reachable. Derived from [`WristLive::open`] every frame and never latched, so the
 /// controls are back the frame the arm goes down.
-/// The D-Pad's own two controls are among them while the arm is up: left and right turn
-/// the device's pages instead of working the hotkey and the ammo swap they are bound to
-/// ([`page_turn`]). Taken the same way as the rest — derived from the open intent, never
-/// latched — so the frame the arm goes down they do their own job again.
 pub fn holds(c: Control) -> bool {
-    matches!(c, Control::Use | Control::Block | Control::ReadyItem | Control::Activate | Control::Vats | Control::AmmoSwap | Control::Hotkey4)
+    matches!(c, Control::Use | Control::Block | Control::ReadyItem | Control::Activate | Control::Vats)
+}
+
+/// Whether a control works one of the two buttons the page flip reads ([`page_turn`]), so
+/// the glance holds it *while it owns the wrist* and only then: a flip is not also the
+/// player's own control, and with the arm down the button does exactly what it always did,
+/// whatever they bound to it [design: the owner's Odin feedback on map.14, 2026-11-22 —
+/// his D-Pad is Lower Weapon, Hotkey 1 and Ammo Swap, which the old fixed list of controls
+/// (Ammo Swap and Hotkey 4, the defaults) named wrongly].
+///
+/// The binding, not the control: taken with [`glance_holds`] by
+/// [`crate::bindings::ControlInput::held`], which has it to hand. The keyboard's arrow
+/// keys, the flip's other input, are no control's binding at all, so nothing is taken
+/// there.
+pub fn flips_page(pad: Option<PadInput>) -> bool {
+    matches!(pad, Some(PadInput::Button(GamepadButton::DPadLeft | GamepadButton::DPadRight)))
+}
+
+/// The page the glance's screen shows after this frame: nothing at all moves it while the
+/// arm is down (the D-Pad is the player's own then, and the press is neither read nor
+/// swallowed), every raise opens on `opens_on` — the MAP page, unless a developer asked
+/// for another with `NVF_WRIST_PAGE` — and only while the glance owns the wrist does a
+/// flip turn it [design: the owner's Odin feedback on map.14, 2026-11-22: "every glance
+/// opens on the map", and no page flipping with the glance down].
+pub fn page_of(open: bool, just_opened: bool, opens_on: Page, page: Page, turn: i32) -> Page {
+    match (open, just_opened) {
+        (false, _) => page,
+        (true, true) => opens_on,
+        (true, false) => page.step(turn),
+    }
 }
 
 /// How long the screen flickers after a page is flipped: a scan across the glass and a
@@ -542,8 +587,11 @@ impl Plugin for WristLivePlugin {
         if page != Page::default() {
             info!("wrist: the glance opens on the {} page (NVF_WRIST_PAGE, a developer's switch)", page.name());
         }
-        app.insert_resource(WristLive { forced, held_up, page, ..default() })
+        app.insert_resource(WristLive { forced, held_up, page, opens_on: page, ..default() })
             .init_resource::<WristBody>()
+            // Before anything reads this frame's input, so no control is held by a glance
+            // that went down last frame (`forget_holds`).
+            .add_systems(First, forget_holds)
             // After the Menu Mode key's hold is read, which is what asks for the glance
             // (`crate::flashlight::menu_key`).
             .add_systems(Update, (decide, read_pages, foley).chain().in_set(crate::PlaySet::Input).after(crate::flashlight::menu_key));
@@ -924,13 +972,26 @@ pub(crate) fn decide(
     wrist.arm = raised(wrist.arm, time.delta_secs(), frame.pose.is_some());
     // Pages are flipped only while the glance owns the wrist, and the flicker runs itself
     // out in real time: nothing here is latched, so the arm going down takes both with it.
+    // The D-Pad is read only on a frame the glance owns, so with the arm down the press is
+    // neither acted on nor taken ([`page_of`], [`flips_page`]).
     let dt = time.delta_secs();
-    if frame.pose.is_some() {
-        let turn = page_turn(&input);
+    let open = frame.pose.is_some();
+    let just_opened = open && was.is_none();
+    let turn = if open && !just_opened { page_turn(&input) } else { 0 };
+    let page = page_of(open, just_opened, wrist.opens_on, wrist.page, turn);
+    if page != wrist.page {
+        wrist.page = page;
         if turn != 0 {
-            wrist.page = wrist.page.step(turn);
+            info!("wrist: the glance turned to the {} page", page.name());
+        }
+    }
+    if open {
+        // A raise opens on its own page with no flicker: the device has only just come up.
+        if turn != 0 {
             wrist.flick = Some(0.0);
-            info!("wrist: the glance turned to the {} page", wrist.page.name());
+        } else if just_opened {
+            wrist.flick = None;
+            wrist.rows.clear();
         } else {
             wrist.flick = wrist.flick.map(|t| t + dt.max(0.0)).filter(|t| *t < FLICK_SECONDS);
         }
@@ -1054,18 +1115,31 @@ mod tests {
     fn the_glances_systems_have_no_conflicting_parameters() {
         let mut world = World::new();
         let mut schedule = Schedule::default();
-        schedule.add_systems((decide, read_pages, foley, crate::wrist_local::build).chain());
+        schedule.add_systems((forget_holds, decide, read_pages, foley, crate::wrist_local::build).chain());
         schedule.initialize(&mut world).expect("the schedule builds");
     }
 
-    /// The D-Pad's two controls are the glance's while the arm is up, so a flip does not
-    /// also swap ammo or fire a hotkey; the moment it is down they are theirs again.
+    /// Whatever the player bound to the two buttons that turn the pages is the glance's
+    /// while the arm is up, so a flip does not also do their own job; nothing else is
+    /// taken, and the moment the arm is down the buttons are theirs again.
     #[test]
     fn the_dpad_turns_the_pages_only_while_the_arm_is_up() {
-        for c in [Control::AmmoSwap, Control::Hotkey4] {
-            assert!(holds(c), "{c:?} turns a page while looking");
+        let button = |b| Some(PadInput::Button(b));
+        for b in [GamepadButton::DPadLeft, GamepadButton::DPadRight] {
+            assert!(flips_page(button(b)), "{b:?} turns a page while looking");
         }
-        // The pages themselves run round and the glance remembers the one it was left on.
+        // The owner's own D-Pad: Lower Weapon and Hotkey 1 left and right (taken while
+        // looking, whatever control they are), Ammo Swap up (never taken: it turns no
+        // page). The old fixed list named Ammo Swap and Hotkey 4 instead, which were his
+        // on neither button.
+        for b in [GamepadButton::DPadUp, GamepadButton::DPadDown, GamepadButton::South, GamepadButton::LeftTrigger] {
+            assert!(!flips_page(button(b)), "{b:?} is the player's while looking");
+        }
+        assert!(!flips_page(None) && !flips_page(Some(PadInput::Stick(crate::pad::StickDir::Left))));
+        for c in [Control::AmmoSwap, Control::Hotkey4, Control::MenuMode] {
+            assert!(!holds(c), "{c:?} is held by its button's binding alone, never by name");
+        }
+        // The pages themselves run round.
         let mut wrist = WristLive { on: true, open: Some(key()), ..default() };
         assert_eq!(wrist.page, Page::Map);
         wrist.page = wrist.page.step(1);
@@ -1074,6 +1148,48 @@ mod tests {
         assert!(!wrist.wants_local());
         wrist.page = Page::Map;
         assert!(wrist.wants_local());
+    }
+
+    /// A press of the D-Pad with the glance down turns no page at all — and is not read,
+    /// so nothing is taken from the player's own control.
+    #[test]
+    fn a_dpad_press_with_the_glance_down_turns_no_page() {
+        for page in Page::ALL {
+            for turn in [-1, 0, 1] {
+                assert_eq!(page_of(false, false, Page::Map, page, turn), page, "the arm is down: {page:?} stays");
+                assert_eq!(page_of(false, true, Page::Map, page, turn), page);
+            }
+        }
+        // Nothing is held while the glance is down either, whatever the button works.
+        set_glance_holds(false);
+        assert!(!glance_holds());
+        set_glance_holds(true);
+        forget_holds();
+        assert!(!glance_holds(), "the frame after the arm went down holds nothing");
+    }
+
+    /// Every glance opens on the MAP page, and D-Pad left and right walk on from there.
+    /// The page it was left on is not remembered [design: the owner, 2026-11-22].
+    #[test]
+    fn every_glance_opens_on_the_map_page() {
+        // Left on QUESTS by the last glance: the next raise shows MAP again.
+        assert_eq!(page_of(true, true, Page::Map, Page::Quests, 0), Page::Map);
+        // The press that opens it does not also flip: the raise's own frame reads no turn.
+        assert_eq!(page_of(true, true, Page::Map, Page::Status, 1), Page::Map);
+        // From there the two buttons walk round the three, both ways.
+        let mut page = page_of(true, true, Page::Map, Page::Quests, 0);
+        for want in [Page::Status, Page::Quests, Page::Map] {
+            page = page_of(true, false, Page::Map, page, 1);
+            assert_eq!(page, want);
+        }
+        assert_eq!(page_of(true, false, Page::Map, Page::Map, -1), Page::Quests);
+        // A developer's `NVF_WRIST_PAGE` opens on the page it names instead.
+        assert_eq!(page_of(true, true, Page::Status, Page::Quests, 0), Page::Status);
+        // The resource the plugin builds opens on the MAP page, Hold style or Toggle.
+        for style in [Raise::Hold, Raise::Toggle] {
+            let wrist = WristLive { on: true, style, ..default() };
+            assert_eq!((wrist.page, wrist.opens_on), (Page::Map, Page::Map));
+        }
     }
 
     /// Indoors the glance opens too: the binding is the interior cell's own FormID, and

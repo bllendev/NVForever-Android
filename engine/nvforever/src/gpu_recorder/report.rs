@@ -19,9 +19,17 @@ pub struct Sampled {
     pub allocations: Option<usize>,
     /// `VK_EXT_memory_budget` through `memory_budget.rs`: (this process's use, budget) MB.
     pub vram_use_mb: Option<(u64, u64)>,
+    /// This process's resident memory, bytes (`super::rss`): the main memory, where every
+    /// figure above is the GPU's. A leak of ours is a number that only ever rises; the
+    /// out-of-memory abort of 2026-11-22 had the GPU's own flat throughout.
+    pub rss_bytes: Option<u64>,
+    /// What the live wrist map's caches hold, bytes
+    /// (`nvf_play::wrist_local::cache_bytes`): the outline grids and the pictures its
+    /// screen wears, the one part of the glance that holds anything of a size.
+    pub wrist_cache_bytes: Option<u64>,
 }
 
-const MB: f64 = 1024.0 * 1024.0;
+pub(super) const MB: f64 = 1024.0 * 1024.0;
 
 fn mb(bytes: u64) -> f64 {
     bytes as f64 / MB
@@ -38,6 +46,12 @@ impl Sampled {
         }
         if let Some((use_mb, budget)) = self.vram_use_mb {
             parts.push(format!("VRAM {use_mb} of {budget} MB"));
+        }
+        if let Some(rss) = self.rss_bytes {
+            parts.push(format!("resident {:.0} MB", mb(rss)));
+        }
+        if let Some(wrist) = self.wrist_cache_bytes.filter(|&b| b > 0) {
+            parts.push(format!("wrist caches {:.1} MB", mb(wrist)));
         }
         if parts.is_empty() {
             return String::new();

@@ -84,6 +84,8 @@ fn sampled() -> Sampled {
         blocks: Some(14),
         allocations: Some(1203),
         vram_use_mb: Some((1420, 1520)),
+        rss_bytes: Some(2390 * MB),
+        wrist_cache_bytes: Some(3 * MB / 2),
     }
 }
 
@@ -93,10 +95,18 @@ fn the_sampled_figures_name_their_age_and_go_quiet_when_nothing_was_read() {
     assert!(text.contains("gpu allocated 822 MB, reserved 1408 MB in 14 blocks, 1203 live allocations"), "{text}");
     assert!(text.contains("VRAM 1420 of 1520 MB"), "{text}");
     assert!(text.contains("read 3.2 s ago"), "{text}");
+    // The main memory, where every other figure is the GPU's: a leak of ours shows here
+    // (the out-of-memory abort of 2026-11-22), and the glance's caches with it.
+    assert!(text.contains("resident 2390 MB"), "{text}");
+    assert!(text.contains("wrist caches 1.5 MB"), "{text}");
     assert_eq!(Sampled::default().text(), "", "nothing read: no clause at all");
     // Only the budget read (no Vulkan allocator report): just that part.
     let budget_only = Sampled { vram_use_mb: Some((100, 200)), ..Sampled::default() };
     assert_eq!(budget_only.text(), "VRAM 100 of 200 MB");
+    // A platform with no cheap reading, and a glance that has never been raised: no clause
+    // of their own rather than a zero that reads as a figure.
+    let no_rss = Sampled { rss_bytes: None, wrist_cache_bytes: Some(0), ..sampled() };
+    assert!(!no_rss.text().contains("resident") && !no_rss.text().contains("wrist caches"), "{}", no_rss.text());
 }
 
 #[test]

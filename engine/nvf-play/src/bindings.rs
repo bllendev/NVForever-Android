@@ -1384,10 +1384,14 @@ impl ControlInput<'_, '_> {
     /// save, so the game can still be paused or left (`crate::kill_cam`, module notes).
     pub fn held(&self, c: Control) -> bool {
         // The live wrist map holds the hands' own controls while the arm is up, so an
-        // attack cannot fire or draw through it and the sights cannot zoom. Set from the
-        // glance's open intent every frame and never latched: the frame the arm goes down
-        // they are all back (`crate::wrist_arm::holds`, `wrist_arm::glance_holds`).
-        if crate::wrist_arm::glance_holds() && crate::wrist_arm::holds(c) {
+        // attack cannot fire or draw through it and the sights cannot zoom, and with them
+        // whatever the player bound to the two D-Pad buttons that turn its pages. Set from
+        // the glance's open intent every frame, never latched and forgotten at the top of
+        // each frame: the frame the arm goes down they are all back
+        // (`crate::wrist_arm::holds`, `wrist_arm::flips_page`, `wrist_arm::glance_holds`).
+        // The D-Pad's two only where a controller works the controls: on a keyboard the
+        // flip is the arrow keys, which are no control's binding, so nothing is taken.
+        if crate::wrist_arm::glance_holds() && (crate::wrist_arm::holds(c) || (self.controller() && crate::wrist_arm::flips_page(self.bindings.pad(c)))) {
             return true;
         }
         self.kill_cam.as_ref().is_some_and(|k| k.active())

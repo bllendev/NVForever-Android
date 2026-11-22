@@ -50,6 +50,7 @@ pub mod breadcrumbs;
 pub mod fault;
 pub mod report;
 pub mod ring;
+pub mod rss;
 #[cfg(test)]
 mod tests;
 
@@ -60,7 +61,7 @@ use bevy::diagnostic::FrameCount;
 use bevy::prelude::*;
 use bevy::render::renderer::RenderDevice;
 
-use report::Sampled;
+use report::{Sampled, MB};
 use ring::{Frame, Ring};
 
 /// How often the summary line is logged and the sampled figures are read.
@@ -83,7 +84,7 @@ static DUMPED: AtomicBool = AtomicBool::new(false);
 static FAULT: OnceLock<Option<String>> = OnceLock::new();
 /// The last reading of the figures too costly to read every frame, and when it was taken.
 static SAMPLED: Mutex<(Sampled, Option<std::time::Instant>)> = Mutex::new((
-    Sampled { age_secs: None, allocated_bytes: None, reserved_bytes: None, blocks: None, allocations: None, vram_use_mb: None },
+    Sampled { age_secs: None, allocated_bytes: None, reserved_bytes: None, blocks: None, allocations: None, vram_use_mb: None, rss_bytes: None, wrist_cache_bytes: None },
     None,
 ));
 
@@ -210,10 +211,19 @@ fn record(
 ) {
     use bevy::render::gpu_counters as counters;
     let now = real.elapsed_secs_f64();
-    // The loading screen: when the last one came up, and whether one is up now.
+    // The loading screen: when the last one came up, and whether one is up now. Each end
+    // of one is worth the process's resident memory on its own line: the abort of
+    // 2026-11-22 came during a load, and a load is where the main memory moves most
+    // (`rss`). Two readings a load, never per frame.
     let up = loading.is_some_and(|l| l.active());
-    if up && !state.loading {
-        state.load_started = Some(now);
+    if up != state.loading {
+        if up {
+            state.load_started = Some(now);
+        }
+        if let Some(bytes) = rss::rss_bytes() {
+            let since = state.load_started.filter(|_| !up).map_or_else(String::new, |at| format!(", {:.1} s of loading", now - at));
+            info!("gpu recorder: resident memory {:.0} MB at the {} of a loading screen{since}", bytes as f64 / MB, if up { "start" } else { "end" });
+        }
     }
     state.loading = up;
     let since_load_ms = state.load_started.map(|started| ((now - started) * 1000.0).clamp(0.0, f64::from(u32::MAX)) as u32);
@@ -239,7 +249,18 @@ fn record(
     }
     state.last_summary = Some(now);
     let (allocated_bytes, reserved_bytes, blocks, allocations) = sample_allocator(device.as_deref());
-    let sampled = Sampled { age_secs: Some(0.0), allocated_bytes, reserved_bytes, blocks, allocations, vram_use_mb: budget.and_then(|b| b.vram_use_mb) };
+    let sampled = Sampled {
+        age_secs: Some(0.0),
+        allocated_bytes,
+        reserved_bytes,
+        blocks,
+        allocations,
+        vram_use_mb: budget.and_then(|b| b.vram_use_mb),
+        // The main memory and what the glance's caches hold of it: one file read and two
+        // atomic loads, once every SUMMARY_SECS.
+        rss_bytes: rss::rss_bytes(),
+        wrist_cache_bytes: Some(nvf_play::wrist_local::cache_bytes()),
+    };
     if let Ok(mut held) = SAMPLED.try_lock() {
         *held = (sampled, Some(std::time::Instant::now()));
     }
