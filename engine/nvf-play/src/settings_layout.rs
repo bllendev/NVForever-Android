@@ -460,7 +460,8 @@ mod tests {
     const TWEAK_PREFIX: &str = "tweak-";
 
     /// Every row #1892 registers under Tweaks (PR head 25bc53a28, `engine/nvf-play/src/tweaks.rs`),
-    /// in its order, without [`TWEAK_PREFIX`]: what the table places ahead of it.
+    /// in its order, without [`TWEAK_PREFIX`]: what the table places ahead of it. Rows
+    /// added since are here too (`hide-hud-quick-loot`, 2026-11-22).
     const TWEAK_ROWS: &str = "\
         discovered-sound level-sound-every-a level-sound-a level-sound-every-b level-sound-b xp-multiplier \
         no-xp-messages no-karma-messages no-quest-failed no-location-popup no-objective-popup disable-fast-travel \
@@ -559,7 +560,7 @@ mod tests {
         usable-ammo-first better-flycam recent-markers-red compass-quest-height compass-marker-height hud-marker-name \
         hud-region-names move-during-pipboy-raise region-borders-message-only marker-name-angle \
         marker-name-hide-unfound marker-name-units hide-hud-compass hide-hud-ammo hide-hud-needs hide-hud-sneak \
-        hide-hud-on-load grey-read-notes remember-item-places player-weapon-volume npc-weapon-volume \
+        hide-hud-quick-loot hide-hud-on-load grey-read-notes remember-item-places player-weapon-volume npc-weapon-volume \
         keep-fall-height-on-load no-marker-popup marker-shift-removes marker-removed-on-it clear-marker-within \
         place-marker-here-says repeat-activate-takes-only hi-res-npc-weapons empty-reload-swaps-ammo \
         objectives-on-arrival objectives-gap sleep-in-owned-beds power-armor-no-training";
@@ -749,8 +750,9 @@ mod tests {
     #[test]
     fn every_tweak_of_1892_has_its_group_and_category() {
         let tweaks = tweak_rows();
-        // 560 less the console and screenshot keys, bindings since 2026-11-16 (Controls).
-        assert_eq!(tweaks.len(), 558);
+        // 560 less the console and screenshot keys, bindings since 2026-11-16 (Controls),
+        // and Hide HUD Key: Keep Quick Loot since 2026-11-22.
+        assert_eq!(tweaks.len(), 559);
         let mut rows: Vec<(&'static str, &'static str)> = KNOWN.to_vec();
         rows.extend(&tweaks);
         let list = registry(&rows);

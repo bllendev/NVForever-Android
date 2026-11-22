@@ -814,7 +814,11 @@ pub const SECTIONS: &[Section] = &[
         &["tweak-key-repeat-accel", "tweak-key-repeat-delay", "tweak-key-repeat-mult", "tweak-key-repeat-delay-alt", "tweak-key-repeat-mult-alt", "tweak-horizontal-look"],
     ),
     // Tweaks > Hotkeys.
-    group_section("Hotkeys", "Hide HUD Key", &["tweak-hide-hud-ammo", "tweak-hide-hud-needs", "tweak-hide-hud-compass", "tweak-hide-hud-on-load", "tweak-hide-hud-sneak"]),
+    group_section(
+        "Hotkeys",
+        "Hide HUD Key",
+        &["tweak-hide-hud-ammo", "tweak-hide-hud-needs", "tweak-hide-hud-compass", "tweak-hide-hud-on-load", "tweak-hide-hud-quick-loot", "tweak-hide-hud-sneak"],
+    ),
     group_section("Hotkeys", "Other Keys", &["tweak-place-marker-here-says", "tweak-repeat-activate-takes-only"]),
     // Tweaks > Cheats.
     group_section("Cheats", "Weight", &["tweak-weightless-aid", "tweak-weightless-ammo", "tweak-weightless-armor", "tweak-weightless-misc", "tweak-weightless-weapons"]),

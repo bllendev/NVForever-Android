@@ -17,6 +17,13 @@
 //! - **On a controller** the D-pad's Up and Down move the selection as the wheel does, one
 //!   row per press, while a list with rows shows ([`QuickLoot::owns_vertical_dpad`]): their
 //!   own controls (the hotkeys on the D-pad by default) are not pressed by them then.
+//! - **With the HUD hidden** (the Hide HUD key, `crate::hud::HudHidden`) the list stays:
+//!   drawn where it always is and holding its keys, including the vertical D-pad, exactly
+//!   as with the HUD shown. Its root is a UI node of its own, so the key's hiding of the
+//!   HUD's pieces never reaches it. The Tweaks row Hide HUD Key: Keep Quick Loot turns
+//!   that off: then the list goes with the HUD — not drawn, so not holding the keys either
+//!   ([`crate::hud::HudHidden::hides_quick_loot`], read by both `follow` and `draw`)
+//!   [design: the owner, 2026-11-22].
 //! - **The rules are the container menu's** (`crate::menu::model::MenuModel`, opened on the
 //!   target as the menu opens it, its pickpocket rolls included): a take from someone
 //!   else's container is theft (`crate::crime::ItemsTaken`), a pocket's take rolls its
@@ -800,8 +807,9 @@ pub(crate) fn follow(
         || driven.is_some_and(|d| d.0)
         || kill_cam.is_some_and(|k| k.active())
         || locks.is_some_and(|l| l.rollover || l.movement)
-        // Not drawn, so not holding the keys either (module notes).
-        || hud_hidden.is_some_and(|h| h.on);
+        // Not drawn, so not holding the keys either (module notes): only where the Hide
+        // HUD key's Keep Quick Loot row is off, as `draw` reads the very same answer.
+        || hud_hidden.is_some_and(|h| h.hides_quick_loot());
     let t = target.0.as_ref().filter(|_| ON.load(Ordering::Relaxed) && !busy);
     if ql.closed_on.is_some() && t.map(|t| t.form_id) != ql.closed_on {
         ql.closed_on = None;
@@ -937,6 +945,10 @@ pub struct QuickLootPlugin;
 
 // ---- drawing ----------------------------------------------------------------------------
 
+/// The list's own top-level UI node: nothing's child, and the HUD's least of all, so the
+/// Hide HUD key hiding the HUD's pieces cannot hide it ([`draw`] sets this one's
+/// visibility itself) [design: the owner, 2026-11-22, "just the HUD gone but Quick Loot to
+/// stay"].
 #[derive(Component)]
 struct Root;
 
@@ -1003,7 +1015,10 @@ fn draw(
     let size = scale();
     let units = crate::interface::units_at(size);
     let playing = *state.get() == PlayState::Playing;
-    let shown = ql.shown.as_ref().filter(|_| playing && !hidden.is_some_and(|h| h.on));
+    // The Hide HUD key takes the list only where its Keep Quick Loot row is off (the same
+    // answer `follow` stops the list on). The list's root is a UI node of its own, not a
+    // child of the HUD's, so with the HUD hidden it is drawn as it always is.
+    let shown = ql.shown.as_ref().filter(|_| playing && !hidden.is_some_and(|h| h.hides_quick_loot()));
     if kit.raster.is_none() {
         if shown.is_none() {
             return;
@@ -1188,6 +1203,16 @@ impl Plugin for QuickLootPlugin {
 mod tests {
     use super::*;
 
+    /// The tests that run `follow` share this module's switches ([`ON`]) and what it
+    /// publishes ([`HOLDS`]), and the harness runs tests side by side: they take this in
+    /// turn. A panic in one is not allowed to fail the next for a poisoned lock — the
+    /// failure that matters is the panic itself.
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn alone() -> std::sync::MutexGuard<'static, ()> {
+        ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn row(name: &str, count: i32, selected: bool) -> RowSpec {
         RowSpec { name: name.into(), count, weight: Some(3.0), value: Some(225), chance: None, selected }
     }
@@ -1304,6 +1329,7 @@ mod tests {
         bindings.set_pad(Control::AmmoSwap, Some(PadInput::Button(GamepadButton::DPadUp)));
         bindings.set_pad(Control::Hotkey4, Some(PadInput::Button(GamepadButton::DPadDown)));
         // The NVF Features row is on: without it the list follows no target.
+        let _alone = alone();
         ON.store(true, Ordering::Relaxed);
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::input::InputPlugin))
@@ -1357,6 +1383,66 @@ mod tests {
         owns(&mut app, false);
         wheel(&mut app, 1.0);
         assert_eq!(row(&app), 0, "the wheel is the list's whatever the D-pad is");
+        ON.store(false, Ordering::Relaxed);
+    }
+
+    /// The Hide HUD key with Keep Quick Loot on (the default): the HUD is gone and the
+    /// list is not — it follows its target and still owns the vertical D-pad, as with the
+    /// HUD shown. With the row off it goes with the HUD, as it did before the row
+    /// [design: the owner, 2026-11-22].
+    #[test]
+    fn a_hidden_hud_keeps_quick_loot_unless_its_row_is_off() {
+        use crate::bindings::{Bindings, InputDevice};
+        use crate::hud::HudHidden;
+        let (sim, shown) = shown_on_a_box();
+        let target = crate::activate::Targeted {
+            form_id: shown.target,
+            name: shown.title.clone(),
+            action: Action::Open,
+            distance: 50.0,
+            source: crate::activate::pick::Source::Collision,
+            crime: false,
+            empty: false,
+        };
+        let mut bindings = Bindings::default();
+        bindings.device = InputDevice::Controller;
+        let _alone = alone();
+        ON.store(true, Ordering::Relaxed);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::input::InputPlugin))
+            .insert_resource(bindings)
+            .insert_resource(sim)
+            .insert_resource(Target(Some(target)))
+            .insert_resource(QuickLoot { shown: Some(shown), ..default() })
+            // The parts the key hides, as `tweaks::hide_hud_key` sets them: the HUD's own
+            // pieces, and Quick Loot kept (Keep Quick Loot on).
+            .insert_resource(HudHidden { on: true, compass: true, ammo: true, needs: true, sneak: true, quick_loot: false })
+            .add_message::<crate::crime::ItemsTaken>()
+            .add_message::<crate::pickpocket::Pickpocketed>()
+            .add_message::<RefChanged>()
+            .add_message::<crate::ui_sounds::UiSound>()
+            .add_systems(Update, follow);
+        app.update();
+        let ql = app.world().resource::<QuickLoot>();
+        assert!(ql.shown.is_some(), "the HUD is hidden and the list stays");
+        assert!(ql.owns_vertical_dpad, "and it owns the vertical D-pad as it does with the HUD shown");
+        assert!(holds_input(), "and holds its keys");
+        // The row off but the key up: nothing is hidden, so nothing changes either.
+        {
+            let mut hidden = app.world_mut().resource_mut::<HudHidden>();
+            (hidden.on, hidden.quick_loot) = (false, true);
+        }
+        app.update();
+        assert!(app.world().resource::<QuickLoot>().shown.is_some(), "with the key off the row hides nothing");
+        // The row off and the key down: the list goes with the rest of the HUD, as before
+        // the row. (It cannot come back in this harness: opening one needs the script
+        // runtime, which the fixture has none of — `follow` only keeps the list it was
+        // given.)
+        app.world_mut().resource_mut::<HudHidden>().on = true;
+        app.update();
+        let ql = app.world().resource::<QuickLoot>();
+        assert!(ql.shown.is_none(), "with Keep Quick Loot off a hidden HUD takes the list");
+        assert!(!ql.owns_vertical_dpad && !holds_input(), "not drawn, so not holding the keys either");
         ON.store(false, Ordering::Relaxed);
     }
 
