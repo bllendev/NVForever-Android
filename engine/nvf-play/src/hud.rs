@@ -983,9 +983,36 @@ struct SneakText;
 
 /// A bar's row of ticks at `x`, `y` (`width` long); the ticks are set in it on whole
 /// pixels by [`pips`].
-fn spawn_row(p: &mut ChildSpawnerCommands, bar: Bar, x: f32, y: f32, width: f32, count: usize, color: Color) {
-    p.spawn((PipRow { bar, color, width, count }, at(x, y, width, TICK.y)));
+fn spawn_row<'a>(p: &'a mut ChildSpawnerCommands, bar: Bar, x: f32, y: f32, width: f32, count: usize, color: Color) -> EntityCommands<'a> {
+    p.spawn((PipRow { bar, color, width, count }, at(x, y, width, TICK.y)))
 }
+
+/// One of the four meters the Glance's **HUD on the Pip-Boy** row takes off the screen
+/// and leaves to the device's own pages (`crate::wrist_hud`): the health bar and its
+/// label, the action points bar and its label, the weapon's condition row, the ammo
+/// counter. The brackets, the compass, the crosshair and the messages are not among them
+/// — only the meters the Pip-Boy's own STATUS page shows [design: the owner, 2026-11-21].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MeterKind {
+    Hp,
+    Ap,
+    Cnd,
+    Ammo,
+}
+
+impl MeterKind {
+    /// The four, in the order `crate::wrist_hud` keeps their flashes in.
+    pub const ALL: [MeterKind; 4] = [MeterKind::Hp, MeterKind::Ap, MeterKind::Cnd, MeterKind::Ammo];
+
+    pub fn at(self) -> usize {
+        self as usize
+    }
+}
+
+/// The root of a meter's own nodes, so one row can be hidden without the piece it stands
+/// in (the compass shares the health piece, the brackets frame both).
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Meter(pub MeterKind);
 
 /// A bracket: the game's picture `x` right of its piece's corner, or plain lines where its
 /// lines are.
@@ -1018,8 +1045,8 @@ fn spawn_hud(commands: &mut Commands, art: &mut Art, images: &mut Assets<Image>,
         let piece = Node { position_type: PositionType::Absolute, left: u(MARGIN_X), bottom: u(MARGIN_Y), width: u(HP_PANEL.x), height: u(HP_PANEL.y), ..default() };
         root.spawn((HpPiece, piece, DrawnByTiles)).with_children(|p| {
             spawn_bracket(p, &art.left_bracket, 0.0, &[LEFT_UPRIGHT], color);
-            label(p, HP, places.hp_label, UPPER_BASE);
-            spawn_row(p, Bar::Health, places.hp_meter, places.meter_y, METER_WIDTH, PIPS, amber(METER_BRIGHTNESS));
+            p.spawn((Meter(MeterKind::Hp), at(0.0, 0.0, HP_PANEL.x, HP_PANEL.y))).with_children(|m| label(m, HP, places.hp_label, UPPER_BASE));
+            spawn_row(p, Bar::Health, places.hp_meter, places.meter_y, METER_WIDTH, PIPS, amber(METER_BRIGHTNESS)).insert(Meter(MeterKind::Hp));
             info!("compass: heading at x {x} of {w}, the strip's N at {n}, fading from {f}", x = COMPASS_HEADING, w = COMPASS.x, n = STRIP_HEADING, f = STRIP_FADE.0);
             let mut window_node = at(COMPASS_AT.x, COMPASS_AT.y, COMPASS.x, COMPASS.y);
             window_node.overflow = Overflow::clip();
@@ -1063,9 +1090,9 @@ fn spawn_hud(commands: &mut Commands, art: &mut Art, images: &mut Assets<Image>,
         let piece = Node { position_type: PositionType::Absolute, right: u(MARGIN_X), bottom: u(MARGIN_Y), width: u(AP_PANEL.x), height: u(AP_PANEL.y), ..default() };
         root.spawn((ApPiece, piece, DrawnByTiles)).with_children(|p| {
             spawn_bracket(p, &art.right_bracket, RIGHT_BRACKET_X, &[RIGHT_UPRIGHT, DIVIDER], color);
-            spawn_row(p, Bar::ActionPoints, places.ap_meter, places.meter_y, METER_WIDTH, PIPS, amber(METER_BRIGHTNESS));
-            label(p, AP, places.ap_label, UPPER_BASE);
-            p.spawn((ConditionRow, at(0.0, 0.0, DIVIDER, AP_PANEL.y), Visibility::Inherited)).with_children(|row| {
+            spawn_row(p, Bar::ActionPoints, places.ap_meter, places.meter_y, METER_WIDTH, PIPS, amber(METER_BRIGHTNESS)).insert(Meter(MeterKind::Ap));
+            p.spawn((Meter(MeterKind::Ap), at(0.0, 0.0, AP_PANEL.x, AP_PANEL.y))).with_children(|m| label(m, AP, places.ap_label, UPPER_BASE));
+            p.spawn((ConditionRow, Meter(MeterKind::Cnd), at(0.0, 0.0, DIVIDER, AP_PANEL.y), Visibility::Inherited)).with_children(|row| {
                 label(row, CND, places.cnd_label, LOWER_BASE);
                 row.spawn((at(places.cnd_x, places.cnd_y, CND_BAR.x, CND_BAR.y), BackgroundColor(amber(GROUND_BRIGHTNESS))));
                 row.spawn((ConditionBar, at(places.cnd_x, places.cnd_y, CND_FILL_WIDTH, CND_BAR.y), BackgroundColor(amber(CONDITION_BRIGHTNESS))));
@@ -1091,7 +1118,7 @@ fn spawn_hud(commands: &mut Commands, art: &mut Art, images: &mut Assets<Image>,
                 row.spawn((at(places.cnd_x, places.cnd_y, CND_BAR.x, CND_BAR.y), BackgroundColor(amber(GROUND_BRIGHTNESS))));
                 row.spawn((ArmorBar, at(places.cnd_x, places.cnd_y, CND_FILL_WIDTH, CND_BAR.y), BackgroundColor(amber(CONDITION_BRIGHTNESS))));
             });
-            p.spawn((AmmoText, at(0.0, 0.0, AP_PANEL.x, AP_PANEL.y)));
+            p.spawn((AmmoText, Meter(MeterKind::Ammo), at(0.0, 0.0, AP_PANEL.x, AP_PANEL.y)));
         });
         // The sneak word, top middle.
         let piece = Node { position_type: PositionType::Absolute, left: Val::Percent(50.0), margin: UiRect::left(u(-SNEAK.x / 2.0)), top: u(0.0), width: u(SNEAK.x), height: u(SNEAK.y + SNEAK_BASE), ..default() };

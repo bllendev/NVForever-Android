@@ -23,6 +23,10 @@ pub struct Sampled {
     /// figure above is the GPU's. A leak of ours is a number that only ever rises; the
     /// out-of-memory abort of 2026-11-22 had the GPU's own flat throughout.
     pub rss_bytes: Option<u64>,
+    /// What the live wrist map's caches hold, bytes
+    /// (`nvf_play::wrist_local::cache_bytes`): the outline grids and the pictures its
+    /// screen wears, the one part of the glance that holds anything of a size.
+    pub wrist_cache_bytes: Option<u64>,
 }
 
 pub(super) const MB: f64 = 1024.0 * 1024.0;
@@ -45,6 +49,9 @@ impl Sampled {
         }
         if let Some(rss) = self.rss_bytes {
             parts.push(format!("resident {:.0} MB", mb(rss)));
+        }
+        if let Some(wrist) = self.wrist_cache_bytes.filter(|&b| b > 0) {
+            parts.push(format!("wrist caches {:.1} MB", mb(wrist)));
         }
         if parts.is_empty() {
             return String::new();
