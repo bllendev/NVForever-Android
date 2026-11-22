@@ -1334,9 +1334,6 @@ pub struct ControlInput<'w, 's> {
     pub blocked: Option<Res<'w, crate::script_input::ScriptBlocked>>,
     /// A playing kill camera holds the gameplay controls (`crate::kill_cam`).
     pub kill_cam: Option<Res<'w, crate::kill_cam::KillCam>>,
-    /// The live wrist map holds the hands' controls while its arm is up
-    /// (`crate::wrist_arm`).
-    pub wrist: Option<Res<'w, crate::wrist_arm::WristLive>>,
     /// A text field has the keyboard ([`KeyboardCapture`]).
     pub capture: Option<Res<'w, KeyboardCapture>>,
 }
@@ -1387,10 +1384,10 @@ impl ControlInput<'_, '_> {
     /// save, so the game can still be paused or left (`crate::kill_cam`, module notes).
     pub fn held(&self, c: Control) -> bool {
         // The live wrist map holds the hands' own controls while the arm is up, so an
-        // attack cannot fire or draw through it and the sights cannot zoom. Read from the
+        // attack cannot fire or draw through it and the sights cannot zoom. Set from the
         // glance's open intent every frame and never latched: the frame the arm goes down
-        // they are all back (`crate::wrist_arm::holds`).
-        if crate::wrist_arm::holds(c) && self.wrist.as_ref().is_some_and(|w| w.live() && w.open.is_some()) {
+        // they are all back (`crate::wrist_arm::holds`, `wrist_arm::glance_holds`).
+        if crate::wrist_arm::glance_holds() && crate::wrist_arm::holds(c) {
             return true;
         }
         self.kill_cam.as_ref().is_some_and(|k| k.active())

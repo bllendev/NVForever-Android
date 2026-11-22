@@ -5,7 +5,9 @@
 //!
 //! The player turns it on at Gameplay › Pip-Boy on the settings page (`wrist-map`, off
 //! until they do) and chooses how its key works (`wrist-map-raise`: Hold or Toggle).
-//! `NVF_WRIST_LIVE=1` forces it on for a developer whatever the row says.
+//! `NVF_WRIST_LIVE=1` forces it on for a developer whatever the row says, and
+//! `NVF_WRIST_FORCE_RAISE=1` holds the glance up with no key at all so a screenshot can
+//! be taken of it. Both are developers' switches, named nowhere a player looks.
 //!
 //! Its key is [`crate::bindings::Control::GlancePipBoy`], rebindable on the Controls page
 //! and unbound by default: with no binding of its own the glance follows a *hold* of the
@@ -21,7 +23,8 @@
 //!
 //! - [`decide`] (in [`crate::PlaySet::Input`]) fills [`Play`] from state the
 //!   engine already keeps, steps the rules, and publishes [`WristLive::open`] (the arm
-//!   pose it asks for) and [`WristLive::shown`] (what its screen should show).
+//!   pose it asks for), [`WristLive::shown`] (what its screen should show) and
+//!   [`glance_holds`] (the hands' controls it holds for the rest of the frame).
 //! - nvforever's `player_body::drive_body` takes the pose from
 //!   [`WristLive::arm_clip_time`], the same first-person hold the menus use.
 //! - nvforever's `wrist_screen` wears the map on the screen shape, and writes back what
@@ -73,6 +76,11 @@ pub struct WristLive {
     pub on: bool,
     /// `NVF_WRIST_LIVE=1`: a developer's override that turns it on whatever the row says.
     pub forced: bool,
+    /// `NVF_WRIST_FORCE_RAISE=1`: a developer's override that asks for the glance with no
+    /// key at all, so a screenshot can be taken of what it draws. Not a row of the
+    /// settings page and nothing a player meets: it only stands in for the key, so every
+    /// blocker still closes the glance exactly as it does for a held key.
+    pub held_up: bool,
     /// How its key works ([`Raise`]), the settings page's second row.
     pub style: Raise,
     /// The player is asking for the glance now: the key is held past its moment
@@ -140,6 +148,25 @@ fn take_style(world: &mut World, name: &str) -> bool {
 /// enough that an ordinary tap still opens the Pip-Boy, short enough to feel like a
 /// glance [design: the owner, 2026-11-21].
 pub const GLANCE_SECONDS: f32 = 0.25;
+
+/// Whether the glance holds the hands' controls now, for `bindings::ControlInput::held`.
+///
+/// A global and not a resource, as `bindings::set_keys_with_pad` is: the view of the
+/// input that [`decide`] itself reads is the same `ControlInput` every other system
+/// reads, and one system cannot both write the glance's state and hold a view of the
+/// input that reads it (Bevy's own B0002). [`decide`] clears it while it reads the
+/// frame's keys — so a press of the hands' own controls is seen on the very frame it is
+/// made, as the behaviour notes ask — and sets it again from the frame's decision, before
+/// anything else in [`crate::PlaySet::Input`] or after it reads the input.
+static GLANCE_HOLDS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn glance_holds() -> bool {
+    GLANCE_HOLDS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn set_glance_holds(on: bool) {
+    GLANCE_HOLDS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
 
 /// The controls the glance holds while the arm is up, so an attack cannot fire or draw a
 /// weapon through it and the sights cannot zoom [design: the behaviour notes' own list].
@@ -243,7 +270,11 @@ impl Plugin for WristLivePlugin {
         if forced {
             info!("wrist: the glance is forced on (NVF_WRIST_LIVE=1), whatever the settings page says");
         }
-        app.insert_resource(WristLive { forced, ..default() })
+        let held_up = std::env::var_os("NVF_WRIST_FORCE_RAISE").is_some_and(|v| v == "1");
+        if held_up {
+            info!("wrist: the glance is held up (NVF_WRIST_FORCE_RAISE=1, a developer's switch for screenshots), as though its key were never let go");
+        }
+        app.insert_resource(WristLive { forced, held_up, ..default() })
             .init_resource::<WristBody>()
             // After the Menu Mode key's hold is read, which is what asks for the glance
             // (`crate::flashlight::menu_key`).
@@ -292,6 +323,9 @@ pub(crate) fn decide(
     mut was_menus: Local<bool>,
     mut latched: Local<bool>,
 ) {
+    // Nothing is held while the frame's own keys are read, so a press of the hands' own
+    // controls does its job on the frame it is made and only then ends the glance.
+    set_glance_holds(false);
     if !wrist.live() {
         // Off: it asks for nothing, and anything it asked for before is withdrawn. The
         // Pip-Boy's key is left entirely alone, so the menus behave as they always did.
@@ -320,16 +354,18 @@ pub(crate) fn decide(
     let asking = if bound { input.pressed(Control::GlancePipBoy) } else { hold.as_deref().is_some_and(|h| h.glancing()) };
     let began = if bound { input.just_pressed(Control::GlancePipBoy) } else { asking && !wrist.asked };
     wrist.asked = asking;
-    let want_open = match wrist.style {
-        Raise::Hold => asking,
-        // A hold flips the latch; letting go leaves it where it is.
-        Raise::Toggle => {
-            if began {
-                *latched = !*latched;
+    // The developer's switch stands in for the key being held down and nothing else.
+    let want_open = wrist.held_up
+        || match wrist.style {
+            Raise::Hold => asking,
+            // A hold flips the latch; letting go leaves it where it is.
+            Raise::Toggle => {
+                if began {
+                    *latched = !*latched;
+                }
+                *latched
             }
-            *latched
-        }
-    };
+        };
     let exterior = location.as_deref().filter(|l| l.interior.is_none()).map(|l| l.world);
     let play = Play {
         session: wrist.session,
@@ -392,6 +428,8 @@ pub(crate) fn decide(
     }
     wrist.open = frame.pose;
     wrist.arm = raised(wrist.arm, time.delta_secs(), frame.pose.is_some());
+    // What the glance holds for the rest of this frame, from its own decision.
+    set_glance_holds(frame.pose.is_some());
     // One line on each change, so a log says when the live view held the arm and why it
     // let go; nothing at all while it is closed.
     match (was, frame.pose) {
@@ -470,6 +508,14 @@ mod tests {
         for c in [Control::MenuMode, Control::Forward, Control::Jump, Control::CrouchSneak, Control::QuickSave] {
             assert!(!holds(c), "{c:?} must keep working while looking");
         }
+        // Nothing is held until a frame's decision says so, and nothing is remembered:
+        // `decide` clears it while it reads the frame's keys and sets it from its own
+        // decision (the controls are read through `bindings::ControlInput::held`).
+        set_glance_holds(false);
+        assert!(!glance_holds(), "a frame that has not decided yet holds nothing");
+        set_glance_holds(true);
+        assert!(glance_holds());
+        set_glance_holds(false);
         // And the whole rule hangs on the open intent: with no arm up there is nothing to
         // hold, whatever was held a frame ago.
         let up = WristLive::held_for_test(true, None);
