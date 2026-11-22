@@ -639,6 +639,12 @@ pub struct TweakSettings {
     pub hide_hud_ammo: bool,
     pub hide_hud_needs: bool,
     pub hide_hud_sneak: bool,
+    /// The one part the key *keeps*: on (the default), the Quick Loot list is still drawn
+    /// and still owns its keys while the HUD is hidden — "just the HUD gone but Quick Loot
+    /// to stay" [design: the owner, 2026-11-22]. Off, the list goes with the HUD as it did
+    /// before. Carried on `crate::hud::HudHidden::quick_loot` the other way about, as the
+    /// parts there are what the key hides.
+    pub hide_hud_keeps_quick_loot: bool,
     /// `iHideHUDKey` `bHideByDefault`: a loaded save starts with those parts hidden.
     pub hide_hud_on_load: bool,
     /// `bTerminalGreyReadNotes`: terminal entries whose note was read are drawn dimmer.
@@ -974,6 +980,7 @@ impl Default for TweakSettings {
             hide_hud_ammo: true,
             hide_hud_needs: true,
             hide_hud_sneak: true,
+            hide_hud_keeps_quick_loot: true,
             hide_hud_on_load: false,
             player_weapon_volume: 100.0,
             npc_weapon_volume: 100.0,
@@ -2173,6 +2180,13 @@ impl Plugin for TweaksPlugin {
         switch!(app, "hide-hud-ammo", "Hide HUD Key: Action Points and Ammo", "The Hide HUD key hides the action points, condition and ammo. (Stewie's Tweaks iHideHUDKey)", hide_hud_ammo);
         switch!(app, "hide-hud-needs", "Hide HUD Key: Hardcore Needs", "The Hide HUD key hides the Hardcore needs words. (Stewie's Tweaks iHideHUDKey)", hide_hud_needs);
         switch!(app, "hide-hud-sneak", "Hide HUD Key: Sneak", "The Hide HUD key hides the sneak word. (Stewie's Tweaks iHideHUDKey)", hide_hud_sneak);
+        switch!(
+            app,
+            "hide-hud-quick-loot",
+            "Hide HUD Key: Keep Quick Loot",
+            "The Hide HUD key leaves the Quick Loot list showing and working its keys with the rest of the HUD gone; off, the list goes with it. (Stewie's Tweaks iHideHUDKey, this part NVForever's own)",
+            hide_hud_keeps_quick_loot
+        );
         switch!(app, "hide-hud-on-load", "Hide HUD Key: Hidden After Loading", "A loaded save starts with the Hide HUD key's parts hidden. (Stewie's Tweaks iHideHUDKey)", hide_hud_on_load);
         switch!(app, "grey-read-notes", "Dim Read Terminal Entries", "Terminal entries whose note you have read are drawn dimmer (not those read before this was on). (Stewie's Tweaks bTerminalGreyReadNotes)", grey_read_notes);
         switch!(app, "remember-item-places", "Remember Item List Places", "The Pip-Boy's item lists open on the row they were left on, each tab its own, and a save keeps them. (Stewie's Tweaks bRememberPipboyScrollPositions)", remember_item_places);
@@ -2426,7 +2440,9 @@ fn place_marker_here(
 /// The Clear Marker When Near tweak: the custom map marker goes when the player comes
 /// The Hide HUD key (`crate::bindings::Control::HideHud`) hides the parts of the HUD its
 /// switches choose, or shows them again (`crate::hud::HudHidden`); at the start, under
-/// Hidden After Loading, they start hidden [design: docs/design/tweaks.md].
+/// Hidden After Loading, they start hidden [design: docs/design/tweaks.md]. Keep Quick
+/// Loot, on by default, is the one row that says what the key *keeps*, so a hidden HUD
+/// still shows the list and still gives it its keys.
 /// The player's Toggle Controller If Attack Pressed tweak: with the keyboard and mouse
 /// working the controls, a controller's A switches them to the controller; with the
 /// controller, a left click switches them back. Written to the INI only with the controls'
@@ -2456,9 +2472,11 @@ fn hide_hud_key(input: crate::bindings::ControlInput, state: Res<State<crate::Pl
         hidden.on = !hidden.on;
         info!("hud: the Hide HUD key {} its parts (tweak)", if hidden.on { "hides" } else { "shows" });
     }
-    let parts = (tweaks.hide_hud_compass, tweaks.hide_hud_ammo, tweaks.hide_hud_needs, tweaks.hide_hud_sneak);
-    if (hidden.compass, hidden.ammo, hidden.needs, hidden.sneak) != parts {
-        (hidden.compass, hidden.ammo, hidden.needs, hidden.sneak) = parts;
+    // Quick Loot the other way about: its row says what the key *keeps*, the resource what
+    // it hides (`crate::hud::HudHidden::hides_quick_loot`).
+    let parts = (tweaks.hide_hud_compass, tweaks.hide_hud_ammo, tweaks.hide_hud_needs, tweaks.hide_hud_sneak, !tweaks.hide_hud_keeps_quick_loot);
+    if (hidden.compass, hidden.ammo, hidden.needs, hidden.sneak, hidden.quick_loot) != parts {
+        (hidden.compass, hidden.ammo, hidden.needs, hidden.sneak, hidden.quick_loot) = parts;
     }
 }
 
