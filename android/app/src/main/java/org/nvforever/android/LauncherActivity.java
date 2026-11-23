@@ -844,7 +844,25 @@ public class LauncherActivity extends Activity {
                 R.string.debug_validation_gpuav_note, layer);
         testRow(vulkan, ControlsFile.GPU_BREADCRUMBS, R.string.debug_breadcrumbs,
                 R.string.debug_breadcrumbs_note, true);
+        // The chunks exist to be marked, so they are a child of the breadcrumbs exactly as the
+        // two deeper checks are children of the layer; the engine enforces the same dependency.
+        testRow(vulkan, ControlsFile.GPU_BREADCRUMB_CHUNKS, R.string.debug_breadcrumb_chunks,
+                R.string.debug_breadcrumb_chunks_note,
+                Boolean.TRUE.equals(controls.get(ControlsFile.GPU_BREADCRUMBS)));
         screen.addView(vulkan, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
+
+        // One switch a drawn feature, for narrowing down which of them the GPU dies in.
+        LinearLayout drawing = Ui.panel(this, getString(R.string.debug_group_drawing));
+        testRow(drawing, ControlsFile.NO_SOFT_PARTICLES, R.string.debug_no_soft_particles,
+                R.string.debug_no_soft_particles_note, true);
+        testRow(drawing, ControlsFile.NO_PARTICLES, R.string.debug_no_particles,
+                R.string.debug_no_particles_note, true);
+        testRow(drawing, ControlsFile.NO_DECALS, R.string.debug_no_decals,
+                R.string.debug_no_decals_note, true);
+        testRow(drawing, ControlsFile.NO_HEAT_HAZE, R.string.debug_no_heat_haze,
+                R.string.debug_no_heat_haze_note, true);
+        screen.addView(drawing, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
 
         LinearLayout diagnostics = Ui.panel(this, getString(R.string.debug_group_diagnostics));

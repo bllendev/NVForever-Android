@@ -42,6 +42,47 @@ Both become `NVF_VULKAN_VALIDATION_DEEP=sync,gpuav` for the engine, which chains
 - On a desktop run, `NVF_GPU_BREADCRUMBS=1` does the same thing.
 - What it cannot promise: the markers carry no barriers, so "the GPU reached this node's begin" is not "every command before it retired", and a value reaches the CPU when the driver flushes it, which on a hung queue is best effort. That is why the dump prints the whole window rather than one answer.
 
+### Finer breadcrumbs: the transparent pass in chunks
+
+The breadcrumbs named the pass: on a save load, frames 2 to 13 completed and frame 14 began
+`bevy_core_pipeline::core_3d::main_transparent_pass_3d_node::main_transparent_pass_3d` and
+never ended (the transmissive pass before it ended) [observed 2026-11-22]. That one pass
+draws every blended thing in the world, so the Debug screen's **GPU breadcrumbs inside the
+transparent pass** (`gpu-breadcrumb-chunks true`, greyed until the breadcrumbs switch above it
+is on) cuts it up: a
+run of consecutive sorted transparent items sharing a draw function and a pipeline is drawn in
+a render pass of its own, with a marker before and after it, up to 32 chunks a frame.
+
+- A marker is a `vkCmdFillBuffer`, which Vulkan forbids inside a render pass, so a marker
+  cannot sit between two draws of one pass. One render pass per chunk is the way to get a
+  marker between the draws, and it is also the cost: each chunk loads and stores the colour
+  and depth attachments, which on a tiler is the expensive thing. Leave the switch off for
+  anything but this test.
+- Nothing is drawn differently: the phase keeps its sorted order and a cut only ever falls on
+  a batch boundary, so the same draws happen in the same order.
+- The dump beside the node breadcrumbs then says which chunk the GPU began and never ended,
+  with its item range, draw count, pipeline id, the pipeline's own label and shader file, and
+  what is drawn in it: particles, effect particles and decals tag their drawn entity with
+  their form or model while the switch is on, so the line can read
+  `particles meshes\effects\ambient\fxsprayjet01.nif pSteam07`. The chunk tables of the last
+  24 frames are kept, so the frame the markers point at is still explained.
+- `NVF_GPU_BREADCRUMB_CHUNKS=1` with `NVF_GPU_BREADCRUMBS=1` does the same on a desktop run.
+- Engine code: `engine/nvforever/src/gpu_recorder/transparent_chunks.rs`; the marker itself is
+  `RenderContext::gpu_breadcrumb` in the vendored `bevy_render`.
+
+### Crash tests: one drawn feature each
+
+Four switches on the Debug screen, under "Leave something out of the picture", each off by
+default and each gating only its own feature, for the suspects in that pass. They are
+independent of the breadcrumbs and of each other.
+
+| Launcher switch | `nvforever-controls.txt` | Environment | What it does |
+| --- | --- | --- | --- |
+| No soft particles | `no-soft-particles true` | `NVF_NO_SOFT_PARTICLES=1` | A particle gets no soft-intersection distance, so it has a hard edge where it passes into a wall. A NIF material without a soft distance is then built without the soft-intersection path at all, so its fragment shader reads the view's depth prepass nowhere. |
+| No particles | `no-particles true` | `NVF_NO_PARTICLES=1` | No particle system and no effect particle is drawn. They are still simulated, so nothing else in the game changes. |
+| No decals | `no-decals true` | `NVF_NO_DECALS=1` | No decal is placed (blood, bullet holes). The shots and their impacts are unchanged. |
+| No heat haze | `no-heat-haze true` | `NVF_NO_HEAT_HAZE=1` | The heat-haze pass records nothing. It is a post-process pass, not a transparent draw, and is off in every preset anyway. |
+
 ## Iteration
 
 - Pushing `odin/**` builds an APK and uploads a GitHub Actions artifact; it does not publish a release. `odin-v*` tags build, verify and publish a GitHub prerelease. Create each new tag from the tested commit, never move a published tag.

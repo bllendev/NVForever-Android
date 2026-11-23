@@ -60,6 +60,26 @@ pub fn main() {
     if tests.gpu_breadcrumbs {
         std::env::set_var(nvforever::odin::GPU_BREADCRUMBS_ENV, "1");
     }
+    // Crash test from the launcher: with the breadcrumbs on, the transparent pass is drawn in
+    // chunks with a marker between them, so a lost device names the chunk of draws
+    // (`nvforever::odin::gpu_recorder::transparent_chunks`). Much slower.
+    if tests.gpu_breadcrumb_chunks {
+        std::env::set_var(nvforever::odin::GPU_BREADCRUMB_CHUNKS_ENV, "1");
+    }
+    // Crash tests from the launcher, one drawn feature each: soft particles, particles,
+    // decals, heat haze.
+    if tests.no_soft_particles {
+        std::env::set_var(nvforever::odin::NO_SOFT_PARTICLES_ENV, "1");
+    }
+    if tests.no_particles {
+        std::env::set_var(nvforever::odin::NO_PARTICLES_ENV, "1");
+    }
+    if tests.no_decals {
+        std::env::set_var(nvforever::odin::NO_DECALS_ENV, "1");
+    }
+    if tests.no_heat_haze {
+        std::env::set_var(nvforever::odin::NO_HEAT_HAZE_ENV, "1");
+    }
     // Crash test from the launcher: the Khronos Vulkan validation layer, loaded before the
     // renderer's instance is made (validation.rs). Much slower; off unless asked for. The two
     // deeper checks are its own switches, and mean nothing without it.

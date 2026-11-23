@@ -554,6 +554,9 @@ impl From<&NifSurfaceBlendColour> for NifSurfaceBlendKey {
             // An object blended into the landscape, not a landscape layer: bevy_pbr's rule
             // decides its ambient occlusion.
             terrain_layer: false,
+            // Crash test only (`nif_material::no_soft_particles`), and a blended object is
+            // never a particle: false in every run.
+            no_soft: false,
         }, s.mesh_terrain_layout)
     }
 }

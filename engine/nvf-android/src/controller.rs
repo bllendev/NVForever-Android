@@ -29,6 +29,21 @@ pub struct ControlsConfig {
     /// Crash test (launcher switch): every render-graph node writes a GPU marker before and
     /// after its work (`nvforever::odin::GPU_BREADCRUMBS_ENV`), so a lost device names the node.
     pub gpu_breadcrumbs: bool,
+    /// Crash test (launcher switch): with the breadcrumbs on, the transparent pass is drawn
+    /// in chunks with a marker between them, so a lost device names the chunk of draws
+    /// (`nvforever::odin::GPU_BREADCRUMB_CHUNKS_ENV`). Many more render passes a frame.
+    pub gpu_breadcrumb_chunks: bool,
+    /// Crash test (launcher switch): particles keep hard edges where they meet the surface
+    /// behind them, and the NIF material reads the depth prepass nowhere
+    /// (`nvforever::odin::NO_SOFT_PARTICLES_ENV`).
+    pub no_soft_particles: bool,
+    /// Crash test (launcher switch): no particle system and no effect particle is drawn
+    /// (`nvforever::odin::NO_PARTICLES_ENV`).
+    pub no_particles: bool,
+    /// Crash test (launcher switch): no decal is placed (`nvforever::odin::NO_DECALS_ENV`).
+    pub no_decals: bool,
+    /// Crash test (launcher switch): no heat haze pass (`nvforever::odin::NO_HEAT_HAZE_ENV`).
+    pub no_heat_haze: bool,
 }
 impl Default for ControlsConfig {
     /// What a phone without the file gets: touch controls, nothing else.
@@ -43,6 +58,11 @@ impl Default for ControlsConfig {
             vulkan_validation_sync: false,
             vulkan_validation_gpuav: false,
             gpu_breadcrumbs: false,
+            gpu_breadcrumb_chunks: false,
+            no_soft_particles: false,
+            no_particles: false,
+            no_decals: false,
+            no_heat_haze: false,
         }
     }
 }
@@ -76,6 +96,11 @@ impl ControlsConfig {
                 "vulkan-validation-sync" => config.vulkan_validation_sync = enabled,
                 "vulkan-validation-gpuav" => config.vulkan_validation_gpuav = enabled,
                 "gpu-breadcrumbs" => config.gpu_breadcrumbs = enabled,
+                "gpu-breadcrumb-chunks" => config.gpu_breadcrumb_chunks = enabled,
+                "no-soft-particles" => config.no_soft_particles = enabled,
+                "no-particles" => config.no_particles = enabled,
+                "no-decals" => config.no_decals = enabled,
+                "no-heat-haze" => config.no_heat_haze = enabled,
                 _ => {}
             }
         }
@@ -246,19 +271,31 @@ mod tests {
         assert!(!empty.controller && empty.touch && !empty.diagnostics);
         assert!(!empty.skip_pipboy_warmup && !empty.skip_vats_outline && !empty.vulkan_validation);
         assert!(!empty.vulkan_validation_sync && !empty.vulkan_validation_gpuav && !empty.gpu_breadcrumbs);
+        assert!(!empty.gpu_breadcrumb_chunks && !empty.no_soft_particles && !empty.no_particles && !empty.no_decals && !empty.no_heat_haze);
 
         // What the launcher writes with every switch on (the comment line is ignored).
         let on = ControlsConfig::parse(
             "# Applied when starting the game\ncontroller true\ntouch true\nskip-pipboy-warmup true\nskip-vats-outline true\nvulkan-validation true\n\
-             vulkan-validation-sync true\nvulkan-validation-gpuav true\ngpu-breadcrumbs true\n",
+             vulkan-validation-sync true\nvulkan-validation-gpuav true\ngpu-breadcrumbs true\ngpu-breadcrumb-chunks true\nno-soft-particles true\n\
+             no-particles true\nno-decals true\nno-heat-haze true\n",
         );
         assert!(on.controller && on.touch && on.skip_pipboy_warmup && on.skip_vats_outline && on.vulkan_validation);
         assert!(on.vulkan_validation_sync && on.vulkan_validation_gpuav && on.gpu_breadcrumbs);
+        assert!(on.gpu_breadcrumb_chunks && on.no_soft_particles && on.no_particles && on.no_decals && on.no_heat_haze);
 
         // The off state is the file saying false, not only the file being absent.
-        let off = ControlsConfig::parse("controller false\ntouch false\nvulkan-validation false\nvulkan-validation-sync false\nvulkan-validation-gpuav false\ngpu-breadcrumbs false\n");
+        let off = ControlsConfig::parse(
+            "controller false\ntouch false\nvulkan-validation false\nvulkan-validation-sync false\nvulkan-validation-gpuav false\ngpu-breadcrumbs false\n\
+             gpu-breadcrumb-chunks false\nno-soft-particles false\nno-particles false\nno-decals false\nno-heat-haze false\n",
+        );
         assert!(!off.controller && !off.touch && !off.vulkan_validation);
         assert!(!off.vulkan_validation_sync && !off.vulkan_validation_gpuav && !off.gpu_breadcrumbs);
+        assert!(!off.gpu_breadcrumb_chunks && !off.no_soft_particles && !off.no_particles && !off.no_decals && !off.no_heat_haze);
+
+        // The names are read one at a time: a switch on leaves the others as they were.
+        let one = ControlsConfig::parse("no-particles 1\n");
+        assert!(one.no_particles && !one.no_soft_particles && !one.no_decals && !one.no_heat_haze && !one.gpu_breadcrumb_chunks);
+        assert!(!ControlsConfig::parse("no-heat-haze maybe").no_heat_haze);
 
         // 1/0 are accepted too; an unknown name, a missing or unreadable value and a blank
         // line change nothing.

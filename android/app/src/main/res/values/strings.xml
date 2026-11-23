@@ -190,6 +190,7 @@
     <string name="debug_group_engine">Engine crash tests</string>
     <string name="debug_group_vulkan">Vulkan validation (Khronos layer, big slowdowns)</string>
     <string name="debug_group_diagnostics">Diagnostics</string>
+    <string name="debug_group_drawing">Leave something out of the picture</string>
     <string name="debug_group_reports">Reports</string>
     <string name="debug_group_reset">Reset</string>
     <string name="debug_skip_pipboy">Skip Pip-Boy warm-up</string>
@@ -204,6 +205,16 @@
     <string name="debug_validation_gpuav_note">Also instruments shaders. Very slow, and a load may never finish. Needs the layer above.</string>
     <string name="debug_breadcrumbs">GPU breadcrumbs</string>
     <string name="debug_breadcrumbs_note">Marks every render step, so a GPU hang can name the step that died.</string>
+    <string name="debug_breadcrumb_chunks">GPU breadcrumbs inside the transparent pass</string>
+    <string name="debug_breadcrumb_chunks_note">Marks each group of see-through draws, so a hang there can name the group instead of the whole pass. Needs the breadcrumbs above. Much slower.</string>
+    <string name="debug_no_soft_particles">No soft particles</string>
+    <string name="debug_no_soft_particles_note">Smoke and dust keep hard edges where they meet a wall, and the shader stops reading the depth of the scene. Tests whether that read crashes.</string>
+    <string name="debug_no_particles">No particles</string>
+    <string name="debug_no_particles_note">Draws no smoke, dust, sparks or blood mist. They are still simulated, just not drawn.</string>
+    <string name="debug_no_decals">No decals</string>
+    <string name="debug_no_decals_note">Places no bullet holes and no blood splatter. Shots and their damage are unchanged.</string>
+    <string name="debug_no_heat_haze">No heat haze</string>
+    <string name="debug_no_heat_haze_note">Draws no shimmering air over the desert. One screen-wide pass fewer.</string>
     <string name="debug_diagnostics">Native input logging</string>
     <string name="debug_diagnostics_note">Logs every controller event. Big logs.</string>
     <string name="debug_privacy">Logs contain your device model, folder paths, file names and the name of your active profile. They contain no game data and no account details. Read them before you share them.</string>

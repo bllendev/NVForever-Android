@@ -32,6 +32,11 @@ public final class ControlsFile {
     public static final String VULKAN_VALIDATION_SYNC = "vulkan-validation-sync";
     public static final String VULKAN_VALIDATION_GPUAV = "vulkan-validation-gpuav";
     public static final String GPU_BREADCRUMBS = "gpu-breadcrumbs";
+    public static final String GPU_BREADCRUMB_CHUNKS = "gpu-breadcrumb-chunks";
+    public static final String NO_SOFT_PARTICLES = "no-soft-particles";
+    public static final String NO_PARTICLES = "no-particles";
+    public static final String NO_DECALS = "no-decals";
+    public static final String NO_HEAT_HAZE = "no-heat-haze";
 
     /**
      * Every switch that makes the game slower or stops it loading, so the launcher can count
@@ -39,7 +44,8 @@ public final class ControlsFile {
      */
     public static final String[] CRASH_TESTS = {
         SKIP_PIPBOY_WARMUP, SKIP_VATS_OUTLINE, VULKAN_VALIDATION, VULKAN_VALIDATION_SYNC,
-        VULKAN_VALIDATION_GPUAV, GPU_BREADCRUMBS, DIAGNOSTICS,
+        VULKAN_VALIDATION_GPUAV, GPU_BREADCRUMBS, GPU_BREADCRUMB_CHUNKS, NO_SOFT_PARTICLES,
+        NO_PARTICLES, NO_DECALS, NO_HEAT_HAZE, DIAGNOSTICS,
     };
 
     private ControlsFile() {}

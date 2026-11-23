@@ -492,6 +492,34 @@ impl<'w, 's> RenderContext<'w, 's> {
         }
     }
 
+    /// NVForever GPU breadcrumbs: a marker of the caller's own, between what this node has
+    /// recorded so far and what it records next. The node's own begin and end markers still
+    /// surround all of it.
+    ///
+    /// For a node that wants finer grain than itself: the transparent pass records one
+    /// marker between each chunk of draws it splits the phase into, because a
+    /// `vkCmdFillBuffer` is not allowed inside a render pass and so cannot sit between two
+    /// draws of one pass (nvforever `gpu_recorder::transparent_chunks`). `name` must come
+    /// from a small fixed set ([`gpu_breadcrumbs::node`](crate::gpu_breadcrumbs::node)).
+    ///
+    /// Does nothing with `NVF_GPU_BREADCRUMBS` unset, which is every ordinary run.
+    pub fn gpu_breadcrumb(&mut self, name: &str, end: bool) {
+        if !crate::gpu_breadcrumbs::on() {
+            return;
+        }
+        self.ensure_device();
+        let node = crate::gpu_breadcrumbs::node(name);
+        // Whatever is open belongs before the marker, and the pass the caller opens next
+        // after it.
+        self.state.flush_encoder();
+        if let Some(buffer) = crate::gpu_breadcrumbs::mark(self.render_device.wgpu_device(), node, end) {
+            self.state
+                .0
+                .commands
+                .push(PendingCommandBuffer::Buffer(buffer));
+        }
+    }
+
     /// The matching end marker, after everything the node recorded. A begin whose end never
     /// ran on the GPU is the node that hung.
     fn end_breadcrumb(&mut self) {

@@ -53,6 +53,7 @@ pub mod ring;
 pub mod rss;
 #[cfg(test)]
 mod tests;
+pub mod transparent_chunks;
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -133,8 +134,15 @@ pub fn dump_text(why: &str) -> String {
     };
     let fault = FAULT.get().and_then(|f| f.as_deref());
     // The breadcrumbs last: the node the GPU was in is the answer the rest of the dump is
-    // context for, and it is `""` unless this run was asked for them (`breadcrumbs`).
-    format!("{}{}", report::dump(why, &frames, pushed, &sampled_now(), fault), breadcrumbs::section())
+    // context for, and it is `""` unless this run was asked for them (`breadcrumbs`). The
+    // transparent pass's chunks come after the nodes, being the finer grain of the same
+    // answer, and are `""` unless that switch was asked for too.
+    format!(
+        "{}{}{}",
+        report::dump(why, &frames, pushed, &sampled_now(), fault),
+        breadcrumbs::section(),
+        transparent_chunks::section()
+    )
 }
 
 /// The dump for a crash report, or `""` when the device is not lost. Appended under the

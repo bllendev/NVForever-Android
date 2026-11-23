@@ -204,6 +204,11 @@ pub fn draw(
         }));
         let mesh = models.meshes.add(particle_mesh());
         let entity = commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(material), Transform::IDENTITY, Visibility::Hidden, NotShadowCaster, NoFrustumCulling, ChildOf(root))).id();
+        // Crash test (gpu_recorder/transparent_chunks.rs): what the chunk report calls it.
+        if crate::odin::gpu_recorder::transparent_chunks::on() {
+            let what = format!("effect particles {} {}", a.shader.edid, path.as_deref().unwrap_or("?"));
+            commands.entity(entity).insert(crate::odin::gpu_recorder::transparent_chunks::kind(what));
+        }
         st.plays += 1;
         let who = if a.on == FormId::PLAYER_REF.0 { "the player".to_string() } else { script.as_deref().and_then(|s| s.rt.as_ref()).map_or_else(|| format!("{:08X}", a.on), |rt| rt.game.data.name(FormId(a.on)).to_string()) };
         info!(
@@ -333,9 +338,12 @@ pub fn build(
     // Taken: a frame whose `draw` did not get this far draws nothing, as before.
     let Some(basis) = st.basis.take() else { return };
     let frame = views.frame();
+    // Crash test (`crate::odin::NO_PARTICLES_ENV`): every burst stays hidden and no squares are
+    // built, as in `particles::draw`.
+    let off = crate::odin::no_particles();
     for b in st.bursts.values() {
         let alive = !b.particles.is_empty();
-        let seen = alive && frame.may_see(burst_bounds(b), b.entity, &views);
+        let seen = !off && alive && frame.may_see(burst_bounds(b), b.entity, &views);
         // The burst's entity may have gone with the world root (a load); nothing to show then.
         if let Ok(mut v) = visibility.get_mut(b.entity) {
             let want = if seen { Visibility::Inherited } else { Visibility::Hidden };
