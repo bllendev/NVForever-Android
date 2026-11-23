@@ -48,6 +48,20 @@ jobs:
           mkdir -p "$RUNNER_TEMP/nvf-report-tests"
           javac -d "$RUNNER_TEMP/nvf-report-tests" android/app/src/main/java/org/nvforever/android/DebugReport.java android/tests/DebugReportTest.java
           java -cp "$RUNNER_TEMP/nvf-report-tests" org.nvforever.android.DebugReportTest
+      # The launcher's own logic: data profiles, the Data folder check, the controls file
+      # and the last-run state. Plain Java, no Android around it (android/tests).
+      - name: Test launcher logic
+        run: |
+          mkdir -p "$RUNNER_TEMP/nvf-launcher-tests"
+          javac -d "$RUNNER_TEMP/nvf-launcher-tests" \
+            android/app/src/main/java/org/nvforever/android/DataCheck.java \
+            android/app/src/main/java/org/nvforever/android/Profiles.java \
+            android/app/src/main/java/org/nvforever/android/ControlsFile.java \
+            android/app/src/main/java/org/nvforever/android/RunState.java \
+            android/tests/LauncherTest.java
+          java -cp "$RUNNER_TEMP/nvf-launcher-tests" org.nvforever.android.LauncherTest
+      - name: Check string resources
+        run: python3 android/tools/check_strings.py
       - name: Check Android input adapter
         run: cargo test --locked --manifest-path engine/Cargo.toml -p nvf-android-input
       - name: Build native ARM64 library
