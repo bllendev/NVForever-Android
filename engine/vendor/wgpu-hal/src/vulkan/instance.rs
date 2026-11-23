@@ -11,6 +11,48 @@ use arrayvec::ArrayVec;
 use ash::{ext, khr, vk};
 use parking_lot::RwLock;
 
+/// NVForever patch (Android only): the Vulkan entry point of a driver the player supplied,
+/// instead of the system `libvulkan.so` this module would load.
+///
+/// On Android the player may install a custom Adreno driver (Mesa Turnip) through
+/// libadrenotools, which hands back a library handle of its own; the only way to use it is to
+/// build the `ash::Entry` from that library's `vkGetInstanceProcAddr` rather than from a
+/// `dlopen` of `libvulkan.so`. `nvf-android` calls [`set_android_vk_get_instance_proc_addr`]
+/// before any instance is created; nothing is stored when no driver is selected, and the
+/// loading path below is then exactly the one upstream has.
+#[cfg(target_os = "android")]
+static ANDROID_VK_GET_INSTANCE_PROC_ADDR: std::sync::OnceLock<vk::PFN_vkGetInstanceProcAddr> =
+    std::sync::OnceLock::new();
+
+/// NVForever patch (Android only): use `get_instance_proc_addr` for every Vulkan instance this
+/// process creates. Returns `false` when one was already set (the first wins) or when an
+/// instance may already have been created; call it before the renderer starts.
+///
+/// # Safety
+///
+/// `get_instance_proc_addr` must be a valid `vkGetInstanceProcAddr` of a Vulkan implementation
+/// that stays loaded for the rest of the process, and must obey the Vulkan 1.0 semantics
+/// `ash::Entry::from_static_fn` requires.
+#[cfg(target_os = "android")]
+pub unsafe fn set_android_vk_get_instance_proc_addr(
+    get_instance_proc_addr: vk::PFN_vkGetInstanceProcAddr,
+) -> bool {
+    ANDROID_VK_GET_INSTANCE_PROC_ADDR
+        .set(get_instance_proc_addr)
+        .is_ok()
+}
+
+/// NVForever patch (Android only): the entry built from the custom driver, or `None` when the
+/// player selected no driver (then the system `libvulkan.so` is loaded as before).
+#[cfg(target_os = "android")]
+fn android_custom_entry() -> Option<ash::Entry> {
+    let get_instance_proc_addr = *ANDROID_VK_GET_INSTANCE_PROC_ADDR.get()?;
+    // SAFETY: the pointer came through `set_android_vk_get_instance_proc_addr`, whose contract
+    // is exactly what `from_static_fn` asks for: a valid `vkGetInstanceProcAddr` of an
+    // implementation that outlives the entry.
+    Some(unsafe { ash::Entry::from_static_fn(ash::StaticFn { get_instance_proc_addr }) })
+}
+
 unsafe extern "system" fn debug_utils_messenger_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
     message_type: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -573,19 +615,30 @@ impl super::Instance {
     ) -> Result<Self, crate::InstanceError> {
         profiling::scope!("Init Vulkan Backend");
 
-        let entry = unsafe {
-            profiling::scope!("Load vk library");
-            // ohos support is already fixed on ash main, but it's unclear when
-            // a new release can happen.
-            #[cfg(target_env = "ohos")]
-            let loaded = ash::Entry::load_from("libvulkan.so");
-            #[cfg(not(target_env = "ohos"))]
-            let loaded = ash::Entry::load();
-            loaded
-        }
-        .map_err(|err| {
-            crate::InstanceError::with_source(String::from("missing Vulkan entry points"), err)
-        })?;
+        // NVForever patch: on Android a driver the player supplied may already be open
+        // (libadrenotools), and its entry point is used instead of loading the system
+        // `libvulkan.so`. Without one this is upstream's path, untouched.
+        #[cfg(target_os = "android")]
+        let custom_entry = android_custom_entry();
+        #[cfg(not(target_os = "android"))]
+        let custom_entry: Option<ash::Entry> = None;
+
+        let entry = match custom_entry {
+            Some(entry) => entry,
+            None => unsafe {
+                profiling::scope!("Load vk library");
+                // ohos support is already fixed on ash main, but it's unclear when
+                // a new release can happen.
+                #[cfg(target_env = "ohos")]
+                let loaded = ash::Entry::load_from("libvulkan.so");
+                #[cfg(not(target_env = "ohos"))]
+                let loaded = ash::Entry::load();
+                loaded
+            }
+            .map_err(|err| {
+                crate::InstanceError::with_source(String::from("missing Vulkan entry points"), err)
+            })?,
+        };
         let version = {
             profiling::scope!("vkEnumerateInstanceVersion");
             unsafe { entry.try_enumerate_instance_version() }
