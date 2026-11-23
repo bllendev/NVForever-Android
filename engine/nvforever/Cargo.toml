@@ -114,6 +114,11 @@ libloading = "0.8.9"
 # (MIT/Apache-2.0).
 libc = "0.2"
 
+[target.'cfg(target_os = "android")'.dependencies]
+# The page size behind /proc/self/statm's resident pages (gpu_recorder/rss.rs): sysconf,
+# as proc(5) says to read it. The same version the Linux build already takes.
+libc = "0.2"
+
 [build-dependencies]
 # The program icon in the Windows executable (build.rs); MIT.
 winresource = "0.1"

@@ -91,6 +91,10 @@ pub fn render_system(
     #[cfg(feature = "trace")]
     let _span = info_span!("main_render_schedule").entered();
 
+    // NVForever GPU breadcrumbs (`crate::gpu_breadcrumbs`): the frame every marker the graph
+    // is about to record belongs to. Does nothing with the switch off.
+    crate::gpu_breadcrumbs::begin_frame();
+
     world.run_schedule(RenderGraph);
 
     {
@@ -154,6 +158,42 @@ wgpu_wrapper! {
     /// The [`AdapterInfo`] of the adapter in use by the renderer.
     #[derive(Resource, Clone)]
     pub struct RenderAdapterInfo(AdapterInfo);
+}
+
+/// NVForever patch (`engine/vendor/README.md`): the two queue writes, counted.
+///
+/// Every upload through a `RenderQueue` goes through one of these. They are inherent
+/// methods with `wgpu::Queue`'s own signatures, so they take precedence over the `Deref`
+/// to the queue at every existing `queue.write_buffer(…)` / `queue.write_texture(…)` call
+/// site, in this crate and in the game's, with no call-site change and the same behaviour.
+/// The only cost is two relaxed atomic adds, which a GPU flight recorder reads once a frame
+/// (`crate::gpu_counters`); a write made on a plain `wgpu::Queue` is simply not counted.
+impl RenderQueue {
+    /// [`wgpu::Queue::write_buffer`], counted.
+    pub fn write_buffer(&self, buffer: &wgpu::Buffer, offset: wgpu::BufferAddress, data: &[u8]) {
+        count_upload(data.len() as u64);
+        (**self).write_buffer(buffer, offset, data);
+    }
+
+    /// [`wgpu::Queue::write_texture`], counted.
+    pub fn write_texture(
+        &self,
+        texture: wgpu::TexelCopyTextureInfo<'_>,
+        data: &[u8],
+        data_layout: wgpu::TexelCopyBufferLayout,
+        size: wgpu::Extent3d,
+    ) {
+        count_upload(data.len() as u64);
+        (**self).write_texture(texture, data, data_layout, size);
+    }
+}
+
+/// NVForever patch: one upload of `bytes` for `crate::gpu_counters`.
+#[inline]
+fn count_upload(bytes: u64) {
+    use core::sync::atomic::Ordering::Relaxed;
+    crate::gpu_counters::UPLOAD_BYTES.fetch_add(bytes, Relaxed);
+    crate::gpu_counters::UPLOADS.fetch_add(1, Relaxed);
 }
 
 const GPU_NOT_FOUND_ERROR_MESSAGE: &str = if cfg!(target_os = "linux") {
