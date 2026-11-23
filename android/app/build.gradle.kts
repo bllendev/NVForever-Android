@@ -1,5 +1,7 @@
 // Milestone 2: the whole game. The app module: packages libnvf_android.so (built from Rust by cargo-ndk) into an APK that
-// runs it through a NativeActivity (GameActivity.java). The only Java is the launcher (folder permission and picker).
+// runs it through a NativeActivity (GameActivity.java). The only Java is the launcher: the permission, the folder picker,
+// the data profiles and the debug screen (docs/android.md). It uses the framework alone: no AndroidX, no Kotlin, no
+// dependency at all, which is also what keeps its string resources and its bundled font library-free.
 plugins {
     id("com.android.application")
 }
@@ -29,7 +31,7 @@ android {
         // without optimisation runs at a few frames per second, which tests nothing useful.
         // The "debug" APK is still debuggable and signed with the debug key.
         release {
-            isMinifyEnabled = false // only two tiny Java classes
+            isMinifyEnabled = false // a handful of small Java classes; the engine is the APK's size
             signingConfig = signingConfigs.getByName("debug") // M1: sideload only, no store key yet
         }
     }

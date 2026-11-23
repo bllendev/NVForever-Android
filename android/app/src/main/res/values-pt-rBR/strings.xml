@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Português (Brasil). Reescrito a partir do novo texto em inglês, não traduzido dos textos
+    soltos que a versão anterior do iniciador tinha: aqueles descreviam uma tela que não
+    existe mais, estavam sem acentos e falavam de "botão 1" e "botão 2", numeração que este
+    desenho não usa. Como acrescentar um idioma: android/README-translations.md.
+
+    Uma chave que falte aqui aparece em inglês, e isso é um resultado correto.
+-->
+<resources>
+    <string name="app_tagline">Um motor não oficial, feito por fãs, para Fallout: New Vegas. É preciso ter a sua própria cópia legal dos arquivos do jogo.</string>
+
+    <string name="common_cancel">Cancelar</string>
+    <string name="common_back">Voltar</string>
+    <string name="common_close">Fechar</string>
+    <string name="common_verify">Verificar de novo</string>
+    <string name="common_change_folder">Trocar de pasta</string>
+    <string name="common_yes">Sim</string>
+    <string name="common_none">nenhuma</string>
+    <string name="common_unknown">desconhecido</string>
+
+    <string name="section_home">Início</string>
+    <string name="section_setup">Preparação</string>
+    <string name="section_data">Dados</string>
+    <string name="section_settings">Opções</string>
+    <string name="section_debug">Depuração</string>
+    <string name="section_about">Sobre</string>
+
+    <string name="legend_home">A Escolher    B Voltar    X Dados    Y Opções    Start Jogar</string>
+    <string name="legend_other">A Escolher    B Voltar    LB e RB Trocar de seção</string>
+
+    <string name="setup_title">Preparação</string>
+    <string name="setup_intro">Três passos e você já pode jogar. Nada daqui é escrito dentro da pasta do jogo.</string>
+    <string name="setup_step_access_title">1. Acesso a todos os arquivos</string>
+    <string name="setup_step_access_why">O jogo lê e escreve nas suas próprias pastas, como faz num PC.</string>
+    <string name="setup_step_access_grant">Conceder acesso</string>
+    <string name="setup_step_access_return">Ligue a chave do sistema e volte para cá.</string>
+    <string name="setup_step_access_granted">Concedido.</string>
+    <string name="setup_step_access_legacy">Esta versão do Android pede permissão de armazenamento em vez da chave de todos os arquivos.</string>
+
+    <string name="setup_step_folder_title">2. Pasta Data</string>
+    <string name="setup_step_folder_why">Aponte o NVForever para a pasta Data da sua própria cópia do jogo. Ela é apenas lida.</string>
+    <string name="setup_step_folder_choose">Escolher pasta...</string>
+    <string name="setup_step_folder_create">Criar NVForever/Data</string>
+    <string name="setup_step_folder_create_note">Depois copie para lá os seus arquivos de Data a partir de um PC.</string>
+    <string name="setup_step_folder_chosen">Pasta: %1$s</string>
+    <string name="setup_step_folder_profile_note">Esta pasta passa a ser o seu primeiro perfil de dados, chamado Vanilla.</string>
+    <string name="setup_blocked_android_data">O Android fecha para todos os aplicativos as pastas de Android/data e Android/obb desde o Android 11. Escolha outro lugar, por exemplo /sdcard/NVForever/Data.</string>
+    <string name="setup_blocked_missing_folder">Essa pasta ainda não existe. Escolha a pasta Data do jogo, ou crie a padrão e copie os seus arquivos para lá.</string>
+
+    <string name="setup_step_check_title">3. Verificação dos arquivos</string>
+    <string name="setup_step_check_why">Os mesmos arquivos que o motor exige. Um arquivo de tamanho zero conta como ausente: é o que uma cópia interrompida deixa.</string>
+    <string name="setup_step_check_ready">Todos os arquivos necessários estão aí. Você já pode jogar.</string>
+    <string name="setup_step_check_blocked">Faltam arquivos necessários. O jogo não consegue iniciar com esta pasta.</string>
+    <string name="setup_start_anyway">Iniciar mesmo assim (diagnóstico)</string>
+    <string name="setup_done">Preparação concluída.</string>
+
+    <string name="check_base_found">FalloutNV.esm encontrado</string>
+    <string name="check_base_missing">FalloutNV.esm não está nesta pasta</string>
+    <string name="check_archives">Arquivos base: %1$d de %2$d</string>
+    <string name="check_addons">Expansões encontradas: %1$d de %2$d</string>
+    <string name="check_missing_file">Falta: %1$s</string>
+    <string name="check_folder_unreadable">Esta pasta não pode ser lida.</string>
+
+    <string name="home_continue">CONTINUAR</string>
+    <string name="home_continue_sub">%1$s, %2$s, perfil %3$s</string>
+    <string name="home_play">JOGAR</string>
+    <string name="home_play_sub">Começar no menu principal</string>
+    <string name="home_profile_label">PERFIL</string>
+    <string name="home_profile_change">Trocar</string>
+    <string name="home_status_title">[ estado ]</string>
+    <string name="home_status_data">Pasta Data</string>
+    <string name="home_status_saves">Jogos salvos</string>
+    <string name="home_status_access">Todos os arquivos</string>
+    <string name="home_status_access_granted">concedido</string>
+    <string name="home_status_access_missing">não concedido</string>
+    <string name="home_status_last_run">Última sessão</string>
+    <string name="home_last_run_none">ainda nenhuma</string>
+    <string name="home_last_run_ok">terminou normalmente</string>
+    <string name="home_last_run_crash">terminou de forma inesperada</string>
+    <string name="home_last_run_crash_action">A última sessão terminou de forma inesperada. Exporte o registro de depuração.</string>
+    <string name="home_tests_on_chip">%1$d testes ligados</string>
+    <string name="home_toggle_touch">Mostrar controles na tela</string>
+    <string name="home_toggle_controller">Controle físico</string>
+    <string name="home_toggles_note">Aplicado ao iniciar o jogo.</string>
+    <string name="home_open_data">Dados</string>
+    <string name="home_export_log">Exportar registro de depuração</string>
+    <string name="home_driver_fell_back">A última inicialização usou o driver gráfico do sistema: %1$s</string>
+
+    <string name="time_just_now">agora mesmo</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="one">há %1$d minuto</item>
+        <item quantity="other">há %1$d minutos</item>
+    </plurals>
+    <plurals name="time_hours_ago">
+        <item quantity="one">há %1$d hora</item>
+        <item quantity="other">há %1$d horas</item>
+    </plurals>
+    <plurals name="time_days_ago">
+        <item quantity="one">há %1$d dia</item>
+        <item quantity="other">há %1$d dias</item>
+    </plurals>
+    <plurals name="count_saves">
+        <item quantity="one">%1$d neste perfil</item>
+        <item quantity="other">%1$d neste perfil</item>
+    </plurals>
+
+    <string name="data_title">[ dados ]</string>
+    <string name="data_profiles_title">Perfis</string>
+    <string name="data_profiles_note">Um perfil é uma pasta Data com a sua própria lista de plugins e os seus próprios jogos salvos. As opções do jogo são compartilhadas entre perfis; os jogos salvos não, porque um jogo salvo feito com mods precisa desses mods.</string>
+    <string name="data_profiles_use">Usar este perfil</string>
+    <string name="data_profiles_active">Em uso</string>
+    <string name="data_profiles_new">Novo perfil...</string>
+    <string name="data_profiles_new_name">Dê um nome ao perfil e depois escolha a pasta Data dele.</string>
+    <string name="data_profiles_rename">Renomear</string>
+    <string name="data_profiles_forget">Esquecer</string>
+    <string name="data_profiles_forget_confirm">Esquecer este perfil? Ele sai desta lista e nada mais: a pasta Data, os jogos salvos e os registros ficam exatamente onde estão.</string>
+    <string name="data_profiles_cannot_use">Este perfil só pode ser usado quando a pasta Data dele tiver todos os arquivos necessários.</string>
+    <string name="data_profiles_unavailable">Pasta indisponível</string>
+    <string name="data_profiles_copy_saves">Copiar os jogos salvos do perfil atual</string>
+    <plurals name="data_profiles_copied">
+        <item quantity="one">%1$d jogo salvo copiado.</item>
+        <item quantity="other">%1$d jogos salvos copiados.</item>
+    </plurals>
+    <string name="data_mods_soon">Mods (em breve)</string>
+    <string name="data_mods_soon_note">A lista de plugins de cada perfil ganha a sua própria tela na próxima versão. Esta já carrega o plugins.txt do perfil.</string>
+
+    <string name="settings_title">[ opções ]</string>
+    <string name="settings_note">Gráficos, som, jogabilidade e botões são opções do próprio jogo: abra o jogo, Pausa e depois Opções.</string>
+    <string name="settings_group_controls">Controles</string>
+    <string name="settings_group_device">Aparelho</string>
+    <string name="settings_group_data">Dados</string>
+    <string name="settings_group_launcher">Iniciador</string>
+    <string name="settings_controls_legend">A usar ou aceitar. B Pip-Boy ou voltar. X preparar item. Y pular. LT mirar. RT atacar. RB V.A.T.S. LB câmera. L3 agachar. R3 agarrar. Direcional para cima munição. Start pausa.</string>
+    <string name="settings_controls_rebind">Os botões são remapeados dentro do jogo: Pausa, Opções, Controles.</string>
+    <string name="settings_keep_awake">Manter a tela ligada enquanto joga</string>
+    <string name="settings_keep_awake_note">O jogo deixa a tela ligada mesmo quando você não a toca.</string>
+    <string name="settings_profile_row">Perfil de dados</string>
+    <string name="settings_profile_note">Escolha com qual perfil o jogo começa. Fase 1 da área de dados.</string>
+    <string name="settings_driver_row">Driver gráfico</string>
+    <string name="settings_driver_system">Sistema</string>
+    <string name="settings_driver_system_note">O driver que veio com o seu aparelho.</string>
+    <string name="settings_driver_install">Instalar um zip de driver...</string>
+    <string name="settings_driver_delete">Apagar este driver</string>
+    <string name="settings_driver_none_note">Nenhum driver próprio está instalado. Instalar um ainda não existe nesta versão.</string>
+    <string name="settings_debug_row">Depuração</string>
+    <string name="settings_debug_note">Testes de falha e registros. Para relatar problemas.</string>
+    <string name="settings_rerun_setup">Refazer a preparação</string>
+    <string name="settings_language">Idioma</string>
+    <string name="settings_language_note">O iniciador segue o idioma do seu aparelho. O jogo tem os seus próprios idiomas, então um iniciador em português com um jogo em outro idioma está correto.</string>
+
+    <string name="debug_title">[ depuração ]</string>
+    <string name="debug_first_confirm">Estas chaves existem para fazer o jogo falhar de um jeito conhecido, para que a falha possa ser relatada. Elas deixam o jogo mais lento e algumas impedem que ele carregue. Nada daqui toca nos seus jogos salvos nem nos seus arquivos do jogo.</string>
+    <string name="debug_open">Abrir</string>
+    <plurals name="debug_warn_strip">
+        <item quantity="one">Há %1$d teste de falha ligado. O jogo vai ficar mais lento.</item>
+        <item quantity="other">Há %1$d testes de falha ligados. O jogo vai ficar mais lento.</item>
+    </plurals>
+    <string name="debug_group_engine">Testes de falha do motor</string>
+    <string name="debug_group_vulkan">Validação do Vulkan (camada da Khronos, bem mais lento)</string>
+    <string name="debug_group_diagnostics">Diagnóstico</string>
+    <string name="debug_group_reports">Relatórios</string>
+    <string name="debug_group_reset">Restaurar</string>
+    <string name="debug_skip_pipboy">Pular o aquecimento do Pip-Boy</string>
+    <string name="debug_skip_pipboy_note">Pula o desenho escondido do Pip-Boy durante um carregamento. Serve para ver se é esse aquecimento que quebra.</string>
+    <string name="debug_skip_vats">Sem contorno de alvo no V.A.T.S.</string>
+    <string name="debug_skip_vats_note">Desliga o contorno em volta dos alvos do V.A.T.S. Serve para ver se é essa câmera extra que quebra.</string>
+    <string name="debug_validation">Camada de validação do Vulkan</string>
+    <string name="debug_validation_note">A camada da Khronos confere cada chamada à GPU e registra os usos indevidos. Bem mais lento.</string>
+    <string name="debug_validation_sync">Validação de sincronização</string>
+    <string name="debug_validation_sync_note">Confere também a ordem do trabalho na GPU. Precisa da camada acima e não faz nada enquanto ela estiver desligada.</string>
+    <string name="debug_validation_gpuav">Validação assistida pela GPU</string>
+    <string name="debug_validation_gpuav_note">Instrumenta também os sombreadores. Muito lento, e um carregamento pode nunca terminar. Precisa da camada acima.</string>
+    <string name="debug_breadcrumbs">Marcas na GPU</string>
+    <string name="debug_breadcrumbs_note">Marca cada passo do desenho, para que um travamento da GPU possa dizer em qual passo morreu.</string>
+    <string name="debug_diagnostics">Registro da entrada nativa</string>
+    <string name="debug_diagnostics_note">Registra cada evento do controle. Registros bem grandes.</string>
+    <string name="debug_privacy">Os registros contêm o modelo do seu aparelho, caminhos de pastas, nomes de arquivos e o nome do seu perfil ativo. Não contêm dados do jogo nem dados de conta. Leia antes de compartilhar.</string>
+    <string name="debug_export_log">Exportar o registro de depuração...</string>
+    <string name="debug_copy_summary">Copiar o resumo de depuração</string>
+    <string name="debug_tests_off">Desligar todos os testes de falha</string>
+    <string name="debug_tests_off_done">Todos os testes de falha estão desligados.</string>
+    <string name="debug_saves_untouched">Nada desta tela toca nos seus jogos salvos, na sua lista de plugins nem nos seus arquivos do jogo.</string>
+
+    <string name="about_title">[ sobre ]</string>
+    <string name="about_disclaimer">O NVForever é um projeto independente, sem fins lucrativos, feito por fãs. Não tem ligação com a Bethesda Softworks, a ZeniMax Media, a Microsoft nem a Obsidian Entertainment, e não é patrocinado nem endossado por elas. Não contém código nem conteúdo do jogo original, e não funciona sem os arquivos de dados da sua própria cópia comprada legalmente.</string>
+    <string name="about_trademark">Fallout e Fallout: New Vegas são marcas da Bethesda Softworks LLC. São citadas só para dizer com o que este motor é compatível.</string>
+    <string name="about_extender">O NVForever não é o xNVSE e não carrega os plugins dele. Ele implementa por conta própria as funções de script do NVSE.</string>
+    <string name="about_licences">Licenças</string>
+    <string name="about_licence_nvforever">NVForever, este aplicativo e o motor: GPL-3.0-or-later</string>
+    <string name="about_licence_validation">Camadas de validação do Vulkan, da Khronos: Apache-2.0</string>
+    <string name="about_licence_font">JetBrains Mono, a tipografia do iniciador: SIL Open Font License 1.1</string>
+    <string name="about_licence_crates">Bevy e as bibliotecas de Rust sobre as quais o motor é feito: MIT ou Apache-2.0</string>
+    <string name="about_licence_read">Ler o texto completo</string>
+    <string name="about_build">Versão</string>
+
+    <string name="error_need_access">Conceda primeiro o acesso a todos os arquivos.</string>
+    <string name="error_save_choice">A escolha não pôde ser salva: %1$s</string>
+    <string name="error_save_controls">A chave não pôde ser salva: %1$s</string>
+    <string name="error_restart">O jogo não pôde ser reiniciado.</string>
+    <string name="error_resume">Esse jogo salvo não pôde ser carregado.</string>
+    <string name="error_export_log">O registro de depuração não pôde ser salvo. Tente uma pasta onde dê para escrever.</string>
+    <string name="error_export_log_done">Registro de depuração salvo. Leia antes de anexar.</string>
+    <string name="error_copy_done">Resumo de depuração copiado. Leia antes de compartilhar.</string>
+    <string name="error_copy_saves">Os jogos salvos não puderam ser copiados: %1$s</string>
+    <string name="error_no_file_app">Nenhum aplicativo deste aparelho consegue abrir isso.</string>
+</resources>
