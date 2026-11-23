@@ -84,7 +84,7 @@ static DUMPED: AtomicBool = AtomicBool::new(false);
 static FAULT: OnceLock<Option<String>> = OnceLock::new();
 /// The last reading of the figures too costly to read every frame, and when it was taken.
 static SAMPLED: Mutex<(Sampled, Option<std::time::Instant>)> = Mutex::new((
-    Sampled { age_secs: None, allocated_bytes: None, reserved_bytes: None, blocks: None, allocations: None, vram_use_mb: None, rss_bytes: None },
+    Sampled { age_secs: None, allocated_bytes: None, reserved_bytes: None, blocks: None, allocations: None, vram_use_mb: None, rss_bytes: None, wrist_cache_bytes: None },
     None,
 ));
 
@@ -256,9 +256,10 @@ fn record(
         blocks,
         allocations,
         vram_use_mb: budget.and_then(|b| b.vram_use_mb),
-        // The main memory, where every figure above is the GPU's: one file read, once
-        // every SUMMARY_SECS.
+        // The main memory and what the glance's caches hold of it: one file read and two
+        // atomic loads, once every SUMMARY_SECS.
         rss_bytes: rss::rss_bytes(),
+        wrist_cache_bytes: Some(nvf_play::wrist_local::cache_bytes()),
     };
     if let Ok(mut held) = SAMPLED.try_lock() {
         *held = (sampled, Some(std::time::Instant::now()));

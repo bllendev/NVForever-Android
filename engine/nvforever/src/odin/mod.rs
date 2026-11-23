@@ -24,6 +24,8 @@ use std::sync::Mutex;
 pub mod gpu_recorder;
 #[path = "../vulkan_validation.rs"]
 pub mod vulkan_validation;
+#[path = "../wrist_screen.rs"]
+pub mod wrist_screen;
 
 /// Set (any value) to skip the Pip-Boy's hidden warm-up while a load is covered: a crash
 /// test the Android launcher offers, not a test aid (`pipboy_arm`).
@@ -112,6 +114,11 @@ pub(crate) fn before_run(app: &mut App) {
     // The Vulkan validation layer's crash-test switch: one startup line when it is on,
     // nothing at all when it is off (vulkan_validation.rs).
     app.add_plugins(vulkan_validation::VulkanValidationPlugin);
+    // The live glance at the Pip-Boy: only a run that plays has a body to raise it on, so
+    // it goes in beside the rest of the player's body (`player_body`, `main`'s play branch).
+    if app.is_plugin_added::<crate::player_body::PlayerBodyPlugin>() {
+        app.add_plugins(wrist_screen::WristScreenPlugin);
+    }
     let extend = EXTEND.lock().expect("the engine starts once, from one thread").take();
     if let Some(extend) = extend {
         extend(app);
