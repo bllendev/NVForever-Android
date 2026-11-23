@@ -748,6 +748,12 @@ fn systems_of<'a>(
                     let entity = commands
                         .spawn((Mesh3d(mesh.clone()), MeshMaterial3d(def.material.clone()), Transform::IDENTITY, Visibility::Hidden, NotShadowCaster, NoFrustumCulling, ChildOf(root)))
                         .id();
+                    // Crash test (gpu_recorder/transparent_chunks.rs): the chunk report names
+                    // a chunk by what is drawn in it, so the drawn entity carries its model.
+                    if crate::odin::gpu_recorder::transparent_chunks::on() {
+                        let what = format!("particles {} {}", path.as_deref().unwrap_or("?"), def.name);
+                        commands.entity(entity).insert(crate::odin::gpu_recorder::transparent_chunks::kind(what));
+                    }
                     if let (Some(idle), Some(owner)) = (idle, key.instance) {
                         if let Some(materials) = def.idle_materials(entity, &idle.clip) {
                             let mut player = Playing::new(&idle.clip.name, &idle.clip, |_| None);
@@ -1182,9 +1188,12 @@ fn draw(
     // Taken: a frame whose `take_basis` did not run draws nothing, as before.
     let Some([right, up, back]) = p.basis.take() else { return };
     let frame = views.frame();
+    // Crash test (`crate::odin::NO_PARTICLES_ENV`): every system stays hidden and no geometry is
+    // built. The systems are simulated as before, so nothing else in the game changes.
+    let off = crate::odin::no_particles();
     for live in p.systems.values_mut().flatten().flatten() {
         let alive = !live.particles.is_empty();
-        let seen = alive && frame.may_see(particle_bounds(&live.def, &live.particles), live.entity, &views);
+        let seen = !off && alive && frame.may_see(particle_bounds(&live.def, &live.particles), live.entity, &views);
         if let Ok(mut v) = visibility.get_mut(live.entity) {
             let want = if seen { Visibility::Inherited } else { Visibility::Hidden };
             if *v != want {

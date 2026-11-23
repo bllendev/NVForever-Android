@@ -159,6 +159,7 @@
     <string name="debug_group_engine">Pruebas de fallo del motor</string>
     <string name="debug_group_vulkan">Validación de Vulkan (capa de Khronos, mucho más lento)</string>
     <string name="debug_group_diagnostics">Diagnóstico</string>
+    <string name="debug_group_drawing">Dejar algo fuera de la imagen</string>
     <string name="debug_group_reports">Informes</string>
     <string name="debug_group_reset">Restablecer</string>
     <string name="debug_skip_pipboy">Saltar el precalentamiento del Pip-Boy</string>
@@ -173,6 +174,16 @@
     <string name="debug_validation_gpuav_note">Instrumenta además los sombreadores. Muy lento, y puede que una carga no termine nunca. Necesita la capa de arriba.</string>
     <string name="debug_breadcrumbs">Marcas de GPU</string>
     <string name="debug_breadcrumbs_note">Marca cada paso del dibujado, para que un bloqueo de la GPU pueda decir en qué paso murió.</string>
+    <string name="debug_breadcrumb_chunks">Migas de pan de la GPU dentro del pase transparente</string>
+    <string name="debug_breadcrumb_chunks_note">Marca cada grupo de dibujados translúcidos, para que un bloqueo ahí pueda nombrar el grupo y no todo el pase. Necesita las migas de arriba. Mucho más lento.</string>
+    <string name="debug_no_soft_particles">Sin partículas suaves</string>
+    <string name="debug_no_soft_particles_note">El humo y el polvo quedan con bordes duros donde tocan una pared, y el shader deja de leer la profundidad de la escena. Prueba si esa lectura falla.</string>
+    <string name="debug_no_particles">Sin partículas</string>
+    <string name="debug_no_particles_note">No dibuja humo, polvo, chispas ni salpicaduras de sangre. Se siguen simulando, solo no se dibujan.</string>
+    <string name="debug_no_decals">Sin calcomanías</string>
+    <string name="debug_no_decals_note">No deja agujeros de bala ni manchas de sangre. Los disparos y su daño no cambian.</string>
+    <string name="debug_no_heat_haze">Sin calima</string>
+    <string name="debug_no_heat_haze_note">No dibuja el aire ondulante sobre el desierto. Un pase de pantalla completa menos.</string>
     <string name="debug_diagnostics">Registro de la entrada nativa</string>
     <string name="debug_diagnostics_note">Anota cada evento del mando. Registros muy grandes.</string>
     <string name="debug_privacy">Los registros contienen el modelo de tu dispositivo, rutas de carpetas, nombres de archivo y el nombre de tu perfil activo. No contienen datos del juego ni datos de ninguna cuenta. Léelos antes de compartirlos.</string>

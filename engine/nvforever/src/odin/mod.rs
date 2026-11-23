@@ -57,6 +57,49 @@ pub const VULKAN_VALIDATION_DEEP_ENV: &str = "NVF_VULKAN_VALIDATION_DEEP";
 /// (`bevy::render::gpu_breadcrumbs`) as well, which is where the markers are recorded.
 pub const GPU_BREADCRUMBS_ENV: &str = "NVF_GPU_BREADCRUMBS";
 
+/// Set (anything but `0`), with [`GPU_BREADCRUMBS_ENV`] as well, to draw the transparent
+/// phase in chunks with a breadcrumb marker between them, so a lost device names the chunk of
+/// draws the GPU hung in rather than the whole pass: a crash test the Android launcher offers
+/// (`gpu_recorder::transparent_chunks`). Many more render passes a frame; nothing is drawn
+/// differently.
+pub const GPU_BREADCRUMB_CHUNKS_ENV: &str = "NVF_GPU_BREADCRUMB_CHUNKS";
+
+/// Set (any value) to draw particles with hard edges where they meet the surface behind them,
+/// which is also to read the depth prepass nowhere in the NIF material's fragment shader: a
+/// crash test the Android launcher offers (`nvf_assets::nif_material`, `particles`).
+pub const NO_SOFT_PARTICLES_ENV: &str = nvf_assets::NO_SOFT_PARTICLES_ENV;
+
+/// Set (any value) to draw no particle systems and no effect particles (they are simulated as
+/// before, and nothing of them is drawn): a crash test the Android launcher offers
+/// (`particles`, `effect_particles`).
+pub const NO_PARTICLES_ENV: &str = "NVF_NO_PARTICLES";
+
+/// Set (any value) to place no decals (blood, bullet holes): a crash test the Android
+/// launcher offers (`decals`).
+pub const NO_DECALS_ENV: &str = "NVF_NO_DECALS";
+
+/// Set (any value) to draw no heat haze (the screen-space pass at the horizon): a crash test
+/// the Android launcher offers (`heat_haze`).
+pub const NO_HEAT_HAZE_ENV: &str = "NVF_NO_HEAT_HAZE";
+
+/// Whether this run was asked to draw no particles ([`NO_PARTICLES_ENV`]). Read once.
+pub fn no_particles() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os(NO_PARTICLES_ENV).is_some())
+}
+
+/// Whether this run was asked to place no decals ([`NO_DECALS_ENV`]). Read once.
+pub fn no_decals() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os(NO_DECALS_ENV).is_some())
+}
+
+/// Whether this run was asked to draw no heat haze ([`NO_HEAT_HAZE_ENV`]). Read once.
+pub fn no_heat_haze() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os(NO_HEAT_HAZE_ENV).is_some())
+}
+
 /// Set (anything but `0`) to say this run is a player's start even though `--data` names a
 /// game folder, so the home's own plugins.txt is the load order ([`developer_data`]). The
 /// Android shell exports it on every start, restarts included
@@ -167,6 +210,10 @@ pub(crate) fn before_run(app: &mut App) {
     // The bounded GPU flight recorder, written only when the device is lost (gpu_recorder/,
     // the Odin 3's DeviceLost). Its `finish` wants the render world, which exists by now.
     app.add_plugins(gpu_recorder::GpuRecorderPlugin);
+    // The transparent pass cut into chunks with a breadcrumb marker between them: a crash
+    // test, and nothing at all unless both its switches are on
+    // (gpu_recorder/transparent_chunks.rs).
+    app.add_plugins(gpu_recorder::transparent_chunks::TransparentChunksPlugin);
     // The Vulkan validation layer's crash-test switch: one startup line when it is on,
     // nothing at all when it is off (vulkan_validation.rs).
     app.add_plugins(vulkan_validation::VulkanValidationPlugin);

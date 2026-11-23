@@ -712,7 +712,10 @@ fn nif_fragment(
     // shapes; abs() also covers single-sided ones seen edge-on.
     let cos_angle = abs(dot(normalize(pbr_input.world_normal), pbr_input.V));
     @if(PREPASS_PIPELINE) let falloff = falloff_opacity(cos_angle, surface.falloff);
-    @if(!PREPASS_PIPELINE) let falloff = falloff_opacity(cos_angle, surface.falloff) * soft_fade(in.position, pbr_input.world_position.xyz, surface.soft.x);
+    @if(!PREPASS_PIPELINE && !NVF_NO_SOFT) let falloff = falloff_opacity(cos_angle, surface.falloff) * soft_fade(in.position, pbr_input.world_position.xyz, surface.soft.x);
+    // NVF_NO_SOFT (nif_material.rs `no_soft_particles`, a crash test): the shape has no soft
+    // intersection, so the fade and its read of the depth prepass are left out entirely.
+    @if(!PREPASS_PIPELINE && NVF_NO_SOFT) let falloff = falloff_opacity(cos_angle, surface.falloff);
     pbr_input.material.base_color.a *= falloff;
     if pbr_input.material.base_color.a < surface.alpha_cut {
         discard;

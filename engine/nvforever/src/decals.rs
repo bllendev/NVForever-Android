@@ -208,10 +208,16 @@ fn place(
     (streamer, cells): (Option<Res<Streamer>>, Query<&Transform, With<CellEntity>>),
     shapes: Query<DrawnShape>,
 ) {
+    // Crash test (`crate::odin::NO_DECALS_ENV`): no decal is placed, so none is drawn. The shots
+    // and their impacts are unchanged.
     let (Some(sfx), Ok((world_root, root_place))) = (sfx, root.single()) else {
         landed.clear();
         return;
     };
+    if crate::odin::no_decals() {
+        landed.clear();
+        return;
+    }
     let st = &mut *st;
     let mut this_frame = 0;
     for hit in landed.read() {
@@ -386,6 +392,11 @@ fn place(
         let entity = commands
             .spawn((ForwardDecal, MeshMaterial3d(material.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), Decal { age: 0.0, material }, ChildOf(parent)))
             .id();
+        // Crash test (gpu_recorder/transparent_chunks.rs): what the chunk report calls it.
+        if crate::odin::gpu_recorder::transparent_chunks::on() {
+            let what = format!("decal {}", impact.edid.as_deref().unwrap_or("?"));
+            commands.entity(entity).insert(crate::odin::gpu_recorder::transparent_chunks::kind(what));
+        }
         if hit.splatter && st.splatters_placed == 0 {
             info!(
                 "decals: {} splatters blood ({}) on the world behind a shot actor at ({:.0}, {:.0}, {:.0}), facing ({:.2}, {:.2}, {:.2}): side {side:.0}",

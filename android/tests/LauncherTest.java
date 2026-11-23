@@ -174,14 +174,18 @@ public final class LauncherTest {
         check(ControlsFile.testsOn(defaults).isEmpty(), "and no crash test is");
 
         Files.write(file.toPath(), ("# a comment\ncontroller true\ntouch 0\n"
-                + "vulkan-validation 1\nnot-a-key true\ngpu-breadcrumbs maybe\n").getBytes(StandardCharsets.UTF_8));
+                + "vulkan-validation 1\nnot-a-key true\ngpu-breadcrumbs maybe\nno-particles true\n")
+                .getBytes(StandardCharsets.UTF_8));
         Map<String, Boolean> read = ControlsFile.read(file);
         check(Boolean.TRUE.equals(read.get(ControlsFile.CONTROLLER)), "true is on");
         check(Boolean.FALSE.equals(read.get(ControlsFile.TOUCH)), "0 is off");
         check(Boolean.TRUE.equals(read.get(ControlsFile.VULKAN_VALIDATION)), "1 is on");
         check(Boolean.FALSE.equals(read.get(ControlsFile.GPU_BREADCRUMBS)), "a word that is not a state is skipped");
+        check(Boolean.TRUE.equals(read.get(ControlsFile.NO_PARTICLES)), "a drawn-feature switch is read too");
+        check(Boolean.FALSE.equals(read.get(ControlsFile.NO_DECALS)), "and its neighbours are left off");
         List<String> on = ControlsFile.testsOn(read);
-        check(on.size() == 1 && on.get(0).equals(ControlsFile.VULKAN_VALIDATION), "one crash test is on");
+        check(on.size() == 2 && on.get(0).equals(ControlsFile.VULKAN_VALIDATION)
+                && on.get(1).equals(ControlsFile.NO_PARTICLES), "two crash tests are on, in the screen's order");
 
         ControlsFile.write(file, read);
         check(ControlsFile.read(file).equals(read), "what is written is what is read back");

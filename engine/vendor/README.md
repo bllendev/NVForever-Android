@@ -636,6 +636,15 @@ every node records through — which is why this lives here and not in the game.
 behind `NVF_GPU_BREADCRUMBS`; unset, nothing is allocated and every function returns at its
 first line. Drop this patch if Bevy or wgpu gains breadcrumbs of its own.
 
+`RenderContext::gpu_breadcrumb(name, end)` is the same marker for a node that wants finer
+grain than itself, with a name the caller gives: the game's chunked transparent pass records
+one between each chunk of draws (`engine/nvforever/src/gpu_recorder/transparent_chunks.rs`),
+because a `vkCmdFillBuffer` is not allowed inside a render pass and so cannot sit between two
+draws of one pass. `gpu_breadcrumbs::frame()` is the frame those markers belong to, so a
+caller keeping its own table of what a marker meant can key it by the frame. The names are
+interned for the run and the lookup is linear, so a caller must draw them from a small fixed
+set.
+
 [documented: `src/render_resource/pipeline_cache.rs::create_pipeline_task`, #2317]
 `RENDER_DEVICE_API_GATE` gates pipeline creation on task threads (and synchronous creation).
 Each compilation holds its read side. NVForever's device poll thread shares it;
