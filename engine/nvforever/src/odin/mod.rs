@@ -8,13 +8,26 @@
 //! 1. `pub mod odin;`, this module;
 //! 2. [`args`] instead of `std::env::args()`, so a platform shell can hand the game a command
 //!    line of its own (an Android activity has no argv);
-//! 3. [`before_run`] just before `App::run`, where the platform shell's own plugins go.
+//! 3. [`init`] before `DefaultPlugins` (what the Vulkan instance and device must be asked
+//!    for before the renderer exists) and [`before_run`] just before `App::run` (the fork's
+//!    own plugins, then the platform shell's).
 //!
 //! The entry points: [`desktop`] is what the desktop binary calls, [`run`] and [`run_with`]
 //! what an Android activity calls (`nvf-android`'s `android_main`).
 
 use bevy::app::{App, AppExit};
 use std::sync::Mutex;
+
+// The fork's engine parts stay in their own files beside main.rs, declared here rather than
+// in it. `#[path]` so the files keep the names the docs and the log lines use.
+#[path = "../gpu_recorder/mod.rs"]
+pub mod gpu_recorder;
+
+/// Set (anything but `0`) to have every render-graph node write a GPU marker before and
+/// after its work, so a lost device names the node the GPU hung in: a crash test the Android
+/// launcher offers (`gpu_recorder::breadcrumbs`). Read in the vendored `bevy_render`
+/// (`bevy::render::gpu_breadcrumbs`) as well, which is where the markers are recorded.
+pub const GPU_BREADCRUMBS_ENV: &str = "NVF_GPU_BREADCRUMBS";
 
 /// The command line [`run`] was given, read once by [`args`]. Unset for a desktop run, which
 /// has its own argv.
@@ -53,8 +66,22 @@ pub(crate) fn args() -> Vec<String> {
     line.unwrap_or_else(|| std::env::args().collect())
 }
 
-/// The platform shell's own plugins, on the configured game just before it runs.
+/// What must be asked of the Vulkan instance and device before `DefaultPlugins`, which is
+/// where the renderer reads these settings (vendored `bevy_render`, `RenderPlugin::build`).
+pub(crate) fn init(app: &mut App) {
+    // VK_EXT_device_fault, so a lost device can say what faulted (gpu_recorder/fault.rs).
+    // Nothing is enabled on a driver without it.
+    let mut settings = app.world_mut().get_resource_or_init::<bevy::render::renderer::raw_vulkan_init::RawVulkanInitSettings>();
+    gpu_recorder::fault::ask_for_extension(&mut settings);
+}
+
+/// The fork's own plugins and then the platform shell's, on the configured game just before
+/// it runs. Every one of them orders its systems against named sets and systems, so being
+/// added last changes nothing about when they run.
 pub(crate) fn before_run(app: &mut App) {
+    // The bounded GPU flight recorder, written only when the device is lost (gpu_recorder/,
+    // the Odin 3's DeviceLost). Its `finish` wants the render world, which exists by now.
+    app.add_plugins(gpu_recorder::GpuRecorderPlugin);
     let extend = EXTEND.lock().expect("the engine starts once, from one thread").take();
     if let Some(extend) = extend {
         extend(app);

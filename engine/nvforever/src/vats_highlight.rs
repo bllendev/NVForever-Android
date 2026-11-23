@@ -501,6 +501,9 @@ fn view(
     (style, phys, who): (Option<Res<nvf_play::vats_classic::VatsStyle>>, Option<Res<nvf_play::phys::PhysState>>, Option<Res<nvf_play::player::Player>>),
 ) {
     let on = st.on.is_some();
+    if on {
+        crate::odin::gpu_recorder::mark(crate::odin::gpu_recorder::ring::feature::VATS_MASK);
+    }
     let pulse = nvf_play::hud::sight_alpha(real.elapsed_secs());
     let (Ok(window), Ok((eye, projection))) = (windows.single(), player.single()) else { return };
     // Dead Eye: the lines as thin as its target is small in the view ([`thinned`]).

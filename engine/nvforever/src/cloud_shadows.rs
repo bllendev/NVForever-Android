@@ -883,6 +883,7 @@ pub fn produce_cloud_shadows(
 ) {
     let work = &mut *work;
     let Some(sky) = sky else { return };
+    crate::odin::gpu_recorder::mark(crate::odin::gpu_recorder::ring::feature::CLOUD_SHADOWS);
     // The wind's displacement runs on whatever happens below (indoors too).
     let cal = calibration();
     let secs = cloud_seconds(&time);
