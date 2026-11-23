@@ -33,17 +33,31 @@ import java.util.zip.ZipInputStream;
  * <pre>
  * files/gpu_drivers/&lt;id&gt;/           one installed driver: its .so, and meta.json if the zip had one
  * files/gpu_drivers/selected        the chosen driver; absent means the system driver
+ * files/gpu_drivers/mode            the launcher's own row: "automatic", else absent
  * files/gpu_drivers/renderer_starting  written by the game before the renderer starts, removed
  *                                   by the engine after 300 drawn frames
  * files/gpu_drivers/last_fallback   why the last start did not use the chosen driver
  * files/gpu_drivers/native_lib_dir  ApplicationInfo.nativeLibraryDir, for the game's fallback
  * </pre>
  *
+ * <p>The engine reads {@code selected} and nothing else, so <b>Automatic</b> is a launcher
+ * word: it resolves, every time it is chosen, to an installed driver if there is one and to
+ * the system driver if there is not. NVForever bundles no driver, so on a fresh install
+ * Automatic is exactly the system driver.
+ *
  * With nothing installed and nothing selected the game behaves exactly as it did before this
  * existed: no file is there, so none is read.
  */
 public final class GpuDrivers {
+    /**
+     * The sentinel {@link #select} and {@link #mode} use for Automatic: an installed driver
+     * when there is one, the system driver when there is not. Never a folder name: the ids
+     * {@link #install} makes are derived from a driver's own label.
+     */
+    public static final String AUTOMATIC = "automatic";
+
     private static final String SELECTED = "selected";
+    private static final String MODE = "mode";
     private static final String MARKER = "renderer_starting";
     private static final String LAST_FALLBACK = "last_fallback";
     private static final String NATIVE_LIB_DIR = "native_lib_dir";
@@ -84,11 +98,39 @@ public final class GpuDrivers {
     }
 
     /**
-     * Chooses a driver for the next game start, or the system driver when {@code idOrNull} is
-     * null or names nothing installed. Either way the previous start's marker and fallback note
-     * go: the question they answer was about the choice being replaced.
+     * Which row of the Graphics driver choice is filled in: {@link #AUTOMATIC}, null for the
+     * system driver, or an installed driver's id. This is the player's own choice, which is
+     * not always the folder the next start opens: Automatic with nothing installed is the
+     * system driver, and the row still reads Automatic.
+     */
+    public static String mode(Context context) {
+        String stored = read(new File(root(context), MODE));
+        if (stored != null && AUTOMATIC.equals(stored.trim())) return AUTOMATIC;
+        return selected(context);
+    }
+
+    /**
+     * Chooses a driver for the next game start: {@link #AUTOMATIC}, a driver's id, or null for
+     * the system driver (which is also what an id naming nothing installed means). Either way
+     * the previous start's marker and fallback note go: the question they answer was about the
+     * choice being replaced.
      */
     public static void select(Context context, String idOrNull) {
+        if (AUTOMATIC.equals(idOrNull)) {
+            List<String[]> drivers = installed(context);
+            apply(context, drivers.isEmpty() ? null : drivers.get(0)[0]);
+            // Written after the choice, so a crash in between leaves the plainer of the two
+            // answers: whatever `selected` says, read as a direct choice.
+            write(new File(root(context), MODE), AUTOMATIC + "\n");
+            return;
+        }
+        //noinspection ResultOfMethodCallIgnored
+        new File(root(context), MODE).delete();
+        apply(context, idOrNull);
+    }
+
+    /** Writes the folder the next start opens, or removes the file for the system driver. */
+    private static void apply(Context context, String idOrNull) {
         File root = root(context);
         File chosen = idOrNull != null && plainName(idOrNull) ? new File(root, idOrNull) : null;
         String library = chosen != null && chosen.isDirectory() ? libraryIn(chosen) : null;
@@ -142,6 +184,9 @@ public final class GpuDrivers {
             File target = new File(root, id);
             if (!staging.renameTo(target)) throw new IOException("Cannot store the driver as " + id);
             staging = null;
+            // Automatic means "an installed driver if there is one", so a first install is
+            // what it has been waiting for. A direct choice is left exactly as the player made it.
+            if (AUTOMATIC.equals(mode(context))) select(context, AUTOMATIC);
             return id;
         } finally {
             if (staging != null) deleteTree(staging);
@@ -151,8 +196,11 @@ public final class GpuDrivers {
     /** Removes an installed driver, and the choice with it when that driver was chosen. */
     public static void delete(Context context, String id) {
         if (!plainName(id)) return;
+        boolean automatic = AUTOMATIC.equals(mode(context));
         if (id.equals(selected(context))) select(context, null);
         deleteTree(new File(root(context), id));
+        // Automatic now resolves to something else: another installed driver, or the system one.
+        if (automatic) select(context, AUTOMATIC);
     }
 
     // ---- the files --------------------------------------------------------------------
