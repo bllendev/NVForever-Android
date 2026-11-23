@@ -35287,3 +35287,28 @@ forbid = [
   { re = 'test aid: script (Call|MoveTo)\(.*\): \S', label = "no placement step failed (before)" },
   { re = 'shape\(s\) with an environment map, no window flag', label = "no shape without the window flag reflects" },
 ]
+
+[[scenario]]
+name = "gpu-driver-not-asked-for"
+source = "docs/odin-debug.md (a Vulkan driver of the player's own, Android): with no driver selected the platform shell sets nothing, so a run says nothing about a GPU driver and no start marker is touched (engine/nvforever/src/odin/gpu_driver.rs)"
+areas = ["renderer"]
+paths = ["engine/nvforever/src/odin/gpu_driver.rs", "engine/nvf-android/src/gpu_driver.rs", "engine/vendor/wgpu-hal/src/vulkan/instance.rs"]
+args = ["--cell", "GSDocMitchellHouse", "--play", "--no-voice", "--no-messages"]
+run_seconds = 12
+expect = [
+  { re = 'gpu driver:', max = 0, label = "an ordinary run says nothing about a GPU driver" },
+]
+
+[[scenario]]
+name = "gpu-driver-line"
+source = "docs/odin-debug.md: with a driver asked for, one startup line says which it was and what the adapter then reported, so a run on a player's own driver can be told apart from one that fell back (engine/nvforever/src/odin/gpu_driver.rs)"
+areas = ["renderer"]
+paths = ["engine/nvforever/src/odin/gpu_driver.rs", "engine/nvf-android/src/gpu_driver.rs"]
+# The Android shell sets this; on a PC it only exercises the line, which is why the adapter
+# it reports is the machine's own.
+env = { NVF_GPU_DRIVER = "System" }
+args = ["--cell", "GSDocMitchellHouse", "--play", "--no-voice", "--no-messages"]
+run_seconds = 12
+expect = [
+  { re = 'gpu driver: requested System; the adapter reports \S.*\(Vulkan, driver \S', label = "the line names the driver asked for and the adapter that arrived", count = 1 },
+]

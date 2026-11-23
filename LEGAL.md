@@ -175,6 +175,19 @@ release (Download DLSS…, [docs/dlss.md](docs/dlss.md)). NVForever ships no NVI
 the files come from NVIDIA's release on the player's request, and nothing of them is hosted,
 mirrored or bundled by the project.
 
+The experimental Android debug build packages two small libraries that are not NVForever's
+code and keep their own licence: **libadrenotools** and the **liblinkernsbypass** it is built
+on (both `BSD-2-Clause`, Copyright (c) 2021 Billy Laws,
+[bylaws/libadrenotools](https://github.com/bylaws/libadrenotools),
+[bylaws/liblinkernsbypass](https://github.com/bylaws/liblinkernsbypass)). They are what lets
+the game open a Vulkan driver the player installed themselves on an Adreno phone
+([docs/odin-debug.md](docs/odin-debug.md)). Neither source tree is committed here: the Android
+workflow fetches both at a pinned commit against a pinned hash and builds them, and their
+licence texts go beside the APK in every artifact and release
+(`LICENSE.libadrenotools.txt`, `LICENSE.liblinkernsbypass.txt`). **No GPU driver is shipped,
+hosted or mirrored by this project**: a driver is a file the player supplies, under whatever
+licence its own authors give it (Mesa's drivers are MIT).
+
 The capture plugin `nvf_capture` is a separate program that runs inside the original
 game. It is under the same licence with an additional permission under GPLv3 section 7
 to be combined with the game and the xNVSE script extender
