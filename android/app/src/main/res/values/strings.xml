@@ -266,12 +266,13 @@
     <string name="settings_group_saves">Saves</string>
     <string name="settings_detail_title">The launcher\'s own options</string>
     <string name="settings_controls_buttons">Button layout</string>
+    <string name="settings_controls_buttons_note">What each button does in the game</string>
     <string name="settings_data_folder_row">Data folder</string>
     <string name="settings_language_value">Follows your phone</string>
     <string name="settings_controls_legend">A use or accept. B Pip-Boy or back. X ready item. Y jump. LT aim. RT attack. RB V.A.T.S. LB camera. L3 crouch. R3 grab. D-pad up ammunition. Start pause.</string>
     <string name="settings_controls_rebind">Rebind buttons in the game: Pause, then Settings, then Controls.</string>
-    <string name="settings_keep_awake">Keep the screen awake while playing</string>
-    <string name="settings_keep_awake_note">The game keeps the screen on even when you are not touching it.</string>
+    <string name="settings_keep_awake">Keep the screen awake</string>
+    <string name="settings_keep_awake_note">While the game is running.</string>
     <string name="settings_profile_row">Data profile</string>
     <string name="settings_profile_note">Choose which profile the game starts with. Phase 1 of the Data area.</string>
     <string name="settings_driver_row">Graphics driver</string>
@@ -297,7 +298,7 @@
         The two raw actions stay on Advanced for whoever wants them.
     -->
     <string name="report_row">Report a problem</string>
-    <string name="report_row_note">Writes a log, then shows where to send it</string>
+    <string name="report_row_note">Writes a log for a bug report</string>
     <string name="report_where">Save the log, then attach it to a new issue on the NVForever project page, or send it to whoever asked you for it. Nothing is sent from this phone by itself.</string>
     <string name="report_save_log">Save the log...</string>
 
@@ -310,11 +311,12 @@
         <item quantity="one">%1$d crash-test switch is on. The game will be slower.</item>
         <item quantity="other">%1$d crash-test switches are on. The game will be slower.</item>
     </plurals>
-    <string name="debug_group_engine">Engine crash tests</string>
-    <string name="debug_group_vulkan">Vulkan validation (Khronos layer, big slowdowns)</string>
+    <string name="debug_group_engine">Engine</string>
+    <string name="debug_group_vulkan">Vulkan</string>
+    <string name="debug_group_vulkan_note">The Khronos layer checks every GPU call. Big slowdowns.</string>
     <string name="debug_group_diagnostics">Diagnostics</string>
-    <string name="debug_group_drawing">Leave something out of the picture</string>
-    <string name="debug_group_drawing_note">One switch a drawn feature. Hold a switch to read what it does.</string>
+    <string name="debug_group_drawing">Drawing</string>
+    <string name="debug_group_drawing_note">Hold a switch to read what it does.</string>
     <string name="debug_group_reports">Reports</string>
     <string name="debug_group_reset">Reset</string>
     <string name="debug_skip_pipboy">Skip inventory UI warm-up</string>
@@ -329,7 +331,7 @@
     <string name="debug_validation_gpuav_note">Also instruments shaders. Very slow, and a load may never finish. Needs the layer above.</string>
     <string name="debug_breadcrumbs">GPU breadcrumbs</string>
     <string name="debug_breadcrumbs_note">Marks every render step, so a GPU hang can name the step that died.</string>
-    <string name="debug_breadcrumb_chunks">GPU breadcrumbs inside the transparent pass</string>
+    <string name="debug_breadcrumb_chunks">Breadcrumb chunks</string>
     <string name="debug_breadcrumb_chunks_note">Marks each group of see-through draws, so a hang there can name the group instead of the whole pass. Needs the breadcrumbs above. Much slower.</string>
     <string name="debug_no_soft_particles">No soft particles</string>
     <string name="debug_no_soft_particles_note">Smoke and dust keep hard edges where they meet a wall, and the shader stops reading the depth of the scene. Tests whether that read crashes.</string>

@@ -192,8 +192,7 @@ public class LauncherActivity extends Activity {
                     getResources().getQuantityString(R.plurals.count_runs, runCount(), runCount()),
                     true, Ui.INK_2);
             Ui.cell(strip, this, getString(R.string.strip_last_run), lastRunText(), false, Ui.INK);
-            Ui.cell(strip, this, getString(R.string.strip_driver), GpuDriversDebug.summary(this),
-                    true, Ui.INK_2);
+            Ui.cell(strip, this, getString(R.string.strip_driver), driverLabel(), false, Ui.INK);
         } else {
             Ui.cell(strip, this, getString(R.string.strip_data), dataVerdict(),
                     false, check.ready() ? Ui.INK : Ui.BAD);
@@ -988,12 +987,12 @@ public class LauncherActivity extends Activity {
                 Boolean.TRUE.equals(controls.get(ControlsFile.CONTROLLER)), true, Ui.ROW_DP,
                 (b, on) -> setControl(ControlsFile.CONTROLLER, on)));
         controlsList.addView(Ui.chevronRow(this, getString(R.string.settings_controls_buttons),
-                getString(R.string.settings_controls_rebind), Ui.ROW_DP,
+                getString(R.string.settings_controls_buttons_note), Ui.ROW_DP,
                 v -> message(getString(R.string.settings_controls_buttons),
                         getString(R.string.settings_controls_legend) + "\n\n"
                                 + getString(R.string.settings_controls_rebind))));
         controlsGroup.addView(controlsList);
-        column.addView(controlsGroup, Ui.wide(this, 16));
+        column.addView(controlsGroup, Ui.wide(this, 12));
 
         LinearLayout device = Ui.group(this, getString(R.string.settings_group_device));
         LinearLayout deviceList = Ui.list(this);
@@ -1001,22 +1000,22 @@ public class LauncherActivity extends Activity {
                 getString(R.string.settings_keep_awake_note), prefs.getBoolean(PREF_KEEP_AWAKE, true),
                 true, Ui.ROW_DP, (b, on) -> prefs.edit().putBoolean(PREF_KEEP_AWAKE, on).apply()));
         device.addView(deviceList);
-        column.addView(device, Ui.wide(this, 16));
+        column.addView(device, Ui.wide(this, 12));
 
         LinearLayout launcher = Ui.group(this, getString(R.string.settings_group_launcher));
         LinearLayout launcherList = Ui.list(this);
         launcherList.addView(Ui.valueRow(this, getString(R.string.settings_language), null,
-                getString(R.string.settings_language_value), false, Ui.ROW_DP,
+                getString(R.string.settings_language_value), false, Ui.ROW_DENSE_DP,
                 v -> message(getString(R.string.settings_language),
                         getString(R.string.settings_language_note))));
         launcherList.addView(Ui.chevronRow(this, getString(R.string.settings_rerun_setup), null,
-                Ui.ROW_DP, v -> {
+                Ui.ROW_DENSE_DP, v -> {
                     prefs.edit().putBoolean(PREF_SETUP_DONE, false).apply();
                     go(Section.SETUP);
                 }));
         // The second, readable way in. It stays a row of Settings even before it is unlocked.
         launcherList.addView(Ui.chevronRow(this, getString(R.string.settings_debug_row),
-                getString(R.string.settings_debug_note), Ui.ROW_DP, v -> {
+                getString(R.string.settings_debug_note), Ui.ROW_DENSE_DP, v -> {
                     unlockDebug();
                     go(Section.DEBUG);
                 }));
@@ -1271,7 +1270,7 @@ public class LauncherActivity extends Activity {
         defaultFocus = first;
         testRow(engineList, ControlsFile.SKIP_VATS_OUTLINE, R.string.debug_skip_vats, true);
         engine.addView(engineList);
-        one.addView(engine, Ui.wide(this, 16));
+        one.addView(engine, Ui.wide(this, 12));
         LinearLayout drawing = Ui.group(this, getString(R.string.debug_group_drawing));
         LinearLayout drawingList = Ui.list(this);
         testRow(drawingList, ControlsFile.NO_SOFT_PARTICLES, R.string.debug_no_soft_particles, true);
@@ -1300,7 +1299,10 @@ public class LauncherActivity extends Activity {
         childRow(vulkanList, ControlsFile.GPU_BREADCRUMB_CHUNKS, R.string.debug_breadcrumb_chunks,
                 Boolean.TRUE.equals(controls.get(ControlsFile.GPU_BREADCRUMBS)));
         vulkan.addView(vulkanList);
-        two.addView(vulkan, Ui.wide(this, 16));
+        vulkan.addView(Ui.note(this, getString(R.string.debug_group_vulkan_note)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        two.addView(vulkan, Ui.wide(this, 12));
         LinearLayout diagnostics = Ui.group(this, getString(R.string.debug_group_diagnostics));
         LinearLayout diagnosticsList = Ui.list(this);
         testRow(diagnosticsList, ControlsFile.DIAGNOSTICS, R.string.debug_diagnostics, true);

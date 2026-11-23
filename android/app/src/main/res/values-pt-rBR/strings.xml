@@ -133,8 +133,8 @@
     <string name="settings_group_launcher">Iniciador</string>
     <string name="settings_controls_legend">A usar ou aceitar. B Pip-Boy ou voltar. X preparar item. Y pular. LT mirar. RT atacar. RB V.A.T.S. LB câmera. L3 agachar. R3 agarrar. Direcional para cima munição. Start pausa.</string>
     <string name="settings_controls_rebind">Os botões são remapeados dentro do jogo: Pausa, Opções, Controles.</string>
-    <string name="settings_keep_awake">Manter a tela ligada enquanto joga</string>
-    <string name="settings_keep_awake_note">O jogo deixa a tela ligada mesmo quando você não a toca.</string>
+    <string name="settings_keep_awake">Manter a tela ligada</string>
+    <string name="settings_keep_awake_note">Enquanto o jogo está aberto.</string>
     <string name="settings_profile_row">Perfil de dados</string>
     <string name="settings_profile_note">Escolha com qual perfil o jogo começa. Fase 1 da área de dados.</string>
     <string name="settings_driver_row">Driver gráfico</string>
@@ -156,10 +156,11 @@
         <item quantity="one">Há %1$d teste de falha ligado. O jogo vai ficar mais lento.</item>
         <item quantity="other">Há %1$d testes de falha ligados. O jogo vai ficar mais lento.</item>
     </plurals>
-    <string name="debug_group_engine">Testes de falha do motor</string>
-    <string name="debug_group_vulkan">Validação do Vulkan (camada da Khronos, bem mais lento)</string>
+    <string name="debug_group_engine">Motor</string>
+    <string name="debug_group_vulkan">Vulkan</string>
+    <string name="debug_group_vulkan_note">A camada da Khronos verifica cada chamada à GPU. Bem mais lento.</string>
     <string name="debug_group_diagnostics">Diagnóstico</string>
-    <string name="debug_group_drawing">Deixar algo fora da imagem</string>
+    <string name="debug_group_drawing">Desenho</string>
     <string name="debug_group_reports">Relatórios</string>
     <string name="debug_group_reset">Restaurar</string>
     <string name="debug_skip_pipboy">Pular o aquecimento da interface de inventário</string>
@@ -174,7 +175,7 @@
     <string name="debug_validation_gpuav_note">Instrumenta também os sombreadores. Muito lento, e um carregamento pode nunca terminar. Precisa da camada acima.</string>
     <string name="debug_breadcrumbs">Marcas na GPU</string>
     <string name="debug_breadcrumbs_note">Marca cada passo do desenho, para que um travamento da GPU possa dizer em qual passo morreu.</string>
-    <string name="debug_breadcrumb_chunks">Marcas da GPU dentro do passe transparente</string>
+    <string name="debug_breadcrumb_chunks">Blocos de marcas</string>
     <string name="debug_breadcrumb_chunks_note">Marca cada grupo de desenhos translúcidos, para que um travamento ali possa nomear o grupo em vez de todo o passe. Precisa das marcas acima. Bem mais lento.</string>
     <string name="debug_no_soft_particles">Sem partículas suaves</string>
     <string name="debug_no_soft_particles_note">Fumaça e poeira ficam com bordas duras onde encostam em uma parede, e o shader para de ler a profundidade da cena. Testa se essa leitura trava.</string>
@@ -307,6 +308,7 @@
     <string name="settings_group_saves">Jogos salvos</string>
     <string name="settings_detail_title">As opções do próprio lançador</string>
     <string name="settings_controls_buttons">Disposição dos botões</string>
+    <string name="settings_controls_buttons_note">O que cada botão faz no jogo</string>
     <string name="settings_data_folder_row">Pasta Data</string>
     <string name="settings_language_value">Segue o seu aparelho</string>
     <string name="settings_driver_automatic">Automático</string>
@@ -317,11 +319,11 @@
 
     <!-- Relatar um problema. -->
     <string name="report_row">Relatar um problema</string>
-    <string name="report_row_note">Grava um registro e depois diz para onde enviá-lo</string>
+    <string name="report_row_note">Grava um registro para um relato</string>
     <string name="report_where">Salve o registro e anexe-o a uma nova questão na página do projeto NVForever, ou envie para quem pediu. Este aparelho não envia nada sozinho.</string>
     <string name="report_save_log">Salvar o registro...</string>
 
-    <string name="debug_group_drawing_note">Um interruptor por coisa desenhada. Segure um para ler o que ele faz.</string>
+    <string name="debug_group_drawing_note">Segure um interruptor para ler o que ele faz.</string>
     <string name="about_licence_sans">Inter, a tipografia de texto do lançador: SIL Open Font License 1.1</string>
     <string name="about_detail_meta">Um motor independente, sem fins lucrativos e feito por fãs. Sem relação com quem fez o jogo original.</string>
 </resources>

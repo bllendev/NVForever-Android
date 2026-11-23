@@ -133,8 +133,8 @@
     <string name="settings_group_launcher">Lanzador</string>
     <string name="settings_controls_legend">A usar o aceptar. B Pip-Boy o volver. X preparar objeto. Y saltar. LT apuntar. RT atacar. RB V.A.T.S. LB cámara. L3 agacharse. R3 agarrar. Cruceta arriba munición. Start pausa.</string>
     <string name="settings_controls_rebind">Los botones se reasignan dentro del juego: Pausa, Opciones, Controles.</string>
-    <string name="settings_keep_awake">Mantener la pantalla encendida al jugar</string>
-    <string name="settings_keep_awake_note">El juego deja la pantalla encendida aunque no la toques.</string>
+    <string name="settings_keep_awake">Mantener la pantalla encendida</string>
+    <string name="settings_keep_awake_note">Mientras el juego está abierto.</string>
     <string name="settings_profile_row">Perfil de datos</string>
     <string name="settings_profile_note">Elige con qué perfil arranca el juego. Fase 1 del área de datos.</string>
     <string name="settings_driver_row">Controlador gráfico</string>
@@ -156,10 +156,11 @@
         <item quantity="one">Hay %1$d prueba de fallo activa. El juego irá más lento.</item>
         <item quantity="other">Hay %1$d pruebas de fallo activas. El juego irá más lento.</item>
     </plurals>
-    <string name="debug_group_engine">Pruebas de fallo del motor</string>
-    <string name="debug_group_vulkan">Validación de Vulkan (capa de Khronos, mucho más lento)</string>
+    <string name="debug_group_engine">Motor</string>
+    <string name="debug_group_vulkan">Vulkan</string>
+    <string name="debug_group_vulkan_note">La capa de Khronos comprueba cada llamada a la GPU. Mucho más lento.</string>
     <string name="debug_group_diagnostics">Diagnóstico</string>
-    <string name="debug_group_drawing">Dejar algo fuera de la imagen</string>
+    <string name="debug_group_drawing">Dibujado</string>
     <string name="debug_group_reports">Informes</string>
     <string name="debug_group_reset">Restablecer</string>
     <string name="debug_skip_pipboy">Saltar el precalentado de la interfaz de inventario</string>
@@ -174,7 +175,7 @@
     <string name="debug_validation_gpuav_note">Instrumenta además los sombreadores. Muy lento, y puede que una carga no termine nunca. Necesita la capa de arriba.</string>
     <string name="debug_breadcrumbs">Marcas de GPU</string>
     <string name="debug_breadcrumbs_note">Marca cada paso del dibujado, para que un bloqueo de la GPU pueda decir en qué paso murió.</string>
-    <string name="debug_breadcrumb_chunks">Migas de pan de la GPU dentro del pase transparente</string>
+    <string name="debug_breadcrumb_chunks">Trozos de marcas</string>
     <string name="debug_breadcrumb_chunks_note">Marca cada grupo de dibujados translúcidos, para que un bloqueo ahí pueda nombrar el grupo y no todo el pase. Necesita las migas de arriba. Mucho más lento.</string>
     <string name="debug_no_soft_particles">Sin partículas suaves</string>
     <string name="debug_no_soft_particles_note">El humo y el polvo quedan con bordes duros donde tocan una pared, y el shader deja de leer la profundidad de la escena. Prueba si esa lectura falla.</string>
@@ -307,6 +308,7 @@
     <string name="settings_group_saves">Partidas</string>
     <string name="settings_detail_title">Las opciones del propio lanzador</string>
     <string name="settings_controls_buttons">Disposición de los botones</string>
+    <string name="settings_controls_buttons_note">Qué hace cada botón en el juego</string>
     <string name="settings_data_folder_row">Carpeta Data</string>
     <string name="settings_language_value">Sigue a tu teléfono</string>
     <string name="settings_driver_automatic">Automático</string>
@@ -317,11 +319,11 @@
 
     <!-- Informar de un problema. -->
     <string name="report_row">Informar de un problema</string>
-    <string name="report_row_note">Guarda un registro y luego dice a dónde enviarlo</string>
+    <string name="report_row_note">Guarda un registro para un informe</string>
     <string name="report_where">Guarda el registro y adjúntalo a una incidencia nueva en la página del proyecto NVForever, o envíaselo a quien te lo haya pedido. Este teléfono no envía nada por su cuenta.</string>
     <string name="report_save_log">Guardar el registro...</string>
 
-    <string name="debug_group_drawing_note">Un interruptor por cosa dibujada. Mantén pulsado uno para leer qué hace.</string>
+    <string name="debug_group_drawing_note">Mantén pulsado un interruptor para leer qué hace.</string>
     <string name="about_licence_sans">Inter, la tipografía de texto del lanzador: SIL Open Font License 1.1</string>
     <string name="about_detail_meta">Un motor independiente, sin ánimo de lucro y hecho por aficionados. Sin relación con quienes hicieron el juego original.</string>
 </resources>
