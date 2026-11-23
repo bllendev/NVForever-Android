@@ -1011,6 +1011,16 @@ is the crates.io package as published (its `examples` are kept: the manifest nam
 Drop it when wgpu lets a caller extend swapchain creation, or creates the swapchain with
 the structure itself.
 
+Android only (marked `NVForever patch`, `src/vulkan/instance.rs` and `src/vulkan/mod.rs`): a
+player's own Vulkan driver (Mesa Turnip on Adreno through libadrenotools, docs/odin-debug.md).
+`set_android_vk_get_instance_proc_addr` (new, public, `unsafe`) stores one
+`vkGetInstanceProcAddr` for the process in a `OnceLock`, and `Instance::init_with_callback`
+builds its `ash::Entry` from it with `Entry::from_static_fn` instead of loading the system
+`libvulkan.so`. The shell calls it before the renderer starts (`nvf-android/src/gpu_driver.rs`
+through `nvforever::odin::gpu_driver::use_vulkan_entry`); with nothing stored, and on every
+other platform, the entry is loaded exactly as upstream loads it. wgpu offers no way to pass
+an entry point in; drop this if it gains one.
+
 Test aid (marked `NVForever (2026-11-19)`, `src/vulkan/mod.rs` `spirv_salt` and
 `src/vulkan/device.rs` `create_shader_module_impl`): `NVF_PLAY_TEST_SPIRV_SALT=<n>` XORs `n`
 into each shader module's SPIR-V generator word, which names only the tool that wrote it, so

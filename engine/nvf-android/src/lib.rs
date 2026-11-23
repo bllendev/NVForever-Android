@@ -8,12 +8,15 @@
 //! 2. [`touch`]: fingers turned into the keys and mouse motion the game reads;
 //! 3. [`logcat`]: stdout/stderr to `adb logcat -s NVForever`;
 //! 4. [`diag`]: when the game cannot start (no game folder, an incomplete copy), a screen that
-//!    says why, instead of an app that closes by itself (this was all of Milestone 1).
+//!    says why, instead of an app that closes by itself (this was all of Milestone 1);
+//! 5. [`gpu_driver`]: a Vulkan driver the player installed themselves (Mesa Turnip for Adreno,
+//!    through libadrenotools), opened before the renderer. Off unless one is selected.
 //!
 //! Plan, build steps and the on-device checklist: `docs/android.md`.
 
 mod controller;
 mod diag;
+mod gpu_driver;
 mod logcat;
 mod paths;
 mod probe;
@@ -85,6 +88,13 @@ pub fn main() {
     // deeper checks are its own switches, and mean nothing without it.
     if tests.vulkan_validation {
         validation::enable(validation::deep_words(tests.vulkan_validation_sync, tests.vulkan_validation_gpuav));
+    }
+    // A Vulkan driver the player installed in the launcher (Mesa Turnip through libadrenotools,
+    // gpu_driver.rs). Before the engine, so the renderer's first instance is made on it; with
+    // no driver selected nothing is read, written, loaded or logged. The validation crash test
+    // wins: that run stays on the system driver.
+    if let Some(driver) = gpu_driver::start(tests.vulkan_validation) {
+        std::env::set_var(nvforever::odin::GPU_DRIVER_ENV, &driver);
     }
     let line = match paths::restart_line(&paths::internal_files()) {
         Ok(Some(line)) => line,
