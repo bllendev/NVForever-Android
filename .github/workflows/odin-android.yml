@@ -51,8 +51,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/nvf-report-tests"
           javac -d "$RUNNER_TEMP/nvf-report-tests" android/app/src/main/java/org/nvforever/android/DebugReport.java android/tests/DebugReportTest.java
           java -cp "$RUNNER_TEMP/nvf-report-tests" org.nvforever.android.DebugReportTest
-      # The launcher's own logic: data profiles, the Data folder check, the controls file
-      # and the last-run state. Plain Java, no Android around it (android/tests).
+      # The launcher's own logic: data profiles, the Data folder check, the controls file,
+      # the last-run state and the save backups. Plain Java, no Android around it
+      # (android/tests).
       - name: Test launcher logic
         run: |
           mkdir -p "$RUNNER_TEMP/nvf-launcher-tests"
@@ -61,8 +62,10 @@ jobs:
             android/app/src/main/java/org/nvforever/android/Profiles.java \
             android/app/src/main/java/org/nvforever/android/ControlsFile.java \
             android/app/src/main/java/org/nvforever/android/RunState.java \
-            android/tests/LauncherTest.java
+            android/app/src/main/java/org/nvforever/android/SaveBackup.java \
+            android/tests/LauncherTest.java android/tests/SaveBackupTest.java
           java -cp "$RUNNER_TEMP/nvf-launcher-tests" org.nvforever.android.LauncherTest
+          java -cp "$RUNNER_TEMP/nvf-launcher-tests" org.nvforever.android.SaveBackupTest
       - name: Check string resources
         run: python3 android/tools/check_strings.py
       - name: Check Android input adapter

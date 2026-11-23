@@ -57,13 +57,51 @@ Optional `diagnostics true` in that file logs native input events.
 
 ## The launcher and data profiles
 
-The launcher is six screens: Setup (all-files access, the Data folder, the file
-check), Home (CONTINUE, PLAY, the status card, the active profile), Data (the
-profile list), Settings (launcher options only), About, and a hidden Debug screen
-with the crash-test switches. Its words are Android string resources
+The launcher is seven screens: Setup (all-files access, the Data folder, the file
+check), Home, Load save, Data (the profile list), Settings (launcher options
+only), About, and a hidden Advanced screen with the crash-test switches. Its
+words are Android string resources
 (`android/app/src/main/res/values*/strings.xml`, English the default; see
-`android/README-translations.md`), and its one typeface is bundled
+`android/README-translations.md`), and both its typefaces are bundled
 (`android/THIRD-PARTY.md`).
+
+**Design v2, direction A, "Main menu"** (owner decision 2026-11-23). Home is a
+main menu: a short left-aligned vertical list (Continue, Load save, Play, Data,
+Settings, About) with one warm focus bar, and a detail panel on the right that
+follows the focused item. Settings and Advanced are one screen each in three
+columns. Every screen ends with a slim status strip (profile, data check,
+add-ons, driver, version) and a controller legend.
+
+The look lives in `Ui.java`: 16dp body text, 13dp secondary, 11dp for technical
+values, one 26dp item a screen; a row is a 48dp band separated by a hairline with
+no fill and no outline, and focus is a 3dp amber bar on the left edge plus a wash
+that fades to the right. Switches are inline and tinted amber. Inter carries
+everything a person reads and JetBrains Mono is kept for the version, paths, file
+names, sizes and the `[ok]` and `[x]` marks. The page draws its own background:
+two soft washes and one abstract horizon hairline, vector only, no game art, no
+game mark and no game font (`LEGAL.md`).
+
+Controls are unchanged: A select, B one level out, LB and RB page the sections,
+Start plays from Home, X opens Data, Y opens Settings, and a long press on the
+version opens Advanced. A crash test's long explanation is read by holding its
+row, which is what lets one screen hold them all.
+
+**Load save** lists the active profile's saves, newest first, read only.
+Choosing one writes the same one-start request CONTINUE always used
+(`files/android-continue.txt`, `paths::continue_save`), so no engine code changes
+for it.
+
+**Back up saves and Restore saves** (Settings, and the Data area) copy the active
+profile's saves to `Download/NVForever-backups/<profile>-<date>/` and back
+(`SaveBackup.java`). A backup is a plain folder of save files, so any file app
+can carry it off the phone. Two rules, both covered by `SaveBackupTest`: nothing
+here ever deletes anything, and a save a restore would write over is copied to
+`<name>.bak` first (`.bak-2` and up when that name is taken), after the player is
+told how many names clash.
+
+**Report a problem** (Settings, and Advanced) is the front door to the debug log:
+it says what a log holds and where to send it, then writes it where the player
+chooses. `Export debug log...` and `Copy debug summary` stay on Advanced.
 
 A **data profile** is a name, a Data folder, and a home folder. Everything else
 follows from the home, because `fnv_install::EngineHome` derives the plugin list,
@@ -116,12 +154,21 @@ A Mods screen for editing that list is phase 2; the Data area shows the row as
 
 `org.nvforever.android.GpuDrivers` is the contract between the launcher and the
 custom Vulkan driver support (Turnip through libadrenotools), which is being built
-separately. Six static methods: `installed(Context)` as `{id, label}` pairs,
-`selected(Context)` (null means the system driver), `select(Context, idOrNull)`,
-`install(Context, Uri)` returning a new id, `delete(Context, id)`, and
-`lastStartFellBack(Context)`, a short reason or null, which Home shows. The body in
-this build is a stub: the list is empty, the selection is the system driver, and
-installing throws with a message fit to show.
+separately. Seven static methods: `installed(Context)` as `{id, label}` pairs,
+`selected(Context)` (null means the system driver), `mode(Context)`,
+`select(Context, idOrNull)`, `install(Context, Uri)` returning a new id,
+`delete(Context, id)`, and `lastStartFellBack(Context)`, a short reason or null,
+which Home shows.
+
+Settings draws the choice as an exclusive one: **Automatic**, **System**, then
+each installed driver by name, and `Install driver zip...` under them. Hold a
+driver to remove it. Automatic means "an installed driver when there is one, the
+system driver when there is not"; NVForever bundles no driver, so on a fresh
+install Automatic is exactly the system driver, and the note under the group says
+so. It is a launcher word only: the engine still reads
+`files/gpu_drivers/selected` and nothing else, and `select` resolves Automatic to
+a folder every time it is chosen, keeping the row itself in
+`files/gpu_drivers/mode`.
 
 ## Save loading on Android
 
@@ -139,6 +186,21 @@ a wake-up flag; arguments and the process ID are read from private storage.
 A missing activity acknowledgement times out and removes the loading cover.
 
 ## Checks
+
+The launcher's own checks, which need no Android SDK (CI runs the same ones,
+`.github/workflows/odin-android.yml`):
+
+```sh
+# every launcher source compiles; android<N>.jar goes on the classpath, not the
+# boot class path, or lambdas fail to link. R and BuildConfig are stand-ins:
+#   python android/tools/gen_stub_r.py <out>/org/nvforever/android/R.java
+javac -cp android33.jar -d out android/app/src/main/java/org/nvforever/android/*.java <stand-ins>
+javac -d t <plain-Java sources> android/tests/LauncherTest.java android/tests/SaveBackupTest.java
+java -cp t org.nvforever.android.LauncherTest
+java -cp t org.nvforever.android.SaveBackupTest
+java -cp t org.nvforever.android.DebugReportTest
+python android/tools/check_strings.py
+```
 
 ```sh
 cargo test --manifest-path engine/Cargo.toml -p nvf-android-input
