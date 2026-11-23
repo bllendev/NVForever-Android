@@ -47,6 +47,74 @@ actions are retained. D-pad Up changes ammunition. Only a complete old default
 D-pad profile is automatically migrated; custom bindings are preserved.
 Optional `diagnostics true` in that file logs native input events.
 
+## The launcher and data profiles
+
+The launcher is six screens: Setup (all-files access, the Data folder, the file
+check), Home (CONTINUE, PLAY, the status card, the active profile), Data (the
+profile list), Settings (launcher options only), About, and a hidden Debug screen
+with the crash-test switches. Its words are Android string resources
+(`android/app/src/main/res/values*/strings.xml`, English the default; see
+`android/README-translations.md`), and its one typeface is bundled
+(`android/THIRD-PARTY.md`).
+
+A **data profile** is a name, a Data folder, and a home folder. Everything else
+follows from the home, because `fnv_install::EngineHome` derives the plugin list,
+the saves, the logs and the mods folder from its root and `EngineHome::default_root`
+takes `NVFOREVER_HOME` first.
+
+```text
+/data/user/0/org.nvforever.android/files/
+    data-path.txt        the active profile's Data folder        (unchanged contract)
+    profile.txt          the active profile's home, relative     (read by paths.rs)
+    profiles.txt         the launcher's own list                 (the engine never reads it)
+    android-continue.txt one start's save, for CONTINUE          (consumed once)
+    NVForever/           the "Vanilla" profile's home: NVForever.ini, plugins.txt,
+                         saves/, logs/, cache/, mods/
+    profiles/<id>/       any other profile's home, the same files again
+```
+
+The first profile is always Vanilla and keeps `files/NVForever`, the home every
+install has had, so an existing install's saves, settings and logs stay exactly
+where they are. Nothing is moved or renamed, and `files/profiles/` is created only
+when a second profile is added. Switching a profile writes `data-path.txt` and
+`profile.txt`, and nothing else. "Forget" removes a row from the list and touches
+no folder, save or log.
+
+**Saves are per profile**, because a save made with mods, loaded without them,
+fails late and looks like an engine bug. The launcher offers to copy saves into a
+new profile; the folder copied from is left as it was.
+
+**Settings are shared across profiles** (owner decision): a profile switch must not
+change resolution, difficulty or anything else on the game's settings page. The INI
+cannot be linked, because every writer replaces it whole through a temporary file
+and a rename (`fnv_install::write_whole`), which would break a hard link and orphan
+a symlink. So `paths::share_settings` copies the newest `NVForever.ini` among all
+the profile homes into the active one before the game starts. Only one profile runs
+at a time and the launcher never writes the file, so "newest wins" has exactly one
+candidate: whichever profile ran last.
+
+**Mod plugins load on Android from this build on.** `developer_data` in
+`engine/nvforever/src/lib.rs` used to be `args.data.is_some()`, and every Android
+start passes `--data`, so the branch that reads the home's `plugins.txt` never ran
+and the load order was always the base game plus the DLC masters. The Android shell
+now passes `--player-start` as well, which says "a player's start even so", and the
+profile's own `plugins.txt` is the load order. A developer or smoke run, which
+passes `--data` without that flag, is unchanged.
+
+A Mods screen for editing that list is phase 2; the Data area shows the row as
+"coming soon" rather than hiding it.
+
+## Graphics drivers
+
+`org.nvforever.android.GpuDrivers` is the contract between the launcher and the
+custom Vulkan driver support (Turnip through libadrenotools), which is being built
+separately. Six static methods: `installed(Context)` as `{id, label}` pairs,
+`selected(Context)` (null means the system driver), `select(Context, idOrNull)`,
+`install(Context, Uri)` returning a new id, `delete(Context, id)`, and
+`lastStartFellBack(Context)`, a short reason or null, which Home shows. The body in
+this build is a stub: the list is empty, the selection is the system driver, and
+installing throws with a message fit to show.
+
 ## Save loading on Android
 
 The desktop handoff starts a fresh executable. NativeActivity requires a fresh

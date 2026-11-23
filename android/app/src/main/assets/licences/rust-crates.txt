@@ -1,0 +1,16 @@
+The Rust crates NVForever is built on
+=====================================
+
+The engine inside this app is Rust. It is built on the Bevy engine and on several hundred
+open-source crates. Almost all of them are offered under the MIT licence or the Apache
+licence, version 2.0, at the user's option; a few are MIT only, BSD or Zlib. The full text
+of the Apache licence, version 2.0, is in this app under "Khronos Vulkan Validation Layers".
+
+The exact list for a given build, crate by crate with its licence, comes from the build
+itself and is not hand-maintained here: the repository's cargo-deny configuration
+(deny.toml) decides which licences are allowed at all, and the build fails when a crate
+arrives under any other one.
+
+The source of this app and of the engine, and the crate list for the commit it was built
+from, are at the project's source repository. NVForever itself, this launcher included, is
+GPL-3.0-or-later; see "NVForever" in this list.

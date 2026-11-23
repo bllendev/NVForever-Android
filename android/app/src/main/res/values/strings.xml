@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    English, the default and the only complete file. Every other values-<code>/strings.xml
+    may be partial: Android falls back to this one key by key, so a half-finished
+    translation ships safely. How to add a language: android/README-translations.md.
+
+    House rules (docs/design, the launcher design, section 9.3):
+      - no key is reused across two screens, even where the English matches;
+      - no sentence is assembled from pieces in code: one format string a sentence;
+      - every placeholder is positional (%1$s), and its meaning is in a comment above;
+      - file names, paths, flag names and INI keys are never translated.
+-->
+<resources>
+    <string name="app_name">NVForever</string>
+    <string name="app_tagline">An unofficial, fan-made engine for Fallout: New Vegas. Your own legally owned copy of the game files is required.</string>
+
+    <!-- Shared words. One key a meaning, not a screen. -->
+    <string name="common_ok">OK</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_back">Back</string>
+    <string name="common_close">Close</string>
+    <string name="common_verify">Re-check</string>
+    <string name="common_change_folder">Change folder</string>
+    <string name="common_yes">Yes</string>
+    <string name="common_none">none</string>
+    <string name="common_unknown">unknown</string>
+
+    <!-- Section names in the bottom bar and the titles of their screens. -->
+    <string name="section_home">Home</string>
+    <string name="section_setup">Setup</string>
+    <string name="section_data">Data</string>
+    <string name="section_settings">Settings</string>
+    <string name="section_debug">Debug</string>
+    <string name="section_about">About</string>
+
+    <!-- The controller legend along the bottom of every screen. -->
+    <string name="legend_home">A Select    B Back    X Data    Y Settings    Start Play</string>
+    <string name="legend_other">A Select    B Back    LB and RB Change section</string>
+
+    <!-- Setup, step 1. -->
+    <string name="setup_title">Setup</string>
+    <string name="setup_intro">Three steps, then you can play. Nothing here is written into your game folder.</string>
+    <string name="setup_step_access_title">1. All-files access</string>
+    <string name="setup_step_access_why">The game reads and writes your own folders, the way it does on a PC.</string>
+    <string name="setup_step_access_grant">Grant access</string>
+    <string name="setup_step_access_return">Turn the system switch on, then come back here.</string>
+    <string name="setup_step_access_granted">Granted.</string>
+    <!-- Android 8 to 10 ask for the two classic permissions instead of the switch. -->
+    <string name="setup_step_access_legacy">This version of Android asks for storage permission instead of the all-files switch.</string>
+
+    <!-- Setup, step 2. -->
+    <string name="setup_step_folder_title">2. Data folder</string>
+    <string name="setup_step_folder_why">Point NVForever at the Data folder of your own copy of the game. It is only ever read.</string>
+    <string name="setup_step_folder_choose">Choose folder...</string>
+    <string name="setup_step_folder_create">Create NVForever/Data</string>
+    <string name="setup_step_folder_create_note">Then copy your Data files into it from a PC.</string>
+    <!-- %1$s is an absolute folder path, left to right even in a right-to-left language. -->
+    <string name="setup_step_folder_chosen">Folder: %1$s</string>
+    <string name="setup_step_folder_profile_note">This folder becomes your first data profile, named Vanilla.</string>
+    <string name="setup_blocked_android_data">Android closes the folders under Android/data and Android/obb to every app since Android 11. Pick another location, for example /sdcard/NVForever/Data.</string>
+    <string name="setup_blocked_missing_folder">That folder does not exist yet. Choose the game\'s Data folder, or create the default one and copy your files into it.</string>
+
+    <!-- Setup, step 3. -->
+    <string name="setup_step_check_title">3. File check</string>
+    <string name="setup_step_check_why">The same files the engine itself insists on. A file of zero length counts as missing: that is what a copy that stopped early leaves.</string>
+    <string name="setup_step_check_ready">Every required file is there. You can play.</string>
+    <string name="setup_step_check_blocked">Some required files are missing. The game cannot start on this folder.</string>
+    <string name="setup_start_anyway">Start anyway (diagnostics)</string>
+    <string name="setup_done">Setup complete.</string>
+
+    <!-- The file check, shared by Setup and the Data area. -->
+    <string name="check_base_found">FalloutNV.esm found</string>
+    <string name="check_base_missing">FalloutNV.esm is not in this folder</string>
+    <!-- %1$d archives found of %2$d required. -->
+    <string name="check_archives">Base archives: %1$d of %2$d</string>
+    <!-- %1$d add-on masters found of %2$d known. None of them is required. -->
+    <string name="check_addons">Add-ons detected: %1$d of %2$d</string>
+    <!-- %1$s is a file name, never translated. -->
+    <string name="check_missing_file">Missing: %1$s</string>
+    <string name="check_folder_unreadable">This folder cannot be read.</string>
+
+    <!-- Home. -->
+    <string name="home_continue">CONTINUE</string>
+    <!-- %1$s is the save's name, %2$s how long ago it was written, %3$s the profile's name. -->
+    <string name="home_continue_sub">%1$s, %2$s, profile %3$s</string>
+    <string name="home_play">PLAY</string>
+    <string name="home_play_sub">Start at the main menu</string>
+    <string name="home_profile_label">PROFILE</string>
+    <string name="home_profile_change">Change</string>
+    <string name="home_status_title">[ status ]</string>
+    <string name="home_status_data">Data folder</string>
+    <string name="home_status_saves">Saves</string>
+    <string name="home_status_access">All-files</string>
+    <string name="home_status_access_granted">granted</string>
+    <string name="home_status_access_missing">not granted</string>
+    <string name="home_status_last_run">Last run</string>
+    <string name="home_last_run_none">none yet</string>
+    <string name="home_last_run_ok">ended normally</string>
+    <string name="home_last_run_crash">ended unexpectedly</string>
+    <string name="home_last_run_crash_action">Last run ended unexpectedly. Export the debug log.</string>
+    <!-- %1$d crash-test switches are on. Shown next to the build chip. -->
+    <string name="home_tests_on_chip">%1$d tests on</string>
+    <string name="home_toggle_touch">Show touch controls</string>
+    <string name="home_toggle_controller">Physical controller</string>
+    <string name="home_toggles_note">Applied when the game starts.</string>
+    <string name="home_open_data">Data</string>
+    <string name="home_export_log">Export debug log</string>
+    <!-- %1$s is the graphics driver\'s own reason, from GpuDrivers.lastStartFellBack. -->
+    <string name="home_driver_fell_back">The last start used the system graphics driver: %1$s</string>
+
+    <!-- How long ago something happened. -->
+    <string name="time_just_now">just now</string>
+    <!-- %1$d minutes ago. -->
+    <plurals name="time_minutes_ago">
+        <item quantity="one">%1$d minute ago</item>
+        <item quantity="other">%1$d minutes ago</item>
+    </plurals>
+    <!-- %1$d hours ago. -->
+    <plurals name="time_hours_ago">
+        <item quantity="one">%1$d hour ago</item>
+        <item quantity="other">%1$d hours ago</item>
+    </plurals>
+    <!-- %1$d days ago. -->
+    <plurals name="time_days_ago">
+        <item quantity="one">%1$d day ago</item>
+        <item quantity="other">%1$d days ago</item>
+    </plurals>
+    <!-- %1$d saves in the active profile. -->
+    <plurals name="count_saves">
+        <item quantity="one">%1$d in this profile</item>
+        <item quantity="other">%1$d in this profile</item>
+    </plurals>
+
+    <!-- The Data area, phase 1: profiles. -->
+    <string name="data_title">[ data ]</string>
+    <string name="data_profiles_title">Profiles</string>
+    <string name="data_profiles_note">A profile is a Data folder plus its own plugin list and saves. Your game settings are shared across profiles; your saves are not, because a save made with mods needs those mods.</string>
+    <string name="data_profiles_use">Use this profile</string>
+    <string name="data_profiles_active">In use</string>
+    <string name="data_profiles_new">New profile...</string>
+    <string name="data_profiles_new_name">Name the profile, then choose its Data folder.</string>
+    <string name="data_profiles_rename">Rename</string>
+    <string name="data_profiles_forget">Forget</string>
+    <string name="data_profiles_forget_confirm">Forget this profile? It is removed from this list and nothing else: its Data folder, saves and logs stay exactly where they are.</string>
+    <string name="data_profiles_cannot_use">This profile cannot be used until its Data folder has every required file.</string>
+    <string name="data_profiles_unavailable">Folder unavailable</string>
+    <string name="data_profiles_copy_saves">Copy saves from the current profile</string>
+    <!-- %1$d saves were copied into the new profile. -->
+    <plurals name="data_profiles_copied">
+        <item quantity="one">%1$d save copied.</item>
+        <item quantity="other">%1$d saves copied.</item>
+    </plurals>
+    <string name="data_mods_soon">Mods (coming soon)</string>
+    <string name="data_mods_soon_note">The plugin list of each profile gets its own screen in the next build. This build already loads the profile\'s plugins.txt.</string>
+
+    <!-- Settings. -->
+    <string name="settings_title">[ settings ]</string>
+    <string name="settings_note">Graphics, audio, gameplay and key bindings are the game\'s own: open the game, then Pause, then Settings.</string>
+    <string name="settings_group_controls">Controls</string>
+    <string name="settings_group_device">Device</string>
+    <string name="settings_group_data">Data</string>
+    <string name="settings_group_launcher">Launcher</string>
+    <string name="settings_controls_legend">A use or accept. B Pip-Boy or back. X ready item. Y jump. LT aim. RT attack. RB V.A.T.S. LB camera. L3 crouch. R3 grab. D-pad up ammunition. Start pause.</string>
+    <string name="settings_controls_rebind">Rebind buttons in the game: Pause, then Settings, then Controls.</string>
+    <string name="settings_keep_awake">Keep the screen awake while playing</string>
+    <string name="settings_keep_awake_note">The game keeps the screen on even when you are not touching it.</string>
+    <string name="settings_profile_row">Data profile</string>
+    <string name="settings_profile_note">Choose which profile the game starts with. Phase 1 of the Data area.</string>
+    <string name="settings_driver_row">Graphics driver</string>
+    <string name="settings_driver_system">System</string>
+    <string name="settings_driver_system_note">The driver your phone came with.</string>
+    <string name="settings_driver_install">Install driver zip...</string>
+    <string name="settings_driver_delete">Delete this driver</string>
+    <string name="settings_driver_none_note">No custom driver is installed. Installing one is not built into this version yet.</string>
+    <string name="settings_debug_row">Debug</string>
+    <string name="settings_debug_note">Crash tests and logs. For bug reports.</string>
+    <string name="settings_rerun_setup">Re-run setup</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_note">The launcher follows your phone\'s language. The game has its own languages, so an English launcher with a game in another language is correct.</string>
+
+    <!-- Debug, reached by a long press on the build chip or the Settings row. -->
+    <string name="debug_title">[ debug ]</string>
+    <string name="debug_first_confirm">These switches exist to make the game fail in a known way, so a crash can be reported. They make the game slower and some will stop it loading. Nothing here touches your saves or your game files.</string>
+    <string name="debug_open">Open</string>
+    <!-- %1$d crash-test switches are on. -->
+    <plurals name="debug_warn_strip">
+        <item quantity="one">%1$d crash-test switch is on. The game will be slower.</item>
+        <item quantity="other">%1$d crash-test switches are on. The game will be slower.</item>
+    </plurals>
+    <string name="debug_group_engine">Engine crash tests</string>
+    <string name="debug_group_vulkan">Vulkan validation (Khronos layer, big slowdowns)</string>
+    <string name="debug_group_diagnostics">Diagnostics</string>
+    <string name="debug_group_reports">Reports</string>
+    <string name="debug_group_reset">Reset</string>
+    <string name="debug_skip_pipboy">Skip Pip-Boy warm-up</string>
+    <string name="debug_skip_pipboy_note">Skips the hidden Pip-Boy render during a load. Tests whether that warm-up is what crashes.</string>
+    <string name="debug_skip_vats">No V.A.T.S. target outline</string>
+    <string name="debug_skip_vats_note">Turns off the outline pass around V.A.T.S. targets. Tests whether that extra camera crashes.</string>
+    <string name="debug_validation">Vulkan validation layer</string>
+    <string name="debug_validation_note">The Khronos layer checks every GPU call and logs misuse. Much slower.</string>
+    <string name="debug_validation_sync">Synchronization validation</string>
+    <string name="debug_validation_sync_note">Also checks GPU work ordering. Needs the layer above, and does nothing while it is off.</string>
+    <string name="debug_validation_gpuav">GPU-assisted validation</string>
+    <string name="debug_validation_gpuav_note">Also instruments shaders. Very slow, and a load may never finish. Needs the layer above.</string>
+    <string name="debug_breadcrumbs">GPU breadcrumbs</string>
+    <string name="debug_breadcrumbs_note">Marks every render step, so a GPU hang can name the step that died.</string>
+    <string name="debug_diagnostics">Native input logging</string>
+    <string name="debug_diagnostics_note">Logs every controller event. Big logs.</string>
+    <string name="debug_privacy">Logs contain your device model, folder paths, file names and the name of your active profile. They contain no game data and no account details. Read them before you share them.</string>
+    <string name="debug_export_log">Export debug log...</string>
+    <string name="debug_copy_summary">Copy debug summary</string>
+    <string name="debug_tests_off">Turn every crash test off</string>
+    <string name="debug_tests_off_done">Every crash test is off.</string>
+    <string name="debug_saves_untouched">Nothing on this screen touches your saves, your plugin list or your game files.</string>
+
+    <!-- About. -->
+    <string name="about_title">[ about ]</string>
+    <string name="about_disclaimer">NVForever is an independent, non-commercial, fan-made project. It is not affiliated with, endorsed or sponsored by Bethesda Softworks, ZeniMax Media, Microsoft or Obsidian Entertainment. It contains no code or content from the original game, and it does not run without the data files of your own lawfully purchased copy.</string>
+    <string name="about_trademark">Fallout and Fallout: New Vegas are trademarks of Bethesda Softworks LLC. Used only to say what this engine is compatible with.</string>
+    <string name="about_extender">NVForever is not xNVSE and does not load its plugins. It implements NVSE script functions itself.</string>
+    <string name="about_licences">Licences</string>
+    <string name="about_licence_nvforever">NVForever, this app and the engine: GPL-3.0-or-later</string>
+    <string name="about_licence_validation">Khronos Vulkan Validation Layers: Apache-2.0</string>
+    <string name="about_licence_font">JetBrains Mono, the launcher\'s typeface: SIL Open Font License 1.1</string>
+    <string name="about_licence_crates">Bevy and the Rust crates the engine is built on: MIT or Apache-2.0</string>
+    <string name="about_licence_read">Read the full text</string>
+    <string name="about_build">Build</string>
+
+    <!-- Errors, each one its own key so a translator can say where it happened. -->
+    <string name="error_need_access">Grant all-files access first.</string>
+    <!-- %1$s is the system's own message, which is not translated. -->
+    <string name="error_save_choice">The choice could not be saved: %1$s</string>
+    <string name="error_save_controls">The switch could not be saved: %1$s</string>
+    <string name="error_restart">The game could not be restarted.</string>
+    <string name="error_resume">That game could not be loaded.</string>
+    <string name="error_export_log">The debug log could not be saved. Try a writable folder.</string>
+    <string name="error_export_log_done">Debug log saved. Review it before you attach it.</string>
+    <string name="error_copy_done">Debug summary copied. Review it before you share it.</string>
+    <string name="error_copy_saves">The saves could not be copied: %1$s</string>
+    <string name="error_no_file_app">No app on this phone can open that.</string>
+</resources>
