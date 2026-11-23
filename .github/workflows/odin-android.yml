@@ -16,6 +16,9 @@ jobs:
     env:
       NDK_VERSION: '28.2.13676358'
       BUILD_TOOLS: '35.0.0'
+      # The CMake the SDK ships, for libadrenotools (android/app/src/main/cpp/CMakeLists.txt);
+      # app/build.gradle.kts asks for this same version.
+      CMAKE_VERSION: '3.22.1'
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -32,7 +35,7 @@ jobs:
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
       - name: Set up Android and Rust
         run: |
-          sdkmanager "platforms;android-35" "build-tools;$BUILD_TOOLS" "ndk;$NDK_VERSION"
+          sdkmanager "platforms;android-35" "build-tools;$BUILD_TOOLS" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
           rustup target add aarch64-linux-android
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -88,6 +91,38 @@ jobs:
           echo "$VVL_ZIP_SHA256  $zip" | sha256sum -c -
           unzip -o -j "$zip" "$VVL_MEMBER" -d "$libs"
           echo "$VVL_SO_SHA256  $libs/libVkLayer_khronos_validation.so" | sha256sum -c -
+      # libadrenotools (BSD-2-Clause) and its liblinkernsbypass submodule (BSD-2-Clause), for
+      # the launcher's optional "Graphics driver" choice: a Mesa Turnip build the player
+      # installs themselves (docs/odin-debug.md). No driver is downloaded or shipped, only
+      # this loader. Neither source tree is committed: both are fetched at a pinned commit,
+      # checked against a pinned hash, and built by Gradle's CMake
+      # (android/app/src/main/cpp/CMakeLists.txt).
+      - name: Add the libadrenotools sources
+        env:
+          ADRENOTOOLS_COMMIT: 8fae8ce254dfc1344527e05301e43f37dea2df80
+          ADRENOTOOLS_SHA256: ceffce971676d4cfdf348a082df06fc92a1dca6d95bea892a480d63f200961cb
+          LINKERNSBYPASS_COMMIT: aa3975893d83ef1bc84c321ec60c65fbf1287887
+          LINKERNSBYPASS_SHA256: da1128c8aa771c4d24766b53a47822d0717baa5c536ca8491220402942b80638
+        run: |
+          set -euo pipefail
+          cpp=android/app/src/main/cpp
+          src="$cpp/libadrenotools"
+          rm -rf "$src"
+          mkdir -p "$src/lib/linkernsbypass"
+          curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/adrenotools.tar.gz" \
+            "https://codeload.github.com/bylaws/libadrenotools/tar.gz/$ADRENOTOOLS_COMMIT"
+          echo "$ADRENOTOOLS_SHA256  $RUNNER_TEMP/adrenotools.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/adrenotools.tar.gz" -C "$src" --strip-components=1
+          curl -fsSL --retry 3 --retry-all-errors -o "$RUNNER_TEMP/linkernsbypass.tar.gz" \
+            "https://codeload.github.com/bylaws/liblinkernsbypass/tar.gz/$LINKERNSBYPASS_COMMIT"
+          echo "$LINKERNSBYPASS_SHA256  $RUNNER_TEMP/linkernsbypass.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/linkernsbypass.tar.gz" -C "$src/lib/linkernsbypass" --strip-components=1
+          test -f "$src/CMakeLists.txt" && test -f "$src/lib/linkernsbypass/CMakeLists.txt"
+          # BSD-2-Clause asks that the notice travel with a binary distribution, so it goes
+          # beside the APK in the artifact and in the release (LEGAL.md).
+          mkdir -p dist
+          cp "$src/LICENSE" dist/LICENSE.libadrenotools.txt
+          cp "$src/lib/linkernsbypass/LICENSE" dist/LICENSE.liblinkernsbypass.txt
       - name: Package APK
         run: gradle -p android --no-daemon -PprebuiltRust assembleDebug
       - name: Sign APK with the dedicated Odin key
@@ -121,6 +156,24 @@ jobs:
           # The layer must reach the APK, and the libraries must be extracted at install time
           # or Android's Vulkan loader cannot see the layer (app/build.gradle.kts).
           unzip -l NVForever-Odin-arm64.apk | grep -q 'lib/arm64-v8a/libVkLayer_khronos_validation.so'
+          # A custom driver only works if nothing pulls the system Vulkan loader into the
+          # process first, so the engine must not link it: wgpu loads it at run time, and on
+          # Android it may instead be handed the driver's own entry point
+          # (engine/nvf-android/src/gpu_driver.rs).
+          if readelf -dW ../android/app/src/main/jniLibs/arm64-v8a/libnvf_android.so | grep -q 'NEEDED.*libvulkan'; then
+            echo 'libnvf_android.so links libvulkan.so; a player-supplied driver cannot be used' >&2
+            exit 1
+          fi
+          # libadrenotools and all four of its hook libraries must reach the APK as files, or
+          # the launcher's Graphics driver choice silently has nothing to load
+          # (docs/odin-debug.md). They are built by Gradle's CMake, so they are checked inside
+          # the package, and for the same 16 KB page alignment as the two above.
+          libs="$RUNNER_TEMP/adrenotools-libs"
+          rm -rf "$libs"
+          for so in libadrenotools.so libhook_impl.so libmain_hook.so libfile_redirect_hook.so libgsl_alloc_hook.so; do
+            unzip -o -j NVForever-Odin-arm64.apk "lib/arm64-v8a/$so" -d "$libs"
+            readelf -lW "$libs/$so" | awk '$1 == "LOAD" { count++; if (strtonum($NF) < 16384) bad=1 } END { exit (!count || bad) }'
+          done
           "$tools/aapt2" dump badging NVForever-Odin-arm64.apk | tee package.txt
           grep -q "package: name='org.nvforever.android.odin'" package.txt
           grep -q "native-code: 'arm64-v8a'" package.txt
@@ -149,6 +202,7 @@ jobs:
         run: |
           sha256sum -c SHA256SUMS.txt
           gh release create "$GITHUB_REF_NAME" NVForever-Odin-arm64.apk SHA256SUMS.txt signer.txt package.txt \
+            LICENSE.libadrenotools.txt LICENSE.liblinkernsbypass.txt \
             --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
             --title "NVForever Odin debug $GITHUB_REF_NAME" \
             --notes "Experimental Android ARM64 build. Requires your own clean Fallout: New Vegas Data folder. Includes no game files. Separate app from GameNative and the older Android ports. Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
