@@ -307,8 +307,9 @@ mod tests {
     /// Quick Loot rows; #2965's heat haze row; #2675's desert haze row; Sprint; #2671's terrain
     /// shadows row; #2981's authored materials row and its reflections row; #2701's
     /// full-detail scenery row; #3014's distant objects row; #2993's aerial perspective row;
-    /// #2995's night sky detail row; #3013's distant lights row; #3322's terrain parallax row), by the group it registers with.
-    const KNOWN: [(&str, &str); 149] = [
+    /// #2995's night sky detail row; #3013's distant lights row; #3322's terrain parallax
+    /// row; the glance's own rows), by the group it registers with.
+    const KNOWN: [(&str, &str); 157] = [
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
         ("advanced-movement", "Gameplay"),
@@ -350,6 +351,14 @@ mod tests {
         ("aim-assist", "Controller"),
         ("aim-slowdown", "Controller"),
         ("aim-lock", "Controller"),
+        ("wrist-map", "Gameplay"),
+        ("wrist-map-raise", "Gameplay"),
+        ("wrist-map-style", "Gameplay"),
+        ("wrist-map-position", "Gameplay"),
+        ("wrist-map-zoom", "Gameplay"),
+        ("wrist-map-rotate", "Gameplay"),
+        ("wrist-hud", "Gameplay"),
+        ("wrist-hud-flash", "Gameplay"),
         ("autosave-travel", "Saving"),
         ("autosave-fast-travel", "Saving"),
         ("autosave-wait", "Saving"),
