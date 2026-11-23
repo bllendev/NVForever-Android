@@ -3,74 +3,324 @@ package org.nvforever.android;
 import android.content.Context;
 import android.net.Uri;
 
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
- * Custom Vulkan drivers the player installed (Turnip through libadrenotools), and which one
- * the game starts with.
+ * The Vulkan drivers the player installed themselves, and which of them the next game start
+ * uses. NVForever ships no driver: the player supplies a driver zip in the emulator format (a
+ * single .so, optionally with meta.json naming it), and the game opens it through libadrenotools
+ * (engine/nvf-android/src/gpu_driver.rs, docs/odin-debug.md).
  *
- * <p><b>This is the agreed contract and a stub body.</b> The work that loads a driver is on
- * another branch; it replaces the bodies below and nothing else. The launcher's Settings,
- * then Graphics driver row, and Home's fall-back message are written against these six
- * methods only, so the two sides can land in either order.
+ * Everything lives in the app's private storage, which is what libadrenotools requires: a
+ * driver on shared storage could be rewritten by any app, so dlopen refuses it.
  *
- * <p>The contract:
- * <ul>
- * <li>{@link #installed} lists the drivers that are ready to use, each as a two-element
- *     array {@code {id, label}}: {@code id} is stable and is what {@link #select} is given,
- *     {@code label} is what the row shows ("Turnip 25.1.0 (Adreno 7xx)"). The list is empty
- *     when none is installed, never null, and the System driver is not in it.</li>
- * <li>{@link #selected} is the chosen driver's id, or null for the system driver. An id that
- *     is no longer installed reads as null.</li>
- * <li>{@link #select} chooses one, or the system driver with null. It applies at the next
- *     game start, like every other launcher switch.</li>
- * <li>{@link #install} takes a driver zip the player picked, unpacks it and returns its new
- *     id. It throws {@link IOException} with a message fit to show when the zip is not a
- *     driver, is for another GPU, or cannot be read.</li>
- * <li>{@link #delete} removes an installed driver. Selecting it afterwards is the system
- *     driver. Deleting an id that is not installed does nothing.</li>
- * <li>{@link #lastStartFellBack} is null when the last game start used what was chosen, and
- *     a short reason ("the driver did not load") when it fell back to the system driver, so
- *     Home can say so instead of the player wondering why nothing changed. Reading it does
- *     not clear it; it is replaced by the next start.</li>
- * </ul>
+ * <pre>
+ * files/gpu_drivers/&lt;id&gt;/           one installed driver: its .so, and meta.json if the zip had one
+ * files/gpu_drivers/selected        the chosen driver; absent means the system driver
+ * files/gpu_drivers/renderer_starting  written by the game before the renderer starts, removed
+ *                                   by the engine after 300 drawn frames
+ * files/gpu_drivers/last_fallback   why the last start did not use the chosen driver
+ * files/gpu_drivers/native_lib_dir  ApplicationInfo.nativeLibraryDir, for the game's fallback
+ * </pre>
  *
- * <p>No method here ever touches a save, a plugin list or a Data folder.
+ * With nothing installed and nothing selected the game behaves exactly as it did before this
+ * existed: no file is there, so none is read.
  */
 public final class GpuDrivers {
+    private static final String SELECTED = "selected";
+    private static final String MARKER = "renderer_starting";
+    private static final String LAST_FALLBACK = "last_fallback";
+    private static final String NATIVE_LIB_DIR = "native_lib_dir";
+    private static final String META = "meta.json";
+
+    /** A driver zip is a library and a little text; anything larger is not one. */
+    private static final long MAX_UNPACKED_BYTES = 256L * 1024 * 1024;
+    private static final int MAX_ENTRIES = 64;
+    /** ELF, 64-bit, little-endian, AArch64: a file that is not this cannot be a driver here. */
+    private static final byte[] ELF64_LE = { 0x7f, 'E', 'L', 'F', 2, 1 };
+    private static final int EM_AARCH64 = 0xb7;
+
     private GpuDrivers() {}
 
-    /** The installed drivers as {@code {id, label}}. Empty while this is a stub. */
-    public static List<String[]> installed(Context c) {
-        return new ArrayList<>();
+    // ---- what is installed ------------------------------------------------------------
+
+    /** The installed drivers as {id, label}, by label. Empty when none is installed. */
+    public static List<String[]> installed(Context context) {
+        List<String[]> drivers = new ArrayList<>();
+        File[] folders = root(context).listFiles();
+        if (folders == null) return drivers;
+        for (File folder : folders) {
+            if (!folder.isDirectory() || folder.getName().startsWith(".")) continue;
+            String library = libraryIn(folder);
+            if (library == null) continue;
+            drivers.add(new String[] { folder.getName(), label(folder) });
+        }
+        Collections.sort(drivers, (a, b) -> a[1].compareToIgnoreCase(b[1]));
+        return drivers;
     }
 
-    /** The chosen driver's id, or null for the system driver. Always null while this is a stub. */
-    public static String selected(Context c) {
+    /** The chosen driver's id, or null for the system driver (including a stale choice). */
+    public static String selected(Context context) {
+        String folder = value(read(new File(root(context), SELECTED)), "folder");
+        if (folder == null || !plainName(folder)) return null;
+        File dir = new File(root(context), folder);
+        return dir.isDirectory() && libraryIn(dir) != null ? folder : null;
+    }
+
+    /**
+     * Chooses a driver for the next game start, or the system driver when {@code idOrNull} is
+     * null or names nothing installed. Either way the previous start's marker and fallback note
+     * go: the question they answer was about the choice being replaced.
+     */
+    public static void select(Context context, String idOrNull) {
+        File root = root(context);
+        File chosen = idOrNull != null && plainName(idOrNull) ? new File(root, idOrNull) : null;
+        String library = chosen != null && chosen.isDirectory() ? libraryIn(chosen) : null;
+        //noinspection ResultOfMethodCallIgnored
+        root.mkdirs();
+        new File(root, MARKER).delete();
+        new File(root, LAST_FALLBACK).delete();
+        if (library == null) {
+            new File(root, SELECTED).delete();
+            return;
+        }
+        // The game asks the linker where its own libraries were extracted to and only reads
+        // this when that fails, but it costs nothing to leave the answer here.
+        write(new File(root, NATIVE_LIB_DIR), context.getApplicationInfo().nativeLibraryDir + "\n");
+        write(new File(root, SELECTED), "# Written by the launcher; applied when starting the game\n"
+                + "folder " + idOrNull + "\n"
+                + "library " + library + "\n"
+                + "label " + oneLine(label(chosen)) + "\n");
+    }
+
+    /** Why the last game start did not use the chosen driver, or null when it did. */
+    public static String lastStartFellBack(Context context) {
+        String why = read(new File(root(context), LAST_FALLBACK));
+        if (why == null) return null;
+        why = why.trim();
+        return why.isEmpty() ? null : why;
+    }
+
+    // ---- installing and removing ------------------------------------------------------
+
+    /**
+     * Unpacks a driver zip into files/gpu_drivers/&lt;id&gt;/ and returns the id. The zip must
+     * hold exactly one AArch64 .so; meta.json, if there is one, names the driver and may name
+     * which library to load. Folders inside the zip are flattened, so no entry can write
+     * outside the driver's own folder. Nothing is selected: that is {@link #select}.
+     *
+     * @throws IOException if the zip cannot be read, holds no usable driver, or is too large
+     */
+    public static String install(Context context, Uri zip) throws IOException {
+        File root = root(context);
+        if (!root.isDirectory() && !root.mkdirs()) throw new IOException("Cannot create " + root);
+        File staging = new File(root, ".incoming-" + System.nanoTime());
+        if (!staging.mkdirs()) throw new IOException("Cannot create a folder for the driver");
+        try {
+            unpack(context, zip, staging);
+            String library = libraryIn(staging);
+            if (library == null) {
+                throw new IOException("That zip holds no 64-bit ARM Vulkan driver (one .so is expected)");
+            }
+            String id = freeId(root, label(staging));
+            File target = new File(root, id);
+            if (!staging.renameTo(target)) throw new IOException("Cannot store the driver as " + id);
+            staging = null;
+            return id;
+        } finally {
+            if (staging != null) deleteTree(staging);
+        }
+    }
+
+    /** Removes an installed driver, and the choice with it when that driver was chosen. */
+    public static void delete(Context context, String id) {
+        if (!plainName(id)) return;
+        if (id.equals(selected(context))) select(context, null);
+        deleteTree(new File(root(context), id));
+    }
+
+    // ---- the files --------------------------------------------------------------------
+
+    private static File root(Context context) {
+        return new File(context.getFilesDir(), "gpu_drivers");
+    }
+
+    /**
+     * The driver library in {@code folder}: the one meta.json names if it is there, else the
+     * folder's single .so. Null when there is none, more than one, or the file is not an
+     * AArch64 shared object, each of which would only fail later inside the game.
+     */
+    private static String libraryIn(File folder) {
+        String named = meta(read(new File(folder, META)), "libraryName");
+        if (named != null && plainName(named)) {
+            File library = new File(folder, named);
+            return library.isFile() && isAarch64Elf(library) ? named : null;
+        }
+        String[] names = folder.list();
+        if (names == null) return null;
+        String only = null;
+        for (String name : names) {
+            if (!name.endsWith(".so")) continue;
+            File library = new File(folder, name);
+            if (!library.isFile() || !isAarch64Elf(library)) continue;
+            if (only != null) return null; // Two drivers in one folder: meta.json must say.
+            only = name;
+        }
+        return only;
+    }
+
+    /** What to call the driver: meta.json's name and version, else the folder's name. */
+    private static String label(File folder) {
+        String text = read(new File(folder, META));
+        String name = meta(text, "name");
+        String version = meta(text, "driverVersion");
+        if (name == null || name.trim().isEmpty()) return folder.getName();
+        return version == null || version.trim().isEmpty() ? name.trim() : name.trim() + " " + version.trim();
+    }
+
+    private static boolean isAarch64Elf(File file) {
+        byte[] head = new byte[20];
+        try (InputStream in = new java.io.FileInputStream(file)) {
+            int read = 0;
+            while (read < head.length) {
+                int n = in.read(head, read, head.length - read);
+                if (n < 0) return false;
+                read += n;
+            }
+        } catch (IOException e) {
+            return false;
+        }
+        if (!Arrays.equals(Arrays.copyOf(head, ELF64_LE.length), ELF64_LE)) return false;
+        // e_machine, two bytes at 0x12, little-endian.
+        return ((head[0x12] & 0xff) | ((head[0x13] & 0xff) << 8)) == EM_AARCH64;
+    }
+
+    private static void unpack(Context context, Uri zip, File into) throws IOException {
+        try (InputStream source = context.getContentResolver().openInputStream(zip)) {
+            if (source == null) throw new IOException("The zip could not be opened");
+            try (ZipInputStream in = new ZipInputStream(source)) {
+                long total = 0;
+                int entries = 0;
+                ZipEntry entry;
+                while ((entry = in.getNextEntry()) != null) {
+                    if (entry.isDirectory()) continue;
+                    if (++entries > MAX_ENTRIES) throw new IOException("That zip holds too many files for a driver");
+                    // Only the file's own name is used, never the path inside the zip, so no
+                    // entry can escape this folder however it is named.
+                    String name = new File(entry.getName().replace('\\', '/')).getName();
+                    if (!plainName(name)) continue;
+                    File out = new File(into, name);
+                    try (OutputStream sink = new FileOutputStream(out)) {
+                        byte[] buffer = new byte[64 * 1024];
+                        int n;
+                        while ((n = in.read(buffer)) > 0) {
+                            total += n;
+                            if (total > MAX_UNPACKED_BYTES) throw new IOException("That zip is far too large for a driver");
+                            sink.write(buffer, 0, n);
+                        }
+                    }
+                }
+                if (entries == 0) throw new IOException("That zip is empty");
+            }
+        }
+    }
+
+    /** A folder name for a driver labelled {@code label} that nothing else is using yet. */
+    private static String freeId(File root, String label) {
+        StringBuilder id = new StringBuilder();
+        for (char c : label.toLowerCase(Locale.ROOT).toCharArray()) {
+            boolean keep = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '-';
+            id.append(keep ? c : '-');
+        }
+        while (id.length() > 0 && id.charAt(0) == '-') id.deleteCharAt(0);
+        while (id.length() > 40) id.deleteCharAt(id.length() - 1);
+        String base = id.length() == 0 ? "driver" : id.toString();
+        String candidate = base;
+        for (int n = 2; new File(root, candidate).exists(); n++) candidate = base + "-" + n;
+        return candidate;
+    }
+
+    private static void deleteTree(File file) {
+        File[] children = file.listFiles();
+        if (children != null) for (File child : children) deleteTree(child);
+        //noinspection ResultOfMethodCallIgnored
+        file.delete();
+    }
+
+    // ---- small readers and writers ----------------------------------------------------
+
+    /** A text file's contents, or null. Bounded: these files are a few hundred bytes. */
+    private static String read(File file) {
+        try {
+            if (!file.isFile() || file.length() > 64 * 1024) return null;
+            return new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+        } catch (IOException | SecurityException e) {
+            return null;
+        }
+    }
+
+    /** Writes {@code text} in one step, so a reader never sees half a file. */
+    private static void write(File file, String text) {
+        File temp = new File(file.getPath() + ".tmp");
+        try {
+            try (OutputStream out = new FileOutputStream(temp)) {
+                out.write(text.getBytes(StandardCharsets.UTF_8));
+            }
+            Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            android.util.Log.e("NVForever", "Writing " + file.getName(), e);
+            //noinspection ResultOfMethodCallIgnored
+            temp.delete();
+        }
+    }
+
+    /** A {@code name value} line's value, as the game's own option files are written. */
+    private static String value(String text, String name) {
+        if (text == null) return null;
+        for (String line : text.split("\n")) {
+            String trimmed = line.trim();
+            if (!trimmed.startsWith(name + " ")) continue;
+            String value = trimmed.substring(name.length() + 1).trim();
+            if (!value.isEmpty()) return value;
+        }
         return null;
     }
 
-    /** Chooses a driver, or the system driver with null. Does nothing while this is a stub. */
-    public static void select(Context c, String idOrNull) {
-        // The real body stores the choice; the game reads it at the next start.
+    /** A meta.json field (the emulator driver format: name, driverVersion, libraryName). */
+    private static String meta(String json, String field) {
+        if (json == null) return null;
+        try {
+            String value = new JSONObject(json).optString(field, "");
+            return value.isEmpty() ? null : value;
+        } catch (org.json.JSONException e) {
+            return null;
+        }
     }
 
-    /** Unpacks a driver zip and returns its id. */
-    public static String install(Context c, Uri zip) throws IOException {
-        throw new UnsupportedOperationException(
-                "Installing a graphics driver is not built into this version yet.");
+    /** One path element: never a path, never a climb out of the folder it is joined to. */
+    private static boolean plainName(String name) {
+        return name != null && !name.isEmpty() && !name.equals(".") && !name.equals("..")
+                && name.indexOf('/') < 0 && name.indexOf('\\') < 0 && name.indexOf('\0') < 0;
     }
 
-    /** Removes an installed driver. Does nothing while this is a stub. */
-    public static void delete(Context c, String id) {
-        throw new UnsupportedOperationException(
-                "Installing a graphics driver is not built into this version yet.");
-    }
-
-    /** Why the last start fell back to the system driver, or null when it did not. */
-    public static String lastStartFellBack(Context c) {
-        return null;
+    /** Keeps a label on the one line the game's option files give it. */
+    private static String oneLine(String text) {
+        return text.replace('\r', ' ').replace('\n', ' ').trim();
     }
 }

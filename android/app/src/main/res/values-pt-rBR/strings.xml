@@ -142,7 +142,7 @@
     <string name="settings_driver_system_note">O driver que veio com o seu aparelho.</string>
     <string name="settings_driver_install">Instalar um zip de driver...</string>
     <string name="settings_driver_delete">Apagar este driver</string>
-    <string name="settings_driver_none_note">Nenhum driver próprio está instalado. Instalar um ainda não existe nesta versão.</string>
+    <string name="settings_driver_none_note">Nenhum driver próprio está instalado. O zip do driver é um arquivo seu; o NVForever não inclui nenhum.</string>
     <string name="settings_debug_row">Depuração</string>
     <string name="settings_debug_note">Testes de falha e registros. Para relatar problemas.</string>
     <string name="settings_rerun_setup">Refazer a preparação</string>

@@ -747,8 +747,9 @@ public class LauncherActivity extends Activity {
 
     /**
      * Settings, then Graphics driver: the system driver, every installed custom driver, and
-     * the two actions. Everything it knows comes from {@link GpuDrivers}, whose body is a stub
-     * in this build, so the row reads "System" and says installing one is not built yet.
+     * the two actions. Everything it knows comes from {@link GpuDrivers}, which keeps the
+     * drivers in the app's private storage; the game opens the chosen one before its renderer
+     * starts (engine/nvf-android/src/gpu_driver.rs, docs/odin-debug.md).
      */
     private View driverRow() {
         LinearLayout panel = Ui.panel(this, getString(R.string.settings_driver_row));
@@ -1236,7 +1237,11 @@ public class LauncherActivity extends Activity {
         String header = getString(R.string.app_name) + " " + BuildConfig.VERSION_NAME
                 + "\nAndroid " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")"
                 + " / " + Build.MANUFACTURER + " " + Build.MODEL
-                + "\nProfile: " + profiles.active().name;
+                + "\nProfile: " + profiles.active().name
+                // Which Vulkan driver the next start uses, and why the last one fell back if it
+                // did: the engine's own "gpu driver:" line in the run log below says what the
+                // adapter then turned out to be (docs/odin-debug.md).
+                + "\n" + GpuDriversDebug.summary(this);
         final File logs = logsDir();
         new Thread(() -> {
             int result;
@@ -1259,7 +1264,8 @@ public class LauncherActivity extends Activity {
     private void copyDebugSummary() {
         StringBuilder summary = new StringBuilder(getString(R.string.app_name) + " " + BuildConfig.VERSION_NAME
                 + "\nAndroid " + Build.VERSION.RELEASE + " / " + Build.MODEL
-                + "\nProfile: " + profiles.active().name);
+                + "\nProfile: " + profiles.active().name
+                + "\n" + GpuDriversDebug.summary(this));
         File[] logs = logsDir().listFiles(
                 (directory, name) -> name.startsWith("nvforever-") && name.endsWith(".log"));
         File newest = null;
