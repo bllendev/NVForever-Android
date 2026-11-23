@@ -1141,12 +1141,17 @@ fn report_mo2_folders(args: &Args) -> Vec<(std::path::PathBuf, &'static str)> {
     reports::mo2_folders(&instance, layout.as_ref())
 }
 
+// Everything the Android fork adds lives in one module, so this file stays upstream's
+// (docs/fork.md): the library entry points the Android activity starts the game through,
+// the fork's own engine parts, and the hooks it calls below.
+pub mod odin;
+
 fn main() -> AppExit {
     // Started as this run's exit watcher (exit_watch.rs): wait for the game's process, no game.
     if exit_watch::run_if_watcher() {
         return AppExit::Success;
     }
-    let mut line = with_default_mode(std::env::args().collect());
+    let mut line = with_default_mode(odin::args());
     if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(std::path::Path::to_path_buf)) {
         line = with_schemas_beside(line, &dir);
         let functions = dir.join("schemas").join("script").join("functions.json");
@@ -2492,6 +2497,7 @@ fn main() -> AppExit {
             s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
         });
     }
+    odin::before_run(&mut app);
     let exit = app.run();
     // The app and its renderer are gone; Streamline shut down before the device and instance it
     // used (dlss/, "Shutdown"). Nothing when Streamline was not loaded.

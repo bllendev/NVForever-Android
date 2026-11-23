@@ -26,6 +26,7 @@ pub const SEND_AFTER: Duration = Duration::from_secs(6);
 /// The largest minidump sent (the server's cap, §5.1).
 pub const MAX_DUMP_BYTES: usize = 4 * 1024 * 1024;
 /// One request's limit (§8).
+#[cfg_attr(target_os = "android", allow(dead_code))] // the Android build has no HTTP client
 pub const TIMEOUT: Duration = Duration::from_secs(10);
 /// The project's server, used when `[Reports] Endpoint` is empty.
 pub const DEFAULT_ENDPOINT: &str = "https://reports-api.nv-forever.com";
@@ -339,6 +340,11 @@ fn send_all(active: &super::Active, pending: &Path, sent: &Path, pid: u32) {
 /// system's OpenSSL), on every platform the game is built for (#3144: off Windows this was
 /// four stubs that never answered, so Report a bug, Send reports and Delete my reports
 /// told a Linux player their network was at fault).
+///
+/// Not on Android: there is no system OpenSSL to link against, so `ureq`'s native-tls is
+/// left out of the Android build (`Cargo.toml`, the same restriction nvf-dlss-files makes)
+/// and the stubs below stand in. Reports from Android wait for a TLS path that build has.
+#[cfg(not(target_os = "android"))]
 pub(crate) mod http {
     use super::TIMEOUT;
 
@@ -380,6 +386,24 @@ pub(crate) mod http {
             .send(body)
             .ok()
             .map(|r| r.status().as_u16())
+    }
+}
+
+/// Android: no answer, as off Windows before #3144. The callers already treat `None` as "no
+/// answer" and keep the report for a later start, so nothing is sent and nothing is lost.
+#[cfg(target_os = "android")]
+pub(crate) mod http {
+    pub fn get(_: &str) -> Option<(u16, Vec<u8>)> {
+        None
+    }
+    pub fn post(_: &str, _: &[u8], _: &str, _: &str) -> Option<u16> {
+        None
+    }
+    pub fn post_for(_: &str, _: &[u8], _: &str, _: Option<&str>) -> Option<(u16, Vec<u8>)> {
+        None
+    }
+    pub fn delete(_: &str, _: &str) -> Option<u16> {
+        None
     }
 }
 

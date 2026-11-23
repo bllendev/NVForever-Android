@@ -33,6 +33,14 @@ still has to be re-run there (84/84 Layer 1 scenarios expected).
 | — | `tracy-client` 0.19 (MIT/Apache-2.0; its `tracy-client-sys` 0.30.1 carries the Tracy 0.14.1 C++ client, BSD-3-Clause) with `tracing-tracy` 0.12 (MIT/Apache-2.0), through Bevy's `trace_tracy`, the versions Bevy 0.20.1 pins | optional, only in the engine's `tracy`/`tracy-memory` build features (#1329): Bevy's spans sent live to the Tracy profiler; built `ondemand` + `only-localhost`; never in release or CI builds (frame-rate-audit.md §1) |
 | — | `eframe`/`egui` 0.37 (glow, no accesskit), `egui_extras`, `egui_commonmark` 0.26, `image` 0.25, `ureq` 3 (native TLS), `rfd` 0.15 (Windows), all MIT/Apache-2.0; egui's fonts OFL-1.1 / Ubuntu Font Licence (deny.toml exception for `epaint_default_fonts` only) | `nvf-launcher` (#2708, docs/design/launcher.md): the launcher window, its news and the newest save's picture |
 
+## Android platform adapter
+
+The Android workspace adds `nvf-android` (GPL-3.0-or-later) and the internal,
+std-only `nvf-android-input` event queue (GPL-3.0-or-later). It reuses Bevy's
+NativeActivity backend and the existing `libc` and `serde_json` crates. The
+Android-only winit 0.30.13 patch retains its Apache-2.0 licence; see
+[the vendor notes](../../engine/vendor/README.md) and [Android build](../android.md).
+
 ## Engine layers (candidates, to evaluate when each layer starts)
 
 | Layer | Need | Candidates |
