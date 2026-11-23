@@ -1174,7 +1174,7 @@ fn main() -> AppExit {
     if args.explore {
         eprintln!("explore: the free-camera explorer (--explore)");
     }
-    let developer_data = args.data.is_some();
+    let developer_data = odin::developer_data(args.data.is_some());
     let (code_page_named, cjk_font_path) = match setup::text_code_page() {
         Ok((c, named, cjk_font_path)) => {
             if c != fnv_util::text::CodePage::default() {

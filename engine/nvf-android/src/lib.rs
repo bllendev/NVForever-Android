@@ -28,9 +28,14 @@ mod validation;
 pub fn main() {
     logcat::forward_stdio();
     let data = paths::data_dir();
+    // The active data profile: its Data folder, and its own home (plugins.txt, saves, logs).
     let home = paths::home_dir();
     if let Err(e) = std::fs::create_dir_all(&home) {
         return diag::run(format!("Cannot create the game's home folder {}: {e}", home.display()));
+    }
+    // The game's own settings are the player's, not the profile's (paths::share_settings).
+    if let Err(e) = paths::share_settings(&paths::internal_files(), &home) {
+        eprintln!("warning: the settings could not be shared between the data profiles: {e}");
     }
     let schemas = match paths::unpack_schemas() {
         Ok(dir) => dir,
@@ -63,7 +68,8 @@ pub fn main() {
     }
     let line = match paths::restart_line(&paths::internal_files()) {
         Ok(Some(line)) => line,
-        Ok(None) => paths::command_line(&data, &schemas, &paths::user_args()),
+        // The launcher's CONTINUE names one start's save (paths::continue_save).
+        Ok(None) => paths::command_line(&data, &schemas, &paths::user_args(), paths::continue_save(&paths::internal_files()).as_deref()),
         Err(e) => return diag::run(e),
     };
     eprintln!("NVForever Android: starting: {}", line.join(" "));
