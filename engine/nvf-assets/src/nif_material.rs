@@ -731,6 +731,11 @@ pub struct NifSurfaceKey {
     /// the surface the depth prepass holds and take the ambient occlusion
     /// ([`ambient_occlusion_opt_in`]).
     pub terrain_layer: bool,
+    /// Crash test only ([`no_soft_particles`]): this shape does not fade where it meets the
+    /// surface behind it, so its shader is built without the soft-intersection path and
+    /// reads the depth prepass nowhere. Always `false` in an ordinary run, which therefore
+    /// specialises exactly the pipelines it did before.
+    pub no_soft: bool,
 }
 
 impl From<&NifSurface> for NifSurfaceKey {
@@ -747,9 +752,31 @@ impl From<&NifSurface> for NifSurfaceKey {
             pipboy_screen: surface.pipboy_screen,
             anti_tiling: surface.anti_tiling && crate::terrain_sampling::repeat_valid(surface.terrain_repeat),
             terrain_layer: crate::terrain_sampling::repeat_valid(surface.terrain_repeat),
+            no_soft: no_soft_particles() && surface.soft.x <= 0.0,
         }
     }
 }
+
+/// `NVF_NO_SOFT_PARTICLES`: the crash test the Android launcher offers as "Crash test: no
+/// soft particles". On, a particle system is given no soft-intersection distance
+/// (`crate::particles`), and every NIF material without one is built without the
+/// soft-intersection path, so its fragment shader reads the view's depth prepass nowhere:
+/// particles get hard edges where they pass into a wall, and the one texture read that the
+/// transparent pass takes of the prepass is gone with them. Read once.
+///
+/// Off (every ordinary run) the key field is `false` for every material, so the pipelines are
+/// exactly the ones built before.
+pub fn no_soft_particles() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os(NO_SOFT_PARTICLES_ENV).is_some())
+}
+
+/// See [`no_soft_particles`].
+pub const NO_SOFT_PARTICLES_ENV: &str = "NVF_NO_SOFT_PARTICLES";
+
+/// The shader def that leaves the soft-intersection path (and its depth prepass read) out of
+/// the NIF material's fragment shader (nif_material.wesl `soft_fade`).
+pub const NO_SOFT_DEF: &str = "NVF_NO_SOFT";
 
 impl MaterialExtension for NifSurface {
     fn fragment_shader() -> ShaderRef {
@@ -775,6 +802,14 @@ impl MaterialExtension for NifSurface {
             // refracting one is in no prepass: the edge stays the main pass's.
             if key.bind_group_data.first_person || key.bind_group_data.refract || !prepass_coverage(descriptor, key.mesh_key, NIF_PREPASS_SHADER, None) {
                 alpha_to_coverage_edges(descriptor, key.mesh_key);
+            }
+        }
+        // Crash test ([`no_soft_particles`]): no soft-intersection fade, which is also no
+        // read of the depth prepass in the main pass's fragment shader. `no_soft` is false
+        // for every material unless the switch is on.
+        if key.bind_group_data.no_soft {
+            if let Some(fragment) = descriptor.fragment.as_mut() {
+                fragment.shader_defs.push(NO_SOFT_DEF.into());
             }
         }
         if key.bind_group_data.shade_light && !descriptor.vertex.shader_defs.contains(&ShaderDefVal::from("PREPASS_PIPELINE")) {
@@ -1613,7 +1648,7 @@ mod tests {
         // Only the switches in `NifSurfaceKey` select the pipeline; the falloff and the
         // alpha cut are uniforms.
         let mut surface = NifSurface::default();
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: false, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: false, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, no_soft: false });
         assert_eq!(surface.alpha_cut, 0.0);
         assert_eq!(surface.emissive_rule, Vec4::ZERO);
         assert_eq!(NifSurfaceUniform::from(&surface).emissive_rule, Vec4::ZERO);
@@ -1623,19 +1658,19 @@ mod tests {
         assert_eq!(NifSurfaceUniform::from(&surface).emissive_rule, surface.emissive_rule);
         assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey::from(&NifSurface::default()));
         surface.decal = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: false, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, no_soft: false });
         surface.hard_edges = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: false, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, no_soft: false });
         surface.shade_light = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, no_soft: false });
         // The refraction strength is a uniform; whether the shape refracts is the pipeline's.
         surface.refraction = 0.1;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: false, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, no_soft: false });
         surface.refract = true;
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: false, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, no_soft: false });
         // A FaceGen offset selects the tinting shader.
         surface.facegen_offset = Some(Handle::default());
-        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: true, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false });
+        assert_eq!(NifSurfaceKey::from(&surface), NifSurfaceKey { decal: true, refract: true, hard_edges: true, shade_light: true, facegen: true, depth_write: false, first_person: false, add_linear: false, pipboy_screen: false, anti_tiling: false, terrain_layer: false, no_soft: false });
     }
 
     #[test]

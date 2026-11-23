@@ -91,6 +91,15 @@ pub fn begin_frame() {
     }
 }
 
+/// The frame [`begin_frame`] last started, which is the frame every marker recorded from
+/// here on belongs to. A caller that keeps its own table of what a marker meant (the
+/// transparent pass's chunks, nvforever `gpu_recorder::transparent_chunks`) keys it by this,
+/// so the dump can say what the node name it reads back stood for on that frame.
+#[inline]
+pub fn frame() -> u64 {
+    FRAME.load(Ordering::Relaxed)
+}
+
 /// The names the node indices in [`INFO`] stand for. Each render system interns its name
 /// once, on the frame it first records anything, and keeps the index in its own
 /// `RenderContextState`, so no marker after that costs a lookup.
@@ -98,6 +107,10 @@ static NAMES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// The index for `name`, adding it if it is new. `u16::MAX` means the table is full, which
 /// only a run with more than 65535 distinct render systems could reach.
+///
+/// The table is never emptied and the lookup is linear, so a caller that names markers
+/// itself ([`RenderContext::gpu_breadcrumb`](crate::renderer::RenderContext::gpu_breadcrumb))
+/// must draw them from a small fixed set of names rather than build a name per frame.
 pub fn node(name: &str) -> u16 {
     let Ok(mut names) = NAMES.lock() else { return u16::MAX };
     if let Some(found) = names.iter().position(|known| known == name) {
