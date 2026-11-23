@@ -278,10 +278,22 @@ pub fn command_line(data: &Path, schemas: &Path, user: &[String], load: Option<&
     line
 }
 
+/// The private command line the launcher leaves for a game process it is about to start in
+/// place of a running one (the save-load handoff).
+const RESTART_REQUEST: &str = "android-next-run.json";
+
+/// Whether this process was started by the launcher's handoff rather than by the player
+/// opening the app. A handoff means the run before it was alive and well enough to ask for
+/// one, which is how `gpu_driver` tells a deliberate restart from a start that died.
+/// Reads nothing and consumes nothing: [`restart_line`] does that.
+pub fn restart_requested(files: &Path) -> bool {
+    files.join(RESTART_REQUEST).is_file()
+}
+
 /// Consume a private activity-restart command line exactly once. JSON preserves
 /// save paths containing spaces; the public shared options file is not executable input.
 pub fn restart_line(files: &Path) -> Result<Option<Vec<String>>, String> {
-    let next = files.join("android-next-run.json");
+    let next = files.join(RESTART_REQUEST);
     let bytes = match std::fs::read(&next) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),

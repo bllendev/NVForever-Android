@@ -21,6 +21,11 @@ use bevy::app::{App, AppExit};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
+// The Vulkan driver this run uses (a player's own driver on Android) and the start marker that
+// sends the next start back to the system one. Fork-only code, so it lives here rather than
+// beside main.rs.
+pub mod gpu_driver;
+
 // The fork's engine parts stay in their own files beside main.rs, declared here rather than
 // in it. `#[path]` so the files keep the names the docs and the log lines use.
 #[path = "../gpu_recorder/mod.rs"]
@@ -50,6 +55,21 @@ pub const VULKAN_VALIDATION_LIB_ENV: &str = "NVF_VULKAN_VALIDATION_LIB";
 /// comma list of `sync` and `gpuav` (`1` is both): a crash test the Android launcher offers
 /// in two switches of its own (`vulkan_validation`). Needs the validation switch as well.
 pub const VULKAN_VALIDATION_DEEP_ENV: &str = "NVF_VULKAN_VALIDATION_DEEP";
+
+/// The Vulkan driver the platform shell was asked for, in the words the run log should carry
+/// (`System`, `Turnip 25.0.3`, ...): one startup line says it beside what the adapter turned
+/// out to be ([`gpu_driver`]). Set only by the Android shell, and only when the player selected
+/// a driver of their own; unset everywhere else, where nothing is logged.
+pub const GPU_DRIVER_ENV: &str = "NVF_GPU_DRIVER";
+
+/// The file the platform shell wrote before the renderer started, removed once this run has
+/// drawn its frames ([`gpu_driver`]). A file still there at the next start is how the shell
+/// knows the driver the player selected did not survive its own first frames.
+pub const RENDERER_MARKER_ENV: &str = "NVF_RENDERER_MARKER";
+
+/// How many drawn frames [`RENDERER_MARKER_ENV`]'s file must survive, instead of
+/// [`gpu_driver::DEFAULT_FRAMES`]. A test aid, not a setting.
+pub const RENDERER_MARKER_FRAMES_ENV: &str = "NVF_RENDERER_MARKER_FRAMES";
 
 /// Set (anything but `0`) to have every render-graph node write a GPU marker before and
 /// after its work, so a lost device names the node the GPU hung in: a crash test the Android
@@ -217,6 +237,10 @@ pub(crate) fn before_run(app: &mut App) {
     // The Vulkan validation layer's crash-test switch: one startup line when it is on,
     // nothing at all when it is off (vulkan_validation.rs).
     app.add_plugins(vulkan_validation::VulkanValidationPlugin);
+    // Which Vulkan driver this run asked for against what the adapter turned out to be, and
+    // the Android start marker that sends the next start back to the system driver
+    // (gpu_driver.rs). Nothing at all unless the platform shell set its variables.
+    app.add_plugins(gpu_driver::GpuDriverPlugin);
     // The live glance at the Pip-Boy: only a run that plays has a body to raise it on, so
     // it goes in beside the rest of the player's body (`player_body`, `main`'s play branch).
     if app.is_plugin_added::<crate::player_body::PlayerBodyPlugin>() {

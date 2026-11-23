@@ -36,6 +36,10 @@ mod semaphore_list;
 mod swapchain;
 
 pub use adapter::PhysicalDeviceFeatures;
+/// NVForever patch (Android only): hand the renderer the Vulkan entry point of a driver the
+/// player supplied, instead of the system `libvulkan.so` (`instance.rs`).
+#[cfg(target_os = "android")]
+pub use instance::set_android_vk_get_instance_proc_addr;
 
 use alloc::{boxed::Box, ffi::CString, sync::Arc, vec::Vec};
 use core::{borrow::Borrow, ffi::CStr, fmt, marker::PhantomData, mem, num::NonZeroU32};
