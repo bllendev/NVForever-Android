@@ -23,7 +23,7 @@
     <string name="section_setup">Preparación</string>
     <string name="section_data">Datos</string>
     <string name="section_settings">Opciones</string>
-    <string name="section_debug">Depuración</string>
+    <string name="section_debug">Avanzado</string>
     <string name="section_about">Acerca de</string>
 
     <string name="legend_home">A Elegir    B Volver    X Datos    Y Opciones    Start Jugar</string>
@@ -78,8 +78,8 @@
     <string name="home_last_run_none">todavía ninguna</string>
     <string name="home_last_run_ok">terminó con normalidad</string>
     <string name="home_last_run_crash">terminó de forma inesperada</string>
-    <string name="home_last_run_crash_action">La última sesión terminó de forma inesperada. Exporta el registro de depuración.</string>
-    <string name="home_tests_on_chip">%1$d pruebas activas</string>
+    <string name="home_last_run_crash_action">La última sesión terminó de forma inesperada. En Opciones, Informar de un problema guarda el registro.</string>
+    <string name="home_tests_on_chip">%1$d activas</string>
     <string name="home_toggle_touch">Mostrar controles táctiles</string>
     <string name="home_toggle_controller">Mando físico</string>
     <string name="home_toggles_note">Se aplica al iniciar el juego.</string>
@@ -105,7 +105,7 @@
         <item quantity="other">%1$d en este perfil</item>
     </plurals>
 
-    <string name="data_title">[ datos ]</string>
+    <string name="data_title">Datos</string>
     <string name="data_profiles_title">Perfiles</string>
     <string name="data_profiles_note">Un perfil es una carpeta Data con su propia lista de complementos y sus propias partidas. Las opciones del juego se comparten entre perfiles; las partidas no, porque una partida hecha con mods necesita esos mods.</string>
     <string name="data_profiles_use">Usar este perfil</string>
@@ -125,8 +125,8 @@
     <string name="data_mods_soon">Mods (muy pronto)</string>
     <string name="data_mods_soon_note">La lista de complementos de cada perfil tendrá su propia pantalla en la siguiente versión. Esta ya carga el plugins.txt del perfil.</string>
 
-    <string name="settings_title">[ opciones ]</string>
-    <string name="settings_note">Los gráficos, el sonido, el juego y los botones son opciones del propio juego: abre el juego, Pausa y luego Opciones.</string>
+    <string name="settings_title">Opciones</string>
+    <string name="settings_note">Los gráficos, el sonido y los botones son opciones del propio juego: Pausa y luego Opciones.</string>
     <string name="settings_group_controls">Controles</string>
     <string name="settings_group_device">Dispositivo</string>
     <string name="settings_group_data">Datos</string>
@@ -139,17 +139,17 @@
     <string name="settings_profile_note">Elige con qué perfil arranca el juego. Fase 1 del área de datos.</string>
     <string name="settings_driver_row">Controlador gráfico</string>
     <string name="settings_driver_system">Sistema</string>
-    <string name="settings_driver_system_note">El controlador con el que vino tu teléfono.</string>
+    <string name="settings_driver_system_note">El controlador con el que vino tu teléfono</string>
     <string name="settings_driver_install">Instalar un zip de controlador...</string>
     <string name="settings_driver_delete">Borrar este controlador</string>
-    <string name="settings_driver_none_note">No hay ningún controlador propio instalado. El zip del controlador lo pones tú; NVForever no incluye ninguno.</string>
-    <string name="settings_debug_row">Depuración</string>
-    <string name="settings_debug_note">Pruebas de fallo y registros. Para informar de errores.</string>
+    <string name="settings_driver_none_note">NVForever no incluye ningún controlador. El zip del controlador lo pones tú.</string>
+    <string name="settings_debug_row">Avanzado</string>
+    <string name="settings_debug_note">Pruebas del motor y registros</string>
     <string name="settings_rerun_setup">Repetir la preparación</string>
     <string name="settings_language">Idioma</string>
     <string name="settings_language_note">El lanzador sigue el idioma de tu teléfono. El juego tiene sus propios idiomas, así que un lanzador en español con un juego en otro idioma es correcto.</string>
 
-    <string name="debug_title">[ depuración ]</string>
+    <string name="debug_title">Avanzado</string>
     <string name="debug_first_confirm">Estos interruptores existen para que el juego falle de una forma conocida y se pueda informar del fallo. Hacen el juego más lento y algunos impiden que cargue. Nada de esto toca tus partidas ni tus archivos del juego.</string>
     <string name="debug_open">Abrir</string>
     <plurals name="debug_warn_strip">
@@ -162,10 +162,10 @@
     <string name="debug_group_drawing">Dejar algo fuera de la imagen</string>
     <string name="debug_group_reports">Informes</string>
     <string name="debug_group_reset">Restablecer</string>
-    <string name="debug_skip_pipboy">Saltar el precalentamiento del Pip-Boy</string>
-    <string name="debug_skip_pipboy_note">Se salta el dibujado oculto del Pip-Boy durante una carga. Sirve para ver si ese precalentamiento es lo que falla.</string>
-    <string name="debug_skip_vats">Sin contorno de objetivo en V.A.T.S.</string>
-    <string name="debug_skip_vats_note">Apaga el contorno alrededor de los objetivos de V.A.T.S. Sirve para ver si esa cámara extra es lo que falla.</string>
+    <string name="debug_skip_pipboy">Saltar el precalentado de la interfaz de inventario</string>
+    <string name="debug_skip_pipboy_note">Se salta el dibujado oculto de la interfaz de inventario durante una carga. Sirve para ver si ese precalentado es lo que falla.</string>
+    <string name="debug_skip_vats">Saltar el contorno de puntería</string>
+    <string name="debug_skip_vats_note">Apaga el contorno alrededor de los objetivos en el modo de disparo apuntado. Sirve para ver si esa cámara extra es lo que falla.</string>
     <string name="debug_validation">Capa de validación de Vulkan</string>
     <string name="debug_validation_note">La capa de Khronos comprueba cada llamada a la GPU y anota los usos indebidos. Mucho más lento.</string>
     <string name="debug_validation_sync">Validación de sincronización</string>
@@ -191,9 +191,9 @@
     <string name="debug_copy_summary">Copiar el resumen de depuración</string>
     <string name="debug_tests_off">Apagar todas las pruebas de fallo</string>
     <string name="debug_tests_off_done">Todas las pruebas de fallo están apagadas.</string>
-    <string name="debug_saves_untouched">Nada de esta pantalla toca tus partidas, tu lista de complementos ni tus archivos del juego.</string>
+    <string name="debug_saves_untouched">Pruebas del motor, comprobaciones de Vulkan y registros. Nunca se tocan tus partidas.</string>
 
-    <string name="about_title">[ acerca de ]</string>
+    <string name="about_title">Acerca de</string>
     <string name="about_disclaimer">NVForever es un proyecto independiente, sin ánimo de lucro, hecho por aficionados. No está afiliado ni patrocinado ni respaldado por Bethesda Softworks, ZeniMax Media, Microsoft ni Obsidian Entertainment. No contiene código ni contenido del juego original, y no funciona sin los archivos de datos de tu propia copia adquirida legalmente.</string>
     <string name="about_trademark">Fallout y Fallout: New Vegas son marcas registradas de Bethesda Softworks LLC. Se nombran solo para decir con qué es compatible este motor.</string>
     <string name="about_extender">NVForever no es xNVSE y no carga sus complementos. Implementa por su cuenta las funciones de script de NVSE.</string>
@@ -215,4 +215,113 @@
     <string name="error_copy_done">Resumen de depuración copiado. Léelo antes de compartirlo.</string>
     <string name="error_copy_saves">No se pudieron copiar las partidas: %1$s</string>
     <string name="error_no_file_app">Ninguna aplicación de este teléfono puede abrir eso.</string>
+
+    <!-- El menu principal de Inicio. -->
+    <string name="menu_continue">Continuar</string>
+    <string name="menu_load">Cargar partida</string>
+    <string name="menu_play">Jugar</string>
+    <string name="menu_data">Datos</string>
+    <string name="menu_settings">Opciones</string>
+    <string name="menu_about">Acerca de</string>
+
+    <!-- La leyenda del mando: un verbo por boton. -->
+    <string name="legend_select">Elegir</string>
+    <string name="legend_back">Volver</string>
+    <string name="legend_play">Jugar</string>
+    <string name="legend_change">Cambiar</string>
+    <string name="legend_toggle">Activar</string>
+    <string name="legend_section">Cambiar de sección</string>
+    <string name="legend_hold_version">Mantén pulsada la versión para ver Avanzado</string>
+    <string name="legend_applies_next_start">Los cambios se aplican la próxima vez que arranque el juego.</string>
+    <string name="legend_advanced_hidden">Oculto hasta que lo pidas. Opciones y luego Avanzado.</string>
+    <string name="legend_back_menu">B vuelve al menú</string>
+    <string name="legend_back_settings">B vuelve a Opciones</string>
+
+    <!-- La franja de estado al pie de cada pantalla. -->
+    <string name="strip_profile">Perfil</string>
+    <string name="strip_data">Datos</string>
+    <string name="strip_addons">Complementos</string>
+    <string name="strip_driver">Controlador</string>
+    <string name="strip_logs">Registros</string>
+    <string name="strip_last_run">Última sesión</string>
+    <string name="strip_tests">Pruebas</string>
+    <string name="status_data_ok">juego base completo</string>
+    <string name="status_data_closed">carpeta cerrada por Android</string>
+    <string name="check_addons_none">ninguno instalado</string>
+    <plurals name="check_addons_installed">
+        <item quantity="one">%1$d instalado</item>
+        <item quantity="other">%1$d instalados</item>
+    </plurals>
+    <plurals name="count_saves_short">
+        <item quantity="one">%1$d partida</item>
+        <item quantity="other">%1$d partidas</item>
+    </plurals>
+    <plurals name="count_runs">
+        <item quantity="one">%1$d sesión</item>
+        <item quantity="other">%1$d sesiones</item>
+    </plurals>
+
+    <!-- Inicio. -->
+    <string name="home_quick">Rápido</string>
+    <string name="home_no_save">Aún no hay ninguna partida en este perfil. Jugar empieza una nueva.</string>
+    <string name="home_no_thumbnail">esta partida no tiene imagen</string>
+    <string name="home_detail_save_meta">%1$s, perfil %2$s</string>
+    <string name="home_detail_play_meta">Perfil %1$s</string>
+
+    <!-- Cargar partida. -->
+    <string name="saves_title">Cargar partida</string>
+    <string name="saves_crumb">Las partidas de este perfil, de la más reciente a la más antigua.</string>
+    <string name="saves_none">Este perfil aún no tiene ninguna partida. Jugar empieza una nueva.</string>
+    <string name="saves_row_meta">%1$s, %2$s</string>
+
+    <!-- Copias de seguridad de las partidas. -->
+    <string name="saves_backup">Copiar las partidas</string>
+    <plurals name="saves_backup_note">
+        <item quantity="one">%1$d partida a Download, perfil %2$s</item>
+        <item quantity="other">%1$d partidas a Download, perfil %2$s</item>
+    </plurals>
+    <plurals name="saves_backup_done">
+        <item quantity="one">%1$d partida copiada a Download/%2$s</item>
+        <item quantity="other">%1$d partidas copiadas a Download/%2$s</item>
+    </plurals>
+    <string name="saves_backup_empty">Este perfil aún no tiene ninguna partida que copiar.</string>
+    <string name="saves_backup_failed">No se pudo escribir la copia: %1$s</string>
+    <string name="saves_restore">Restaurar partidas</string>
+    <string name="saves_restore_note">Desde una copia en Download</string>
+    <string name="saves_restore_pick">Elige una copia</string>
+    <string name="saves_restore_none">Aún no hay ninguna copia. Copiar las partidas escribe una en Download/%1$s.</string>
+    <plurals name="saves_restore_confirm">
+        <item quantity="one">%1$d partida de aquí se llama igual que una de la copia. ¿Restaurar y guardar una copia .bak de ella?</item>
+        <item quantity="other">%1$d partidas de aquí se llaman igual que otras de la copia. ¿Restaurar y guardar una copia .bak de cada una?</item>
+    </plurals>
+    <plurals name="saves_restore_done">
+        <item quantity="one">%1$d partida restaurada.</item>
+        <item quantity="other">%1$d partidas restauradas.</item>
+    </plurals>
+    <string name="saves_restore_failed">No se pudieron restaurar las partidas: %1$s</string>
+    <string name="saves_note">Una copia se copia, nunca se mueve. No se toca nada de tu carpeta Data y nunca se borra nada.</string>
+
+    <!-- Datos y Opciones. -->
+    <string name="data_crumb">Qué carpeta lee el juego, y las partidas que van con ella.</string>
+    <string name="settings_group_problems">Problemas</string>
+    <string name="settings_group_saves">Partidas</string>
+    <string name="settings_detail_title">Las opciones del propio lanzador</string>
+    <string name="settings_controls_buttons">Disposición de los botones</string>
+    <string name="settings_data_folder_row">Carpeta Data</string>
+    <string name="settings_language_value">Sigue a tu teléfono</string>
+    <string name="settings_driver_automatic">Automático</string>
+    <string name="settings_driver_automatic_note">Un controlador instalado, si no el del sistema</string>
+    <string name="settings_driver_installed_note">Instalado por ti</string>
+    <string name="settings_driver_hold_to_remove">NVForever no incluye ningún controlador. El zip lo pones tú. Mantén pulsado un controlador para quitarlo.</string>
+    <string name="settings_driver_delete_confirm">¿Quitar %1$s? No se toca el zip del que lo instalaste.</string>
+
+    <!-- Informar de un problema. -->
+    <string name="report_row">Informar de un problema</string>
+    <string name="report_row_note">Guarda un registro y luego dice a dónde enviarlo</string>
+    <string name="report_where">Guarda el registro y adjúntalo a una incidencia nueva en la página del proyecto NVForever, o envíaselo a quien te lo haya pedido. Este teléfono no envía nada por su cuenta.</string>
+    <string name="report_save_log">Guardar el registro...</string>
+
+    <string name="debug_group_drawing_note">Un interruptor por cosa dibujada. Mantén pulsado uno para leer qué hace.</string>
+    <string name="about_licence_sans">Inter, la tipografía de texto del lanzador: SIL Open Font License 1.1</string>
+    <string name="about_detail_meta">Un motor independiente, sin ánimo de lucro y hecho por aficionados. Sin relación con quienes hicieron el juego original.</string>
 </resources>

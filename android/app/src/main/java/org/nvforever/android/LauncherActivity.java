@@ -32,19 +32,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The screen the app opens on: the launcher.
+ * The screen the app opens on: the launcher, design v2 direction A.
  *
- * <p>Six destinations, never more than two levels deep. Setup on a first run (all-files
- * access, the Data folder, the file check), then Home (CONTINUE, PLAY and a status card that
- * answers "will it work"), the Data area (data profiles), Settings (launcher options only),
- * About (the disclaimer and the licences), and a hidden Debug screen holding the crash-test
- * switches that used to sit on the first screen.
+ * <p>Home is a main menu: a short left-aligned vertical list (Continue, Load save, Play, Data,
+ * Settings, About) with one warm focus bar, and a detail panel on the right that follows the
+ * focused item. Setup runs first on a fresh install; Settings and Advanced are one screen each,
+ * laid out in three columns; a slim status strip and a controller legend end every screen.
  *
  * <p>What it writes, and nothing else: {@code files/profiles.txt}, {@code files/data-path.txt}
  * and {@code files/profile.txt} (the engine reads the last two, nvf-android/src/paths.rs),
- * {@code files/android-continue.txt} for one CONTINUE, and the shared
- * {@code NVForever/nvforever-controls.txt}. It never writes into a Data folder, never moves
- * a save, and never touches a plugin list.
+ * {@code files/android-continue.txt} for one CONTINUE or one chosen save, the shared
+ * {@code NVForever/nvforever-controls.txt}, and, only when the player asks for it,
+ * {@code Download/NVForever-backups/} ({@link SaveBackup}). It never writes into a Data folder,
+ * never moves a save, and never touches a plugin list.
  *
  * <p>Everything is reachable with a D-pad and A and B alone: every control is focusable,
  * A activates, B goes one level out, and the shoulder buttons page through the sections.
@@ -62,10 +62,13 @@ public class LauncherActivity extends Activity {
     private static final String PREF_KEEP_AWAKE = "keep-awake";
     private static final String PREF_SETUP_DONE = "setup-done";
 
-    /** The launcher's screens. Setup and Debug are not in the shoulder-button round. */
-    private enum Section { SETUP, HOME, DATA, SETTINGS, ABOUT, DEBUG }
+    /** The launcher's screens. Setup, Load save and Advanced are not in the shoulder round. */
+    private enum Section { SETUP, HOME, SAVES, DATA, SETTINGS, ABOUT, DEBUG }
 
     private static final Section[] PAGED = {Section.HOME, Section.DATA, Section.SETTINGS, Section.ABOUT};
+
+    /** The main menu, in the order it is drawn. */
+    private enum Menu { CONTINUE, LOAD, PLAY, DATA, SETTINGS, ABOUT }
 
     private SharedPreferences prefs;
     private Profiles profiles;
@@ -74,6 +77,8 @@ public class LauncherActivity extends Activity {
     private Section section = Section.HOME;
     /** The name of the profile being created, between naming it and picking its folder. */
     private String pendingProfileName;
+    /** Home's right-hand panel, refilled whenever the focused menu item changes. */
+    private LinearLayout detail;
 
     // ---- lifecycle ---------------------------------------------------------------------
 
@@ -121,18 +126,20 @@ public class LauncherActivity extends Activity {
 
     private void show() {
         LinearLayout root = Ui.column(this);
-        root.setBackgroundColor(Ui.BG);
-        int pad = Ui.dp(this, 16);
-        root.setPaddingRelative(pad, pad, pad, pad);
-        root.addView(topBar());
+        root.setBackground(Ui.background(this));
+        int side = Ui.dp(this, Ui.GUTTER_DP);
+        root.setPaddingRelative(side, Ui.dp(this, 10), side, Ui.dp(this, 12));
 
         LinearLayout content = Ui.column(this);
-        content.addView(buildSection(), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 12, 12));
-        root.addView(content, new LinearLayout.LayoutParams(
+        content.addView(buildSection(), new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(content, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        root.addView(bottomBar());
+        root.addView(statusStrip(), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+        root.addView(legend(), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 0));
         setContentView(Ui.page(this, root));
         View focus = root.findFocus();
         if (focus == null) {
@@ -150,77 +157,105 @@ public class LauncherActivity extends Activity {
     /** The control each screen opens with, so a controller player can press A straight away. */
     private View defaultFocus;
 
-    private View topBar() {
+    /** The name and the one-line "what this screen is for", above every screen but Home. */
+    private View header(CharSequence title, CharSequence crumb, CharSequence back) {
         LinearLayout bar = Ui.row(this);
-        LinearLayout names = Ui.column(this);
-        TextView wordmark = Ui.label(this, getString(R.string.app_name), Ui.TITLE_SP, Ui.AMBER, true);
-        wordmark.setLetterSpacing(0.22f);
-        names.addView(wordmark);
-        TextView tagline = Ui.note(this, getString(R.string.app_tagline));
-        tagline.setMaxLines(2);
-        names.addView(tagline);
-        bar.addView(names, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        LinearLayout chips = Ui.column(this);
-        chips.setGravity(Gravity.END);
-        TextView build = Ui.label(this, buildChipText(), Ui.SMALL_SP, Ui.AMBER_DIM, false);
-        build.setPaddingRelative(Ui.dp(this, 8), Ui.dp(this, 6), Ui.dp(this, 8), Ui.dp(this, 6));
-        build.setBackground(Ui.focusable(this, Ui.PANEL, Ui.LINE));
-        build.setFocusable(true);
-        build.setOnClickListener(v -> {});
-        build.setOnLongClickListener(v -> {
-            unlockDebug();
-            return true;
-        });
-        build.setContentDescription(buildChipText() + ". Hold to show the debug screen.");
-        chips.addView(build);
-        int testsOn = ControlsFile.testsOn(controls).size();
-        if (testsOn > 0) {
-            chips.addView(Ui.label(this, getString(R.string.home_tests_on_chip, testsOn), Ui.SMALL_SP, Ui.WARN, true),
-                    Ui.params(this, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 0));
+        bar.setGravity(Gravity.BOTTOM);
+        bar.addView(Ui.screenTitle(this, title));
+        TextView note = Ui.crumb(this, crumb);
+        note.setSingleLine(true);
+        note.setEllipsize(TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        np.setMarginStart(Ui.dp(this, 12));
+        np.bottomMargin = Ui.dp(this, 2);
+        bar.addView(note, np);
+        if (back != null) {
+            TextView right = Ui.crumb(this, back);
+            right.setGravity(Gravity.END);
+            bar.addView(right);
         }
-        bar.addView(chips);
         return bar;
     }
 
     private String buildChipText() {
-        return BuildConfig.VERSION_NAME + " " + Build.SUPPORTED_ABIS[0] + " " + Build.MODEL;
+        return BuildConfig.VERSION_NAME + "  " + Build.SUPPORTED_ABIS[0] + "  " + Build.MODEL;
     }
 
-    private View bottomBar() {
-        LinearLayout bar = Ui.column(this);
-        LinearLayout buttons = Ui.row(this);
-        for (Section s : PAGED) {
-            if (s == section) {
-                continue;
+    /** The facts at the foot of the screen, one line, nothing wrapped. */
+    private View statusStrip() {
+        LinearLayout strip = Ui.statusStrip(this);
+        Profiles.Profile active = profiles.active();
+        Ui.cell(strip, this, getString(R.string.strip_profile), active.name, false, Ui.INK);
+        if (section == Section.DEBUG) {
+            Ui.cell(strip, this, getString(R.string.strip_logs),
+                    getResources().getQuantityString(R.plurals.count_runs, runCount(), runCount()),
+                    true, Ui.INK_2);
+            Ui.cell(strip, this, getString(R.string.strip_last_run), lastRunText(), false, Ui.INK);
+            Ui.cell(strip, this, getString(R.string.strip_driver), GpuDriversDebug.summary(this),
+                    true, Ui.INK_2);
+        } else {
+            Ui.cell(strip, this, getString(R.string.strip_data), dataVerdict(),
+                    false, check.ready() ? Ui.INK : Ui.BAD);
+            Ui.cell(strip, this, getString(R.string.strip_addons), addonsLine(check), false, Ui.INK);
+            Ui.cell(strip, this, getString(R.string.strip_driver), driverLabel(), false, Ui.INK);
+            int testsOn = ControlsFile.testsOn(controls).size();
+            if (testsOn > 0) {
+                Ui.cell(strip, this, getString(R.string.strip_tests),
+                        getString(R.string.home_tests_on_chip, testsOn), false, Ui.WARN);
             }
-            TextView b = Ui.button(this, sectionName(s), v -> go(s));
-            buttons.addView(b, barItem());
         }
-        if (prefs.getBoolean(PREF_DEBUG_UNLOCKED, false) && section != Section.DEBUG) {
-            buttons.addView(Ui.button(this, sectionName(Section.DEBUG), v -> go(Section.DEBUG)), barItem());
+        View push = new View(this);
+        strip.addView(push, new LinearLayout.LayoutParams(0, 1, 1f));
+        strip.addView(buildChip());
+        return strip;
+    }
+
+    /** The version, and the long press that shows Advanced. */
+    private View buildChip() {
+        TextView build = Ui.micro(this, buildChipText(), Ui.INK_2);
+        build.setPaddingRelative(Ui.dp(this, 8), Ui.dp(this, 4), Ui.dp(this, 4), Ui.dp(this, 4));
+        build.setFocusable(true);
+        build.setOnClickListener(v -> {});
+        build.setOnLongClickListener(v -> {
+            unlockDebug();
+            go(Section.DEBUG);
+            return true;
+        });
+        build.setContentDescription(buildChipText() + ". " + getString(R.string.legend_hold_version));
+        return build;
+    }
+
+    /** The controller legend, which says what A and B do on the screen you are on. */
+    private View legend() {
+        LinearLayout bar = Ui.legend(this);
+        switch (section) {
+            case HOME:
+                Ui.legendItem(bar, this, "A", getString(R.string.legend_select));
+                Ui.legendItem(bar, this, "B", getString(R.string.legend_back));
+                Ui.legendItem(bar, this, "Start", getString(R.string.legend_play));
+                Ui.legendItem(bar, this, "Y", getString(R.string.section_settings));
+                Ui.legendHint(bar, this, getString(R.string.legend_hold_version));
+                break;
+            case SETTINGS:
+                Ui.legendItem(bar, this, "A", getString(R.string.legend_change));
+                Ui.legendItem(bar, this, "B", getString(R.string.legend_back));
+                Ui.legendItem(bar, this, "LB RB", getString(R.string.legend_section));
+                Ui.legendHint(bar, this, getString(R.string.legend_applies_next_start));
+                break;
+            case DEBUG:
+                Ui.legendItem(bar, this, "A", getString(R.string.legend_toggle));
+                Ui.legendItem(bar, this, "B", getString(R.string.legend_back));
+                Ui.legendItem(bar, this, "LB RB", getString(R.string.legend_section));
+                Ui.legendHint(bar, this, getString(R.string.legend_advanced_hidden));
+                break;
+            default:
+                Ui.legendItem(bar, this, "A", getString(R.string.legend_select));
+                Ui.legendItem(bar, this, "B", getString(R.string.legend_back));
+                Ui.legendItem(bar, this, "LB RB", getString(R.string.legend_section));
+                break;
         }
-        bar.addView(buttons);
-        bar.addView(Ui.note(this, getString(section == Section.HOME ? R.string.legend_home : R.string.legend_other)),
-                Ui.params(this, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
         return bar;
-    }
-
-    private LinearLayout.LayoutParams barItem() {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        p.setMarginEnd(Ui.dp(this, 8));
-        return p;
-    }
-
-    private String sectionName(Section s) {
-        switch (s) {
-            case SETUP: return getString(R.string.section_setup);
-            case DATA: return getString(R.string.section_data);
-            case SETTINGS: return getString(R.string.section_settings);
-            case ABOUT: return getString(R.string.section_about);
-            case DEBUG: return getString(R.string.section_debug);
-            default: return getString(R.string.section_home);
-        }
     }
 
     private void go(Section s) {
@@ -231,8 +266,10 @@ public class LauncherActivity extends Activity {
 
     private View buildSection() {
         defaultFocus = null;
+        detail = null;
         switch (section) {
             case SETUP: return setupScreen();
+            case SAVES: return savesScreen();
             case DATA: return dataScreen();
             case SETTINGS: return settingsScreen();
             case DEBUG: return debugScreen();
@@ -304,110 +341,280 @@ public class LauncherActivity extends Activity {
         go(round.get((at + step + round.size()) % round.size()));
     }
 
-    // ---- Home --------------------------------------------------------------------------
+    // ---- Home: the main menu -----------------------------------------------------------
 
     private View homeScreen() {
-        LinearLayout screen = Ui.row(this);
-        screen.setGravity(Gravity.TOP);
+        LinearLayout screen = Ui.column(this);
 
-        LinearLayout left = Ui.column(this);
-        Profiles.Profile active = profiles.active();
-        LinearLayout chip = Ui.buttonWithNote(this,
-                getString(R.string.home_profile_label) + "  " + active.name,
-                getString(R.string.home_profile_change), v -> go(Section.DATA));
-        left.addView(chip, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
+        LinearLayout names = Ui.column(this);
+        TextView wordmark = Ui.label(this, wordmarkText(), Ui.MENU_SP, Ui.INK, true);
+        names.addView(wordmark);
+        TextView tagline = Ui.crumb(this, getString(R.string.app_tagline));
+        tagline.setMaxLines(1);
+        tagline.setEllipsize(TextUtils.TruncateAt.END);
+        names.addView(tagline);
+        screen.addView(names, Ui.wide(this, 10));
 
-        RunState.Save newest = RunState.newestSave(active.savesDir(getFilesDir()));
-        if (newest != null) {
-            View hero = Ui.hero(this, getString(R.string.home_continue),
-                    getString(R.string.home_continue_sub, newest.name(), ago(newest.modified), active.name),
-                    v -> startGame(newest.file));
-            left.addView(hero, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
-            defaultFocus = hero;
-            View play = Ui.buttonWithNote(this, getString(R.string.home_play),
-                    getString(R.string.home_play_sub), v -> startGame(null));
-            left.addView(play, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
-        } else {
-            // No save in this profile: PLAY is the hero, and CONTINUE is absent rather than
-            // a giant dead control a D-pad can land on.
-            View play = Ui.hero(this, getString(R.string.home_play), getString(R.string.home_play_sub),
-                    v -> startGame(null));
-            left.addView(play, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
-            defaultFocus = play;
-        }
-
-        left.addView(Ui.switchRow(this, getString(R.string.home_toggle_touch), null,
-                Boolean.TRUE.equals(controls.get(ControlsFile.TOUCH)), true,
-                (b, on) -> setControl(ControlsFile.TOUCH, on)));
-        left.addView(Ui.switchRow(this, getString(R.string.home_toggle_controller), null,
-                Boolean.TRUE.equals(controls.get(ControlsFile.CONTROLLER)), true,
-                (b, on) -> setControl(ControlsFile.CONTROLLER, on)),
-                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        left.addView(Ui.note(this, getString(R.string.home_toggles_note)),
-                Ui.params(this, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
-
-        screen.addView(left, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.62f));
-        LinearLayout right = statusCard();
-        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.38f);
-        rp.setMarginStart(Ui.dp(this, 12));
-        screen.addView(right, rp);
-        return screen;
-    }
-
-    private LinearLayout statusCard() {
-        LinearLayout card = Ui.panel(this, getString(R.string.home_status_title));
-        Profiles.Profile active = profiles.active();
-        card.addView(Ui.readout(this, getString(R.string.home_status_data), active.data, Ui.TEXT));
-        card.addView(Ui.readout(this, "", checkLine(), check.ready() ? Ui.TEXT : Ui.BAD));
-        card.addView(Ui.readout(this, getString(R.string.home_status_saves),
-                getResources().getQuantityString(R.plurals.count_saves,
-                        RunState.countSaves(active.savesDir(getFilesDir())),
-                        RunState.countSaves(active.savesDir(getFilesDir()))), Ui.TEXT));
-        boolean access = hasFilesAccess();
-        card.addView(Ui.readout(this, getString(R.string.home_status_access),
-                getString(access ? R.string.home_status_access_granted : R.string.home_status_access_missing),
-                access ? Ui.TEXT : Ui.BAD));
-        RunState.LastRun last = RunState.lastRun(active.logsDir(getFilesDir()));
-        int lastText = last == RunState.LastRun.NONE ? R.string.home_last_run_none
-                : last == RunState.LastRun.OK ? R.string.home_last_run_ok : R.string.home_last_run_crash;
-        card.addView(Ui.readout(this, getString(R.string.home_status_last_run), getString(lastText),
-                last == RunState.LastRun.CRASHED ? Ui.WARN : Ui.TEXT));
-        if (last == RunState.LastRun.CRASHED) {
-            card.addView(Ui.button(this, getString(R.string.home_last_run_crash_action), v -> {
-                unlockDebug();
-                go(Section.DEBUG);
-            }), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+        // The two things a player must be told without asking: the last run died, and the
+        // graphics driver they chose was not the one the last start managed to use.
+        if (RunState.lastRun(logsDir()) == RunState.LastRun.CRASHED) {
+            screen.addView(Ui.band(this, getString(R.string.home_last_run_crash_action), Ui.WARN),
+                    Ui.wide(this, 8));
         }
         String fellBack = GpuDrivers.lastStartFellBack(this);
         if (fellBack != null) {
-            card.addView(Ui.strip(this, getString(R.string.home_driver_fell_back, fellBack), Ui.WARN),
-                    Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+            screen.addView(Ui.band(this, getString(R.string.home_driver_fell_back, fellBack), Ui.WARN),
+                    Ui.wide(this, 8));
         }
-        card.addView(Ui.button(this, getString(R.string.home_open_data), v -> go(Section.DATA)),
-                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 10, 0));
-        card.addView(Ui.button(this, getString(R.string.home_export_log), v -> chooseDebugLogDestination()),
-                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        return card;
+
+        LinearLayout main = Ui.row(this);
+        main.setGravity(Gravity.TOP);
+
+        LinearLayout menu = Ui.column(this);
+        menu.setGravity(Gravity.CENTER_VERTICAL);
+        RunState.Save newest = RunState.newestSave(profiles.active().savesDir(getFilesDir()));
+        int saves = RunState.countSaves(profiles.active().savesDir(getFilesDir()));
+        if (newest != null) {
+            View item = menuItem(Menu.CONTINUE, getString(R.string.menu_continue), null, true,
+                    v -> startGame(newest.file));
+            menu.addView(item, Ui.wide(this, 0));
+            defaultFocus = item;
+            menu.addView(menuItem(Menu.LOAD, getString(R.string.menu_load),
+                    getResources().getQuantityString(R.plurals.count_saves_short, saves, saves),
+                    false, v -> go(Section.SAVES)), Ui.wide(this, 0));
+        }
+        View play = menuItem(Menu.PLAY, getString(R.string.menu_play), null, newest == null,
+                v -> startGame(null));
+        menu.addView(play, Ui.wide(this, 0));
+        if (defaultFocus == null) {
+            defaultFocus = play;
+        }
+        menu.addView(menuItem(Menu.DATA, getString(R.string.menu_data), null, false,
+                v -> go(Section.DATA)), Ui.wide(this, 0));
+        menu.addView(menuItem(Menu.SETTINGS, getString(R.string.menu_settings), null, false,
+                v -> go(Section.SETTINGS)), Ui.wide(this, 0));
+        menu.addView(menuItem(Menu.ABOUT, getString(R.string.menu_about), null, false,
+                v -> go(Section.ABOUT)), Ui.wide(this, 0));
+        main.addView(menu, new LinearLayout.LayoutParams(Ui.dp(this, 330),
+                ViewGroup.LayoutParams.MATCH_PARENT));
+
+        LinearLayout right = Ui.row(this);
+        right.setGravity(Gravity.TOP);
+        right.addView(Ui.hairline(this), new LinearLayout.LayoutParams(1,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        LinearLayout pane = Ui.column(this);
+        pane.setPaddingRelative(Ui.dp(this, 30), Ui.dp(this, 4), 0, 0);
+        detail = Ui.column(this);
+        pane.addView(detail, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        LinearLayout quick = Ui.group(this, getString(R.string.home_quick));
+        LinearLayout quickList = Ui.list(this);
+        quickList.addView(Ui.switchRow(this, getString(R.string.home_toggle_touch), null,
+                Boolean.TRUE.equals(controls.get(ControlsFile.TOUCH)), true, Ui.ROW_DP,
+                (b, on) -> setControl(ControlsFile.TOUCH, on)));
+        quickList.addView(Ui.switchRow(this, getString(R.string.home_toggle_controller), null,
+                Boolean.TRUE.equals(controls.get(ControlsFile.CONTROLLER)), true, Ui.ROW_DP,
+                (b, on) -> setControl(ControlsFile.CONTROLLER, on)));
+        quick.addView(quickList);
+        pane.addView(quick, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 12, 0));
+        right.addView(pane, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        main.addView(right, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+
+        screen.addView(main, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        showDetail(newest != null ? Menu.CONTINUE : Menu.PLAY);
+        return screen;
     }
 
-    /** The one-line verdict on the active profile's folder, used on Home and in the Data area. */
-    private String checkLine() {
+    /** NVForever, with the second half in the accent. One wordmark, no letter spacing. */
+    private CharSequence wordmarkText() {
+        String name = getString(R.string.app_name);
+        android.text.SpannableString text = new android.text.SpannableString(name);
+        int from = Math.min(2, name.length());
+        text.setSpan(new android.text.style.ForegroundColorSpan(Ui.AMBER), from, name.length(),
+                android.text.Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
+        return text;
+    }
+
+    /** A menu row that also drives the detail panel: focus shows it, A does it. */
+    private View menuItem(Menu which, String title, String hint, boolean hero, View.OnClickListener action) {
+        LinearLayout item = Ui.menuItem(this, title, hint, hero, action);
+        item.setOnFocusChangeListener((v, has) -> {
+            if (has) {
+                showDetail(which);
+            }
+        });
+        return item;
+    }
+
+    /** The right-hand panel: what the focused menu item leads to, and nothing clickable. */
+    private void showDetail(Menu which) {
+        if (detail == null) {
+            return;
+        }
+        detail.removeAllViews();
+        Profiles.Profile active = profiles.active();
+        switch (which) {
+            case CONTINUE: {
+                RunState.Save newest = RunState.newestSave(active.savesDir(getFilesDir()));
+                detailHead(getString(R.string.menu_continue));
+                if (newest == null) {
+                    detailNote(getString(R.string.home_no_save));
+                    break;
+                }
+                detailThumbnail();
+                detailTitle(newest.name());
+                detailMeta(getString(R.string.home_detail_save_meta, ago(newest.modified), active.name));
+                detailPath(newest.file.getName() + "   " + size(newest.file.length()));
+                break;
+            }
+            case LOAD: {
+                int saves = RunState.countSaves(active.savesDir(getFilesDir()));
+                detailHead(getString(R.string.menu_load));
+                detailTitle(getResources().getQuantityString(R.plurals.count_saves, saves, saves));
+                detailMeta(getString(R.string.saves_crumb));
+                List<File> newestFew = SaveBackup.saves(active.savesDir(getFilesDir()));
+                sortNewestFirst(newestFew);
+                for (int i = 0; i < Math.min(3, newestFew.size()); i++) {
+                    detailPath(newestFew.get(i).getName());
+                }
+                break;
+            }
+            case PLAY:
+                detailHead(getString(R.string.menu_play));
+                detailTitle(getString(R.string.home_play_sub));
+                detailMeta(getString(R.string.home_detail_play_meta, active.name));
+                detailPath(active.data);
+                break;
+            case DATA:
+                detailHead(getString(R.string.menu_data));
+                detailTitle(active.name);
+                detailMeta(dataVerdict());
+                detailMeta(getString(R.string.strip_addons) + ": " + addonsLine(check));
+                detailPath(active.data);
+                break;
+            case SETTINGS:
+                detailHead(getString(R.string.menu_settings));
+                detailTitle(getString(R.string.settings_detail_title));
+                detailMeta(getString(R.string.settings_note));
+                detailPath(getString(R.string.strip_driver) + " " + driverLabel());
+                break;
+            default:
+                detailHead(getString(R.string.menu_about));
+                detailTitle(getString(R.string.app_name));
+                detailMeta(getString(R.string.about_detail_meta));
+                detailPath(buildChipText());
+                break;
+        }
+    }
+
+    private void detailHead(String text) {
+        detail.addView(Ui.groupHead(this, text), Ui.wide(this, 10));
+    }
+
+    private void detailTitle(String text) {
+        TextView t = Ui.label(this, text, Ui.LEAD_SP, Ui.INK, true);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        detail.addView(t);
+    }
+
+    private void detailMeta(String text) {
+        TextView t = Ui.label(this, text, Ui.SMALL_SP, Ui.INK_2, false);
+        t.setMaxLines(3);
+        t.setEllipsize(TextUtils.TruncateAt.END);
+        detail.addView(t, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 0));
+    }
+
+    private void detailNote(String text) {
+        detail.addView(Ui.note(this, text), Ui.wide(this, 0));
+    }
+
+    private void detailPath(String text) {
+        TextView t = Ui.micro(this, text, Ui.INK_3);
+        t.setSingleLine(true);
+        t.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        detail.addView(t, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+    }
+
+    /**
+     * The frame where a save's picture would be. NVForever's saves hold no thumbnail, so the
+     * frame says so rather than showing a picture of anything.
+     */
+    private void detailThumbnail() {
+        LinearLayout box = Ui.row(this);
+        box.setGravity(Gravity.CENTER);
+        android.graphics.drawable.GradientDrawable frame = new android.graphics.drawable.GradientDrawable();
+        frame.setColor(Ui.BG_2);
+        frame.setStroke(1, Ui.RULE_2);
+        box.setBackground(frame);
+        box.addView(Ui.micro(this, getString(R.string.home_no_thumbnail), 0xFF4A443B));
+        detail.addView(box, Ui.params(this, Ui.dp(this, 200), Ui.dp(this, 112), 0, 0, 10));
+    }
+
+    // ---- the one-line facts the strip and the detail share -------------------------------
+
+    private String driverLabel() {
+        String mode = GpuDrivers.mode(this);
+        if (GpuDrivers.AUTOMATIC.equals(mode)) {
+            return getString(R.string.settings_driver_automatic);
+        }
+        if (mode == null) {
+            return getString(R.string.settings_driver_system);
+        }
+        for (String[] driver : GpuDrivers.installed(this)) {
+            if (driver[0].equals(mode)) {
+                return driver[1];
+            }
+        }
+        return getString(R.string.settings_driver_system);
+    }
+
+    /** The data folder in one phrase: ready, or the first thing that is wrong with it. */
+    private String dataVerdict() {
         if (check.closed) {
-            return getString(R.string.setup_blocked_android_data);
+            return Ui.mark(false) + " " + getString(R.string.status_data_closed);
         }
         if (!check.exists) {
-            return getString(R.string.check_folder_unreadable);
+            return Ui.mark(false) + " " + getString(R.string.check_folder_unreadable);
         }
-        String base = Ui.mark(check.baseMasterFound()) + " "
-                + getString(check.baseMasterFound() ? R.string.check_base_found : R.string.check_base_missing);
-        String archives = Ui.mark(check.archivesFound() == check.archivesTotal()) + " "
-                + getString(R.string.check_archives, check.archivesFound(), check.archivesTotal());
-        String addons = getString(R.string.check_addons, check.addonsFound(), DataCheck.ADDON_MASTERS.length);
-        return base + "\n" + archives + "\n" + addons;
+        if (!check.baseMasterFound()) {
+            return Ui.mark(false) + " " + getString(R.string.check_base_missing);
+        }
+        if (check.archivesFound() != check.archivesTotal()) {
+            return Ui.mark(false) + " "
+                    + getString(R.string.check_archives, check.archivesFound(), check.archivesTotal());
+        }
+        return Ui.mark(true) + " " + getString(R.string.status_data_ok);
+    }
+
+    /**
+     * The add-ons, said the way round that is true: none is the normal state of a plain copy
+     * of the game, and no add-on is required, so it carries no mark.
+     */
+    private String addonsLine(DataCheck.Result scan) {
+        int found = scan.addonsFound();
+        return found == 0 ? getString(R.string.check_addons_none)
+                : getResources().getQuantityString(R.plurals.check_addons_installed, found, found);
+    }
+
+    private int runCount() {
+        File[] logs = logsDir().listFiles(
+                (directory, name) -> name.startsWith("nvforever-") && name.endsWith(".log"));
+        return logs == null ? 0 : logs.length;
+    }
+
+    private String lastRunText() {
+        RunState.LastRun last = RunState.lastRun(logsDir());
+        return getString(last == RunState.LastRun.NONE ? R.string.home_last_run_none
+                : last == RunState.LastRun.OK ? R.string.home_last_run_ok
+                : R.string.home_last_run_crash);
     }
 
     /** How long ago, in the player's own language, with the right plural. */
@@ -427,103 +634,166 @@ public class LauncherActivity extends Activity {
         return getResources().getQuantityString(R.plurals.time_days_ago, (int) days, (int) days);
     }
 
+    /** A file size, in the units the system formats for this language. */
+    private String size(long bytes) {
+        return android.text.format.Formatter.formatShortFileSize(this, bytes);
+    }
+
+    // ---- Load save ------------------------------------------------------------------------
+
+    /**
+     * Every save of the active profile, newest first, read only: a name, when it was written
+     * and how big it is. Choosing one starts the game loading it, through the same one-start
+     * request CONTINUE uses (files/android-continue.txt, paths::continue_save).
+     */
+    private View savesScreen() {
+        LinearLayout screen = Ui.column(this);
+        screen.addView(header(getString(R.string.saves_title), getString(R.string.saves_crumb),
+                getString(R.string.legend_back_menu)), Ui.wide(this, 10));
+        Profiles.Profile active = profiles.active();
+        List<File> saves = SaveBackup.saves(active.savesDir(getFilesDir()));
+        if (saves.isEmpty()) {
+            screen.addView(Ui.note(this, getString(R.string.saves_none)));
+            return screen;
+        }
+        sortNewestFirst(saves);
+        LinearLayout list = Ui.list(this);
+        for (final File save : saves) {
+            View row = Ui.valueRow(this, saveName(save),
+                    getString(R.string.saves_row_meta, ago(save.lastModified()), size(save.length())),
+                    save.getName(), true, Ui.ROW_DP, v -> startGame(save));
+            list.addView(row);
+            if (defaultFocus == null) {
+                defaultFocus = row;
+            }
+        }
+        screen.addView(list);
+        return screen;
+    }
+
+    private static String saveName(File save) {
+        String name = save.getName();
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
+    }
+
+    private static void sortNewestFirst(List<File> files) {
+        java.util.Collections.sort(files, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+    }
+
     // ---- Setup -------------------------------------------------------------------------
 
     private View setupScreen() {
         LinearLayout screen = Ui.column(this);
-        screen.addView(Ui.heading(this, getString(R.string.setup_title)));
-        screen.addView(Ui.note(this, getString(R.string.setup_intro)),
-                Ui.params(this, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 10));
+        screen.addView(header(getString(R.string.setup_title), getString(R.string.setup_intro), null),
+                Ui.wide(this, 12));
+
+        LinearLayout columns = Ui.row(this);
+        columns.setGravity(Gravity.TOP);
 
         boolean access = hasFilesAccess();
-        LinearLayout step1 = Ui.panel(this, getString(R.string.setup_step_access_title));
+        LinearLayout step1 = Ui.group(this, getString(R.string.setup_step_access_title));
         step1.addView(Ui.note(this, getString(R.string.setup_step_access_why)));
         if (Build.VERSION.SDK_INT < 30) {
             step1.addView(Ui.note(this, getString(R.string.setup_step_access_legacy)));
         }
+        LinearLayout step1List = Ui.list(this);
         if (access) {
-            step1.addView(Ui.body(this, Ui.mark(true) + " " + getString(R.string.setup_step_access_granted)));
+            step1List.addView(Ui.valueRow(this, getString(R.string.setup_step_access_granted), null,
+                    Ui.mark(true), true, Ui.ROW_DP, null));
         } else {
-            View grant = Ui.buttonWithNote(this, getString(R.string.setup_step_access_grant),
-                    getString(R.string.setup_step_access_return), v -> requestFilesAccess());
-            step1.addView(grant, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+            View grant = Ui.chevronRow(this, getString(R.string.setup_step_access_grant),
+                    getString(R.string.setup_step_access_return), Ui.ROW_DP, v -> requestFilesAccess());
+            step1List.addView(grant);
             defaultFocus = grant;
         }
-        screen.addView(step1, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
+        step1.addView(step1List, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        columns.addView(step1, columnParams(0));
 
-        LinearLayout step2 = Ui.panel(this, getString(R.string.setup_step_folder_title));
+        LinearLayout step2 = Ui.group(this, getString(R.string.setup_step_folder_title));
         step2.addView(Ui.note(this, getString(R.string.setup_step_folder_why)));
-        step2.addView(Ui.body(this, getString(R.string.setup_step_folder_chosen, profiles.active().data)));
-        step2.addView(Ui.note(this, getString(R.string.setup_step_folder_profile_note)));
-        View choose = Ui.button(this, getString(R.string.setup_step_folder_choose), v -> pickFolder(REQUEST_TREE));
+        LinearLayout step2List = Ui.list(this);
+        View choose = Ui.pathRow(this, getString(R.string.setup_step_folder_choose),
+                profiles.active().data, Ui.ROW_DP, v -> pickFolder(REQUEST_TREE));
         choose.setEnabled(access);
-        step2.addView(choose, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        View create = Ui.buttonWithNote(this, getString(R.string.setup_step_folder_create),
-                getString(R.string.setup_step_folder_create_note), v -> createDefaultFolder());
+        step2List.addView(choose);
+        View create = Ui.chevronRow(this, getString(R.string.setup_step_folder_create),
+                getString(R.string.setup_step_folder_create_note), Ui.ROW_DP, v -> createDefaultFolder());
         create.setEnabled(access);
-        step2.addView(create, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+        step2List.addView(create);
+        step2.addView(step2List, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        step2.addView(Ui.note(this, getString(R.string.setup_step_folder_profile_note)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
         if (access && defaultFocus == null) {
             defaultFocus = choose;
         }
-        screen.addView(step2, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
+        columns.addView(step2, columnParams(16));
 
-        LinearLayout step3 = Ui.panel(this, getString(R.string.setup_step_check_title));
-        step3.addView(Ui.note(this, getString(R.string.setup_step_check_why)));
+        LinearLayout step3 = Ui.group(this, getString(R.string.setup_step_check_title));
         step3.addView(checkList());
+        LinearLayout step3List = Ui.list(this);
         if (check.ready()) {
-            step3.addView(Ui.body(this, Ui.mark(true) + " " + getString(R.string.setup_step_check_ready)));
-            View play = Ui.hero(this, getString(R.string.home_play), getString(R.string.home_play_sub), v -> {
-                prefs.edit().putBoolean(PREF_SETUP_DONE, true).apply();
-                startGame(null);
-            });
-            step3.addView(play, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+            View play = Ui.chevronRow(this, getString(R.string.menu_play),
+                    getString(R.string.setup_step_check_ready), Ui.ROW_DP, v -> {
+                        prefs.edit().putBoolean(PREF_SETUP_DONE, true).apply();
+                        startGame(null);
+                    });
+            step3List.addView(play);
             defaultFocus = play;
         } else {
-            step3.addView(Ui.label(this, Ui.mark(false) + " " + getString(R.string.setup_step_check_blocked),
-                    Ui.BODY_SP, Ui.BAD, false));
-            step3.addView(Ui.button(this, getString(R.string.common_verify), v -> {
-                reload();
-                show();
-            }), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+            step3List.addView(Ui.valueRow(this, getString(R.string.common_verify),
+                    getString(R.string.setup_step_check_blocked), Ui.mark(false), true, Ui.ROW_DP, v -> {
+                        reload();
+                        show();
+                    }));
             // The escape hatch stays, demoted: it is useful, and it is not the happy path.
-            TextView anyway = Ui.label(this, getString(R.string.setup_start_anyway), Ui.SMALL_SP, Ui.WEAK, false);
-            anyway.setPaddingRelative(Ui.dp(this, 12), Ui.dp(this, 10), Ui.dp(this, 12), Ui.dp(this, 10));
-            anyway.setBackground(Ui.focusable(this, Ui.BG, Ui.LINE));
-            anyway.setFocusable(true);
+            View anyway = Ui.chevronRow(this, getString(R.string.setup_start_anyway), null,
+                    Ui.ROW_DENSE_DP, v -> startGame(null));
             anyway.setEnabled(access && !check.closed);
-            anyway.setOnClickListener(v -> startGame(null));
-            step3.addView(anyway, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+            step3List.addView(anyway);
         }
-        screen.addView(step3, new LinearLayout.LayoutParams(
+        step3.addView(step3List, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        step3.addView(Ui.note(this, getString(R.string.setup_step_check_why)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        columns.addView(step3, columnParams(16));
+        screen.addView(columns, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return screen;
+    }
+
+    /** One of the three columns Setup, Settings and Advanced are laid out in. */
+    private LinearLayout.LayoutParams columnParams(int startDp) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        p.setMarginStart(Ui.dp(this, startDp));
+        return p;
     }
 
     /** The tick list of required files and detected add-ons, with sizes. */
     private View checkList() {
         LinearLayout list = Ui.column(this);
         if (check.closed) {
-            list.addView(Ui.label(this, getString(R.string.setup_blocked_android_data), Ui.BODY_SP, Ui.BAD, false));
+            list.addView(Ui.label(this, getString(R.string.setup_blocked_android_data),
+                    Ui.SMALL_SP, Ui.BAD, false));
             return list;
         }
         if (!check.exists) {
-            list.addView(Ui.label(this, getString(R.string.setup_blocked_missing_folder), Ui.BODY_SP, Ui.BAD, false));
+            list.addView(Ui.label(this, getString(R.string.setup_blocked_missing_folder),
+                    Ui.SMALL_SP, Ui.BAD, false));
             return list;
         }
         for (DataCheck.Entry e : check.required) {
-            list.addView(Ui.readout(this, Ui.mark(e.present) + " " + e.name,
-                    e.present ? size(e.size) : getString(R.string.check_missing_file, e.name),
-                    e.present ? Ui.WEAK : Ui.BAD));
+            list.addView(Ui.micro(this, Ui.mark(e.present) + " " + e.name + "   "
+                    + (e.present ? size(e.size) : getString(R.string.check_missing_file, e.name)),
+                    e.present ? Ui.INK_2 : Ui.BAD));
         }
-        list.addView(Ui.readout(this, getString(R.string.check_addons, check.addonsFound(),
-                DataCheck.ADDON_MASTERS.length), addonNames(), Ui.WEAK));
+        list.addView(Ui.micro(this, getString(R.string.strip_addons) + " " + addonsLine(check)
+                + (check.addonsFound() == 0 ? "" : ": " + addonNames()), Ui.INK_3));
         return list;
     }
 
@@ -537,32 +807,44 @@ public class LauncherActivity extends Activity {
         return found.isEmpty() ? getString(R.string.common_none) : TextUtils.join(", ", found);
     }
 
-    /** A file size, in the units the system formats for this language. */
-    private String size(long bytes) {
-        return android.text.format.Formatter.formatShortFileSize(this, bytes);
-    }
-
     // ---- Data --------------------------------------------------------------------------
 
     private View dataScreen() {
         LinearLayout screen = Ui.column(this);
-        screen.addView(Ui.heading(this, getString(R.string.data_title)));
-        LinearLayout panel = Ui.panel(this, getString(R.string.data_profiles_title));
-        panel.addView(Ui.note(this, getString(R.string.data_profiles_note)));
+        screen.addView(header(getString(R.string.data_title), getString(R.string.data_crumb),
+                getString(R.string.legend_back_menu)), Ui.wide(this, 10));
+
+        LinearLayout columns = Ui.row(this);
+        columns.setGravity(Gravity.TOP);
+
+        LinearLayout list = Ui.group(this, getString(R.string.data_profiles_title));
+        LinearLayout rows = Ui.list(this);
         for (Profiles.Profile p : profiles.all()) {
-            panel.addView(profileRow(p), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+            rows.addView(profileRow(p));
         }
-        View add = Ui.button(this, getString(R.string.data_profiles_new), v -> newProfile());
-        panel.addView(add, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 10, 0));
-        screen.addView(panel, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 10));
+        rows.addView(Ui.chevronRow(this, getString(R.string.data_profiles_new), null,
+                Ui.ROW_DP, v -> newProfile()));
+        list.addView(rows);
+        list.addView(Ui.note(this, getString(R.string.data_profiles_note)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        columns.addView(list, columnParams(0));
+
+        LinearLayout right = Ui.column(this);
+        LinearLayout saves = Ui.group(this, getString(R.string.settings_group_saves));
+        saves.addView(savesRows());
+        saves.addView(Ui.note(this, getString(R.string.saves_note)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        right.addView(saves, Ui.wide(this, 16));
 
         // Phase 2 lives here. The row is shown, not hidden, so the shape of the area is honest.
-        LinearLayout soon = Ui.panel(this, getString(R.string.data_mods_soon));
+        LinearLayout soon = Ui.group(this, getString(R.string.data_mods_soon));
         soon.addView(Ui.note(this, getString(R.string.data_mods_soon_note)));
-        screen.addView(soon, new LinearLayout.LayoutParams(
+        right.addView(soon, Ui.wide(this, 0));
+        columns.addView(right, columnParams(16));
+
+        screen.addView(columns, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return screen;
     }
@@ -572,21 +854,11 @@ public class LauncherActivity extends Activity {
         DataCheck.Result scan = active ? check : DataCheck.scan(p.dataDir());
         String badge = !scan.exists ? getString(R.string.data_profiles_unavailable)
                 : Ui.mark(scan.ready()) + " " + getString(R.string.check_archives,
-                        scan.archivesFound(), scan.archivesTotal())
-                        + ", " + getString(R.string.check_addons, scan.addonsFound(), DataCheck.ADDON_MASTERS.length);
-        LinearLayout row = Ui.column(this);
-        int pad = Ui.dp(this, 12);
-        row.setPaddingRelative(pad, pad / 2, pad, pad / 2);
-        row.setBackground(Ui.focusable(this, Ui.PANEL, active ? Ui.AMBER_EDGE : Ui.LINE));
-        row.setFocusable(true);
-        row.addView(Ui.label(this, p.name + (active ? "   " + getString(R.string.data_profiles_active) : ""),
-                Ui.BODY_SP, active ? Ui.AMBER : Ui.TEXT, true));
-        row.addView(Ui.note(this, p.data));
-        row.addView(Ui.note(this, badge));
-        row.addView(Ui.note(this, getResources().getQuantityString(R.plurals.count_saves,
-                RunState.countSaves(p.savesDir(getFilesDir())), RunState.countSaves(p.savesDir(getFilesDir())))));
+                        scan.archivesFound(), scan.archivesTotal());
+        TextView value = Ui.micro(this, badge, scan.exists && scan.ready() ? Ui.INK_2 : Ui.BAD);
+        LinearLayout row = Ui.row(this, p.name + (active ? "   " + getString(R.string.data_profiles_active) : ""),
+                p.data, true, null, value, Ui.ROW_DP, true, v -> profileActions(p, scan));
         row.setContentDescription(p.name + ". " + p.data + ". " + badge);
-        row.setOnClickListener(v -> profileActions(p, scan));
         if (active) {
             defaultFocus = row;
         }
@@ -652,7 +924,7 @@ public class LauncherActivity extends Activity {
         EditText field = new EditText(this);
         field.setText(current);
         field.setSingleLine(true);
-        field.setTextColor(Ui.TEXT);
+        field.setTextColor(Ui.INK);
         new AlertDialog.Builder(this)
                 .setTitle(R.string.data_profiles_new_name)
                 .setView(field)
@@ -689,102 +961,174 @@ public class LauncherActivity extends Activity {
 
     private View settingsScreen() {
         LinearLayout screen = Ui.column(this);
-        screen.addView(Ui.heading(this, getString(R.string.settings_title)));
-        screen.addView(Ui.note(this, getString(R.string.settings_note)),
-                Ui.params(this, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 4, 10));
+        screen.addView(header(getString(R.string.settings_title), getString(R.string.settings_note),
+                getString(R.string.legend_back_menu)), Ui.wide(this, 10));
 
-        LinearLayout controlsPanel = Ui.panel(this, getString(R.string.settings_group_controls));
-        View touch = Ui.switchRow(this, getString(R.string.home_toggle_touch), null,
-                Boolean.TRUE.equals(controls.get(ControlsFile.TOUCH)), true,
-                (b, on) -> setControl(ControlsFile.TOUCH, on));
-        controlsPanel.addView(touch);
-        defaultFocus = touch;
-        controlsPanel.addView(Ui.switchRow(this, getString(R.string.home_toggle_controller), null,
-                Boolean.TRUE.equals(controls.get(ControlsFile.CONTROLLER)), true,
-                (b, on) -> setControl(ControlsFile.CONTROLLER, on)),
-                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        controlsPanel.addView(Ui.note(this, getString(R.string.settings_controls_legend)),
-                Ui.params(this, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        controlsPanel.addView(Ui.note(this, getString(R.string.settings_controls_rebind)));
-        screen.addView(controlsPanel, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
-
-        LinearLayout device = Ui.panel(this, getString(R.string.settings_group_device));
-        device.addView(Ui.switchRow(this, getString(R.string.settings_keep_awake),
-                getString(R.string.settings_keep_awake_note), prefs.getBoolean(PREF_KEEP_AWAKE, true), true,
-                (b, on) -> prefs.edit().putBoolean(PREF_KEEP_AWAKE, on).apply()));
-        device.addView(driverRow(), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        screen.addView(device, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
-
-        LinearLayout data = Ui.panel(this, getString(R.string.settings_group_data));
-        data.addView(Ui.buttonWithNote(this,
-                getString(R.string.settings_profile_row) + ": " + profiles.active().name,
-                getString(R.string.settings_profile_note), v -> go(Section.DATA)));
-        screen.addView(data, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
-
-        LinearLayout launcher = Ui.panel(this, getString(R.string.settings_group_launcher));
-        launcher.addView(Ui.buttonWithNote(this, getString(R.string.settings_language),
-                getString(R.string.settings_language_note), v -> {}));
-        launcher.addView(Ui.button(this, getString(R.string.settings_rerun_setup), v -> {
-            prefs.edit().putBoolean(PREF_SETUP_DONE, false).apply();
-            go(Section.SETUP);
-        }), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        View debugRow = Ui.buttonWithNote(this, getString(R.string.settings_debug_row),
-                getString(R.string.settings_debug_note), v -> {
-                    unlockDebug();
-                    go(Section.DEBUG);
-                });
-        // The second, readable way in. It stays a row of Settings even before it is unlocked.
-        launcher.addView(debugRow, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        screen.addView(launcher, new LinearLayout.LayoutParams(
+        LinearLayout columns = Ui.row(this);
+        columns.setGravity(Gravity.TOP);
+        columns.addView(settingsColumnOne(), columnParams(0));
+        columns.addView(settingsColumnTwo(), columnParams(20));
+        columns.addView(settingsColumnThree(), columnParams(20));
+        screen.addView(columns, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return screen;
     }
 
+    private View settingsColumnOne() {
+        LinearLayout column = Ui.column(this);
+
+        LinearLayout controlsGroup = Ui.group(this, getString(R.string.settings_group_controls));
+        LinearLayout controlsList = Ui.list(this);
+        View touch = Ui.switchRow(this, getString(R.string.home_toggle_touch), null,
+                Boolean.TRUE.equals(controls.get(ControlsFile.TOUCH)), true, Ui.ROW_DP,
+                (b, on) -> setControl(ControlsFile.TOUCH, on));
+        controlsList.addView(touch);
+        defaultFocus = touch;
+        controlsList.addView(Ui.switchRow(this, getString(R.string.home_toggle_controller), null,
+                Boolean.TRUE.equals(controls.get(ControlsFile.CONTROLLER)), true, Ui.ROW_DP,
+                (b, on) -> setControl(ControlsFile.CONTROLLER, on)));
+        controlsList.addView(Ui.chevronRow(this, getString(R.string.settings_controls_buttons),
+                getString(R.string.settings_controls_rebind), Ui.ROW_DP,
+                v -> message(getString(R.string.settings_controls_buttons),
+                        getString(R.string.settings_controls_legend) + "\n\n"
+                                + getString(R.string.settings_controls_rebind))));
+        controlsGroup.addView(controlsList);
+        column.addView(controlsGroup, Ui.wide(this, 16));
+
+        LinearLayout device = Ui.group(this, getString(R.string.settings_group_device));
+        LinearLayout deviceList = Ui.list(this);
+        deviceList.addView(Ui.switchRow(this, getString(R.string.settings_keep_awake),
+                getString(R.string.settings_keep_awake_note), prefs.getBoolean(PREF_KEEP_AWAKE, true),
+                true, Ui.ROW_DP, (b, on) -> prefs.edit().putBoolean(PREF_KEEP_AWAKE, on).apply()));
+        device.addView(deviceList);
+        column.addView(device, Ui.wide(this, 16));
+
+        LinearLayout launcher = Ui.group(this, getString(R.string.settings_group_launcher));
+        LinearLayout launcherList = Ui.list(this);
+        launcherList.addView(Ui.valueRow(this, getString(R.string.settings_language), null,
+                getString(R.string.settings_language_value), false, Ui.ROW_DP,
+                v -> message(getString(R.string.settings_language),
+                        getString(R.string.settings_language_note))));
+        launcherList.addView(Ui.chevronRow(this, getString(R.string.settings_rerun_setup), null,
+                Ui.ROW_DP, v -> {
+                    prefs.edit().putBoolean(PREF_SETUP_DONE, false).apply();
+                    go(Section.SETUP);
+                }));
+        // The second, readable way in. It stays a row of Settings even before it is unlocked.
+        launcherList.addView(Ui.chevronRow(this, getString(R.string.settings_debug_row),
+                getString(R.string.settings_debug_note), Ui.ROW_DP, v -> {
+                    unlockDebug();
+                    go(Section.DEBUG);
+                }));
+        launcher.addView(launcherList);
+        column.addView(launcher, Ui.wide(this, 0));
+        return column;
+    }
+
+    private View settingsColumnTwo() {
+        LinearLayout column = Ui.column(this);
+        column.addView(driverGroup(), Ui.wide(this, 16));
+
+        LinearLayout problems = Ui.group(this, getString(R.string.settings_group_problems));
+        LinearLayout list = Ui.list(this);
+        list.addView(Ui.chevronRow(this, getString(R.string.report_row),
+                getString(R.string.report_row_note), Ui.ROW_DP, v -> reportAProblem()));
+        list.addView(Ui.valueRow(this, getString(R.string.strip_last_run), null, lastRunText(),
+                false, Ui.ROW_DENSE_DP, v -> {
+                    unlockDebug();
+                    go(Section.DEBUG);
+                }));
+        problems.addView(list);
+        column.addView(problems, Ui.wide(this, 0));
+        return column;
+    }
+
+    private View settingsColumnThree() {
+        LinearLayout column = Ui.column(this);
+
+        LinearLayout data = Ui.group(this, getString(R.string.settings_group_data));
+        LinearLayout dataList = Ui.list(this);
+        dataList.addView(Ui.valueRow(this, getString(R.string.settings_profile_row), null,
+                profiles.active().name, false, Ui.ROW_DP, v -> go(Section.DATA)));
+        dataList.addView(Ui.pathRow(this, getString(R.string.settings_data_folder_row),
+                profiles.active().data, Ui.ROW_DP, v -> pickFolder(REQUEST_TREE)));
+        data.addView(dataList);
+        column.addView(data, Ui.wide(this, 16));
+
+        LinearLayout saves = Ui.group(this, getString(R.string.settings_group_saves));
+        saves.addView(savesRows());
+        saves.addView(Ui.note(this, getString(R.string.saves_note)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        column.addView(saves, Ui.wide(this, 0));
+        return column;
+    }
+
+    /** Back up and restore, the same two rows wherever they are shown. */
+    private View savesRows() {
+        Profiles.Profile active = profiles.active();
+        int saves = RunState.countSaves(active.savesDir(getFilesDir()));
+        LinearLayout list = Ui.list(this);
+        list.addView(Ui.chevronRow(this, getString(R.string.saves_backup),
+                getResources().getQuantityString(R.plurals.saves_backup_note, saves, saves, active.name),
+                Ui.ROW_DP, v -> backUpSaves()));
+        list.addView(Ui.chevronRow(this, getString(R.string.saves_restore),
+                getString(R.string.saves_restore_note), Ui.ROW_DP, v -> restoreSaves()));
+        return list;
+    }
+
     /**
-     * Settings, then Graphics driver: the system driver, every installed custom driver, and
-     * the two actions. Everything it knows comes from {@link GpuDrivers}, which keeps the
-     * drivers in the app's private storage; the game opens the chosen one before its renderer
-     * starts (engine/nvf-android/src/gpu_driver.rs, docs/odin-debug.md).
+     * Settings, then Graphics driver: an exclusive choice of Automatic, the system driver and
+     * every driver the player installed, then the one action. Everything it knows comes from
+     * {@link GpuDrivers}, which keeps the drivers in the app's private storage; the game opens
+     * the chosen one before its renderer starts (engine/nvf-android/src/gpu_driver.rs).
      */
-    private View driverRow() {
-        LinearLayout panel = Ui.panel(this, getString(R.string.settings_driver_row));
+    private View driverGroup() {
+        LinearLayout group = Ui.group(this, getString(R.string.settings_driver_row));
         List<String[]> drivers = GpuDrivers.installed(this);
-        String chosen = GpuDrivers.selected(this);
-        panel.addView(Ui.switchRow(this, getString(R.string.settings_driver_system),
-                getString(R.string.settings_driver_system_note), chosen == null, true, (b, on) -> {
+        String mode = GpuDrivers.mode(this);
+        LinearLayout list = Ui.list(this);
+        list.addView(Ui.radioRow(this, getString(R.string.settings_driver_automatic),
+                getString(R.string.settings_driver_automatic_note),
+                GpuDrivers.AUTOMATIC.equals(mode), Ui.ROW_DP, v -> {
+                    GpuDrivers.select(this, GpuDrivers.AUTOMATIC);
+                    show();
+                }));
+        list.addView(Ui.radioRow(this, getString(R.string.settings_driver_system),
+                getString(R.string.settings_driver_system_note), mode == null, Ui.ROW_DP, v -> {
                     GpuDrivers.select(this, null);
                     show();
                 }));
         for (String[] driver : drivers) {
             final String id = driver[0];
-            panel.addView(Ui.switchRow(this, driver[1], null, id.equals(chosen), true, (b, on) -> {
-                GpuDrivers.select(this, on ? id : null);
-                show();
-            }), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-            panel.addView(Ui.button(this, getString(R.string.settings_driver_delete), v -> confirm(
-                    getString(R.string.settings_driver_delete), () -> {
-                        try {
-                            GpuDrivers.delete(this, id);
-                        } catch (RuntimeException e) {
-                            toast(String.valueOf(e.getMessage()));
-                        }
+            LinearLayout row = Ui.radioRow(this, driver[1],
+                    getString(R.string.settings_driver_installed_note), id.equals(mode), Ui.ROW_DP,
+                    v -> {
+                        GpuDrivers.select(this, id);
                         show();
-                    })), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+                    });
+            row.setOnLongClickListener(v -> {
+                confirm(getString(R.string.settings_driver_delete_confirm, driver[1]), () -> {
+                    try {
+                        GpuDrivers.delete(this, id);
+                    } catch (RuntimeException e) {
+                        toast(String.valueOf(e.getMessage()));
+                    }
+                    show();
+                });
+                return true;
+            });
+            list.addView(row);
         }
-        if (drivers.isEmpty()) {
-            panel.addView(Ui.note(this, getString(R.string.settings_driver_none_note)),
-                    Ui.params(this, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
-        }
-        panel.addView(Ui.button(this, getString(R.string.settings_driver_install),
-                v -> pickDriverZip()), Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        return panel;
+        list.addView(Ui.row(this, getString(R.string.settings_driver_install), null, Ui.indent(this),
+                Ui.label(this, ">", Ui.BODY_SP, Ui.INK_3, false), Ui.ROW_DENSE_DP, true,
+                v -> pickDriverZip()));
+        group.addView(list);
+        group.addView(Ui.note(this, getString(drivers.isEmpty() ? R.string.settings_driver_none_note
+                : R.string.settings_driver_hold_to_remove)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        return group;
     }
 
     private void pickDriverZip() {
@@ -798,7 +1142,100 @@ public class LauncherActivity extends Activity {
         }
     }
 
-    // ---- Debug -------------------------------------------------------------------------
+    // ---- backing saves up, and reading them back -----------------------------------------
+
+    private File downloadsDir() {
+        return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+    }
+
+    /**
+     * Copies the active profile's saves into
+     * {@code Download/NVForever-backups/<profile>-<date>/}. A copy, never a move: the profile's
+     * own folder is left exactly as it was, and nothing anywhere is deleted.
+     */
+    private void backUpSaves() {
+        if (!hasFilesAccess()) {
+            toast(getString(R.string.error_need_access));
+            return;
+        }
+        Profiles.Profile active = profiles.active();
+        final File saves = active.savesDir(getFilesDir());
+        if (RunState.countSaves(saves) == 0) {
+            toast(getString(R.string.saves_backup_empty));
+            return;
+        }
+        final File into = SaveBackup.folderFor(downloadsDir(), active.name, System.currentTimeMillis());
+        new Thread(() -> {
+            String message;
+            try {
+                int n = SaveBackup.backUp(saves, into);
+                message = getResources().getQuantityString(R.plurals.saves_backup_done, n, n,
+                        SaveBackup.BACKUPS_TAIL + "/" + into.getName());
+            } catch (IOException | SecurityException e) {
+                message = getString(R.string.saves_backup_failed, String.valueOf(e.getMessage()));
+            }
+            final String said = message;
+            runOnUiThread(() -> toast(said));
+        }, "nvf-save-backup").start();
+    }
+
+    /**
+     * Reads a backup folder in Download back into the active profile's saves. A save already
+     * there is copied to a free {@code .bak} name before it is written over, and the player is
+     * told how many that is before anything is written.
+     */
+    private void restoreSaves() {
+        if (!hasFilesAccess()) {
+            toast(getString(R.string.error_need_access));
+            return;
+        }
+        List<File> backups = SaveBackup.backups(downloadsDir());
+        if (backups.isEmpty()) {
+            message(getString(R.string.saves_restore), getString(R.string.saves_restore_none,
+                    SaveBackup.BACKUPS_TAIL));
+            return;
+        }
+        String[] names = new String[backups.size()];
+        for (int i = 0; i < backups.size(); i++) {
+            File backup = backups.get(i);
+            int n = SaveBackup.countSaves(backup);
+            names[i] = backup.getName() + "   "
+                    + getResources().getQuantityString(R.plurals.count_saves_short, n, n);
+        }
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.saves_restore_pick)
+                .setItems(names, (d, which) -> confirmRestore(backups.get(which)))
+                .setNegativeButton(R.string.common_cancel, null)
+                .show();
+    }
+
+    private void confirmRestore(final File backup) {
+        final File saves = profiles.active().savesDir(getFilesDir());
+        int clashes = SaveBackup.clashes(backup, saves);
+        Runnable restore = () -> new Thread(() -> {
+            String message;
+            try {
+                int n = SaveBackup.restore(backup, saves);
+                message = getResources().getQuantityString(R.plurals.saves_restore_done, n, n);
+            } catch (IOException | SecurityException e) {
+                message = getString(R.string.saves_restore_failed, String.valueOf(e.getMessage()));
+            }
+            final String said = message;
+            runOnUiThread(() -> {
+                toast(said);
+                reload();
+                show();
+            });
+        }, "nvf-save-restore").start();
+        if (clashes == 0) {
+            restore.run();
+            return;
+        }
+        confirm(getResources().getQuantityString(R.plurals.saves_restore_confirm, clashes, clashes),
+                restore);
+    }
+
+    // ---- Advanced (the hidden Debug screen) ----------------------------------------------
 
     private void unlockDebug() {
         if (!prefs.getBoolean(PREF_DEBUG_UNLOCKED, false)) {
@@ -816,126 +1253,181 @@ public class LauncherActivity extends Activity {
                     .show();
         }
         LinearLayout screen = Ui.column(this);
-        screen.addView(Ui.heading(this, getString(R.string.debug_title)));
+        screen.addView(header(getString(R.string.debug_title), getString(R.string.debug_saves_untouched),
+                getString(R.string.legend_back_settings)), Ui.wide(this, 8));
         int on = ControlsFile.testsOn(controls).size();
         if (on > 0) {
-            screen.addView(Ui.strip(this, getResources().getQuantityString(R.plurals.debug_warn_strip, on, on), Ui.WARN),
-                    Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 8));
+            screen.addView(Ui.band(this, getResources().getQuantityString(R.plurals.debug_warn_strip, on, on),
+                    Ui.WARN), Ui.wide(this, 10));
         }
-        screen.addView(Ui.note(this, getString(R.string.debug_saves_untouched)),
-                Ui.params(this, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
 
-        LinearLayout engine = Ui.panel(this, getString(R.string.debug_group_engine));
-        View first = testRow(engine, ControlsFile.SKIP_PIPBOY_WARMUP, R.string.debug_skip_pipboy,
-                R.string.debug_skip_pipboy_note, true);
+        LinearLayout columns = Ui.row(this);
+        columns.setGravity(Gravity.TOP);
+
+        LinearLayout one = Ui.column(this);
+        LinearLayout engine = Ui.group(this, getString(R.string.debug_group_engine));
+        LinearLayout engineList = Ui.list(this);
+        View first = testRow(engineList, ControlsFile.SKIP_PIPBOY_WARMUP, R.string.debug_skip_pipboy, true);
         defaultFocus = first;
-        testRow(engine, ControlsFile.SKIP_VATS_OUTLINE, R.string.debug_skip_vats, R.string.debug_skip_vats_note, true);
-        screen.addView(engine, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
+        testRow(engineList, ControlsFile.SKIP_VATS_OUTLINE, R.string.debug_skip_vats, true);
+        engine.addView(engineList);
+        one.addView(engine, Ui.wide(this, 16));
+        LinearLayout drawing = Ui.group(this, getString(R.string.debug_group_drawing));
+        LinearLayout drawingList = Ui.list(this);
+        testRow(drawingList, ControlsFile.NO_SOFT_PARTICLES, R.string.debug_no_soft_particles, true);
+        testRow(drawingList, ControlsFile.NO_PARTICLES, R.string.debug_no_particles, true);
+        testRow(drawingList, ControlsFile.NO_DECALS, R.string.debug_no_decals, true);
+        testRow(drawingList, ControlsFile.NO_HEAT_HAZE, R.string.debug_no_heat_haze, true);
+        drawing.addView(drawingList);
+        drawing.addView(Ui.note(this, getString(R.string.debug_group_drawing_note)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        one.addView(drawing, Ui.wide(this, 0));
+        columns.addView(one, columnParams(0));
 
-        LinearLayout vulkan = Ui.panel(this, getString(R.string.debug_group_vulkan));
-        testRow(vulkan, ControlsFile.VULKAN_VALIDATION, R.string.debug_validation,
-                R.string.debug_validation_note, true);
+        LinearLayout two = Ui.column(this);
+        LinearLayout vulkan = Ui.group(this, getString(R.string.debug_group_vulkan));
+        LinearLayout vulkanList = Ui.list(this);
+        testRow(vulkanList, ControlsFile.VULKAN_VALIDATION, R.string.debug_validation, true);
         // The two deeper checks are children of the layer: focusable, and inert while it is
         // off, which is the dependency the engine itself enforces.
         boolean layer = Boolean.TRUE.equals(controls.get(ControlsFile.VULKAN_VALIDATION));
-        testRow(vulkan, ControlsFile.VULKAN_VALIDATION_SYNC, R.string.debug_validation_sync,
-                R.string.debug_validation_sync_note, layer);
-        testRow(vulkan, ControlsFile.VULKAN_VALIDATION_GPUAV, R.string.debug_validation_gpuav,
-                R.string.debug_validation_gpuav_note, layer);
-        testRow(vulkan, ControlsFile.GPU_BREADCRUMBS, R.string.debug_breadcrumbs,
-                R.string.debug_breadcrumbs_note, true);
+        childRow(vulkanList, ControlsFile.VULKAN_VALIDATION_SYNC, R.string.debug_validation_sync, layer);
+        childRow(vulkanList, ControlsFile.VULKAN_VALIDATION_GPUAV, R.string.debug_validation_gpuav, layer);
+        testRow(vulkanList, ControlsFile.GPU_BREADCRUMBS, R.string.debug_breadcrumbs, true);
         // The chunks exist to be marked, so they are a child of the breadcrumbs exactly as the
         // two deeper checks are children of the layer; the engine enforces the same dependency.
-        testRow(vulkan, ControlsFile.GPU_BREADCRUMB_CHUNKS, R.string.debug_breadcrumb_chunks,
-                R.string.debug_breadcrumb_chunks_note,
+        childRow(vulkanList, ControlsFile.GPU_BREADCRUMB_CHUNKS, R.string.debug_breadcrumb_chunks,
                 Boolean.TRUE.equals(controls.get(ControlsFile.GPU_BREADCRUMBS)));
-        screen.addView(vulkan, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
+        vulkan.addView(vulkanList);
+        two.addView(vulkan, Ui.wide(this, 16));
+        LinearLayout diagnostics = Ui.group(this, getString(R.string.debug_group_diagnostics));
+        LinearLayout diagnosticsList = Ui.list(this);
+        testRow(diagnosticsList, ControlsFile.DIAGNOSTICS, R.string.debug_diagnostics, true);
+        diagnostics.addView(diagnosticsList);
+        two.addView(diagnostics, Ui.wide(this, 0));
+        columns.addView(two, columnParams(20));
 
-        // One switch a drawn feature, for narrowing down which of them the GPU dies in.
-        LinearLayout drawing = Ui.panel(this, getString(R.string.debug_group_drawing));
-        testRow(drawing, ControlsFile.NO_SOFT_PARTICLES, R.string.debug_no_soft_particles,
-                R.string.debug_no_soft_particles_note, true);
-        testRow(drawing, ControlsFile.NO_PARTICLES, R.string.debug_no_particles,
-                R.string.debug_no_particles_note, true);
-        testRow(drawing, ControlsFile.NO_DECALS, R.string.debug_no_decals,
-                R.string.debug_no_decals_note, true);
-        testRow(drawing, ControlsFile.NO_HEAT_HAZE, R.string.debug_no_heat_haze,
-                R.string.debug_no_heat_haze_note, true);
-        screen.addView(drawing, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
+        LinearLayout three = Ui.column(this);
+        LinearLayout reports = Ui.group(this, getString(R.string.debug_group_reports));
+        LinearLayout reportList = Ui.list(this);
+        reportList.addView(Ui.chevronRow(this, getString(R.string.report_row), null,
+                Ui.ROW_DENSE_DP, v -> reportAProblem()));
+        reportList.addView(Ui.chevronRow(this, getString(R.string.debug_export_log), null,
+                Ui.ROW_DENSE_DP, v -> chooseDebugLogDestination()));
+        reportList.addView(Ui.chevronRow(this, getString(R.string.debug_copy_summary), null,
+                Ui.ROW_DENSE_DP, v -> copyDebugSummary()));
+        reports.addView(reportList);
+        reports.addView(Ui.note(this, getString(R.string.debug_privacy)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 6, 0));
+        three.addView(reports, Ui.wide(this, 16));
+        LinearLayout reset = Ui.group(this, getString(R.string.debug_group_reset));
+        LinearLayout resetList = Ui.list(this);
+        resetList.addView(Ui.chevronRow(this, getString(R.string.debug_tests_off), null,
+                Ui.ROW_DENSE_DP, v -> {
+                    ControlsFile.clearTests(controls);
+                    saveControls();
+                    toast(getString(R.string.debug_tests_off_done));
+                    show();
+                }));
+        reset.addView(resetList);
+        three.addView(reset, Ui.wide(this, 0));
+        columns.addView(three, columnParams(20));
 
-        LinearLayout diagnostics = Ui.panel(this, getString(R.string.debug_group_diagnostics));
-        testRow(diagnostics, ControlsFile.DIAGNOSTICS, R.string.debug_diagnostics,
-                R.string.debug_diagnostics_note, true);
-        screen.addView(diagnostics, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
-
-        LinearLayout reports = Ui.panel(this, getString(R.string.debug_group_reports));
-        reports.addView(Ui.note(this, getString(R.string.debug_privacy)));
-        reports.addView(Ui.button(this, getString(R.string.debug_export_log), v -> chooseDebugLogDestination()),
-                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        reports.addView(Ui.button(this, getString(R.string.debug_copy_summary), v -> copyDebugSummary()),
-                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        screen.addView(reports, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
-
-        LinearLayout reset = Ui.panel(this, getString(R.string.debug_group_reset));
-        reset.addView(Ui.button(this, getString(R.string.debug_tests_off), v -> {
-            ControlsFile.clearTests(controls);
-            saveControls();
-            toast(getString(R.string.debug_tests_off_done));
-            show();
-        }));
-        screen.addView(reset, new LinearLayout.LayoutParams(
+        screen.addView(columns, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return screen;
     }
 
-    private View testRow(LinearLayout into, String key, int title, int note, boolean enabled) {
-        View row = Ui.switchRow(this, getString(title), getString(note),
-                Boolean.TRUE.equals(controls.get(key)), enabled, (b, on) -> {
+    /**
+     * One crash-test switch. The long explanation each of these has is read on a press and
+     * hold rather than under the label, which is what lets the screen hold them all at once.
+     */
+    private View testRow(LinearLayout into, String key, int title, boolean enabled) {
+        return testRow(into, key, title, enabled, false);
+    }
+
+    /** A switch that depends on the one above it: indented, and inert while that one is off. */
+    private View childRow(LinearLayout into, String key, int title, boolean enabled) {
+        return testRow(into, key, title, enabled, true);
+    }
+
+    private View testRow(LinearLayout into, String key, int title, boolean enabled, boolean child) {
+        LinearLayout row = Ui.switchRow(this, (child ? "   " : "") + getString(title), null,
+                Boolean.TRUE.equals(controls.get(key)), enabled, Ui.ROW_DENSE_DP, (b, on) -> {
                     setControl(key, on);
                     show();
                 });
-        into.addView(row, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+        row.setOnLongClickListener(v -> {
+            message(getString(title), getString(noteFor(key)));
+            return true;
+        });
+        into.addView(row);
         return row;
+    }
+
+    /** The long explanation of a crash test, shown on a press and hold. */
+    private static int noteFor(String key) {
+        switch (key) {
+            case ControlsFile.SKIP_VATS_OUTLINE: return R.string.debug_skip_vats_note;
+            case ControlsFile.VULKAN_VALIDATION: return R.string.debug_validation_note;
+            case ControlsFile.VULKAN_VALIDATION_SYNC: return R.string.debug_validation_sync_note;
+            case ControlsFile.VULKAN_VALIDATION_GPUAV: return R.string.debug_validation_gpuav_note;
+            case ControlsFile.GPU_BREADCRUMBS: return R.string.debug_breadcrumbs_note;
+            case ControlsFile.GPU_BREADCRUMB_CHUNKS: return R.string.debug_breadcrumb_chunks_note;
+            case ControlsFile.NO_SOFT_PARTICLES: return R.string.debug_no_soft_particles_note;
+            case ControlsFile.NO_PARTICLES: return R.string.debug_no_particles_note;
+            case ControlsFile.NO_DECALS: return R.string.debug_no_decals_note;
+            case ControlsFile.NO_HEAT_HAZE: return R.string.debug_no_heat_haze_note;
+            case ControlsFile.DIAGNOSTICS: return R.string.debug_diagnostics_note;
+            default: return R.string.debug_skip_pipboy_note;
+        }
     }
 
     // ---- About -------------------------------------------------------------------------
 
     private View aboutScreen() {
         LinearLayout screen = Ui.column(this);
-        screen.addView(Ui.heading(this, getString(R.string.about_title)));
-        LinearLayout panel = Ui.panel(this, null);
-        panel.addView(Ui.body(this, getString(R.string.about_disclaimer)));
-        panel.addView(Ui.note(this, getString(R.string.about_trademark)),
-                Ui.params(this, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        panel.addView(Ui.note(this, getString(R.string.about_extender)),
-                Ui.params(this, ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        panel.addView(Ui.readout(this, getString(R.string.about_build), buildChipText(), Ui.TEXT),
-                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
-        screen.addView(panel, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 0, 10));
+        screen.addView(header(getString(R.string.about_title), getString(R.string.about_detail_meta),
+                getString(R.string.legend_back_menu)), Ui.wide(this, 10));
 
-        LinearLayout licences = Ui.panel(this, getString(R.string.about_licences));
-        View first = licenceRow(licences, R.string.about_licence_nvforever, "gpl-3.0.txt");
+        LinearLayout columns = Ui.row(this);
+        columns.setGravity(Gravity.TOP);
+
+        LinearLayout words = Ui.column(this);
+        words.addView(Ui.body(this, getString(R.string.about_disclaimer)));
+        words.addView(Ui.note(this, getString(R.string.about_trademark)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+        words.addView(Ui.note(this, getString(R.string.about_extender)),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+        words.addView(Ui.micro(this, getString(R.string.about_build) + "  " + buildChipText(), Ui.INK_3),
+                Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT, 0, 10, 0));
+        columns.addView(words, columnParams(0));
+
+        LinearLayout licences = Ui.group(this, getString(R.string.about_licences));
+        LinearLayout list = Ui.list(this);
+        View first = licenceRow(list, R.string.about_licence_nvforever, "gpl-3.0.txt");
         defaultFocus = first;
-        licenceRow(licences, R.string.about_licence_validation, "vulkan-validation-apache-2.0.txt");
-        licenceRow(licences, R.string.about_licence_font, "jetbrains-mono-ofl-1.1.txt");
-        licenceRow(licences, R.string.about_licence_crates, "rust-crates.txt");
-        screen.addView(licences, new LinearLayout.LayoutParams(
+        licenceRow(list, R.string.about_licence_validation, "vulkan-validation-apache-2.0.txt");
+        licenceRow(list, R.string.about_licence_sans, "inter-ofl-1.1.txt");
+        licenceRow(list, R.string.about_licence_font, "jetbrains-mono-ofl-1.1.txt");
+        licenceRow(list, R.string.about_licence_crates, "rust-crates.txt");
+        licences.addView(list);
+        columns.addView(licences, columnParams(20));
+
+        screen.addView(columns, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return screen;
     }
 
     private View licenceRow(LinearLayout into, int title, String asset) {
-        View row = Ui.buttonWithNote(this, getString(title), getString(R.string.about_licence_read),
-                v -> showLicence(getString(title), asset));
-        into.addView(row, Ui.params(this, ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 0, 8, 0));
+        View row = Ui.chevronRow(this, getString(title), getString(R.string.about_licence_read),
+                Ui.ROW_DP, v -> showLicence(getString(title), asset));
+        into.addView(row);
         return row;
     }
 
@@ -949,12 +1441,21 @@ public class LauncherActivity extends Activity {
         } catch (IOException e) {
             text = String.valueOf(e.getMessage());
         }
-        TextView view = Ui.label(this, text, Ui.SMALL_SP, Ui.TEXT, false);
+        TextView view = Ui.micro(this, text, Ui.INK);
         int pad = Ui.dp(this, 12);
         view.setPaddingRelative(pad, pad, pad, pad);
         new AlertDialog.Builder(this)
                 .setTitle(title)
                 .setView(Ui.page(this, view))
+                .setPositiveButton(R.string.common_close, null)
+                .show();
+    }
+
+    /** One paragraph the player asked to read, and one way out of it. */
+    private void message(String title, String text) {
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setMessage(text)
                 .setPositiveButton(R.string.common_close, null)
                 .show();
     }
@@ -1118,7 +1619,7 @@ public class LauncherActivity extends Activity {
 
     // ---- starting the game -------------------------------------------------------------
 
-    /** PLAY, or CONTINUE with {@code save}: one start's save, through files/android-continue.txt. */
+    /** PLAY, or one chosen save: one start's save, through files/android-continue.txt. */
     private void startGame(File save) {
         if (!hasFilesAccess()) {
             toast(getString(R.string.error_need_access));
@@ -1219,6 +1720,19 @@ public class LauncherActivity extends Activity {
 
     private File logsDir() {
         return profiles.active().logsDir(getFilesDir());
+    }
+
+    /**
+     * The friendly front door to the debug log: say what a report is and where it goes, then
+     * write the log where the player chooses. The two raw actions stay on Advanced.
+     */
+    private void reportAProblem() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.report_row)
+                .setMessage(getString(R.string.report_where) + "\n\n" + getString(R.string.debug_privacy))
+                .setPositiveButton(R.string.report_save_log, (d, w) -> chooseDebugLogDestination())
+                .setNegativeButton(R.string.common_cancel, null)
+                .show();
     }
 
     private void chooseDebugLogDestination() {
