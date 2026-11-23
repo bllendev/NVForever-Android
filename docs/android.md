@@ -16,6 +16,14 @@ cargo install cargo-ndk
 gradle -p android assembleDebug
 ```
 
+An optional native part, libadrenotools (a Vulkan driver the player supplies on an
+Adreno phone, docs/odin-debug.md), is built by Gradle's CMake only when its sources are
+in `android/app/src/main/cpp/libadrenotools/`, which CI puts there and which is never
+committed. Without them Gradle configures no native build at all, and the APK is the APK
+it was. A local build that wants it needs the SDK's `cmake;3.22.1`, the same two downloads
+the workflow makes, and `NDK_VERSION` set to the installed NDK (CI sets it; without it
+Gradle asks for the plugin's own default NDK version instead).
+
 The app is `android/app/build/outputs/apk/debug/app-debug.apk`. Gradle compiles
 the release Rust library before packaging it. `-PprebuiltRust` can skip that
 step when the matching library is already in `app/src/main/jniLibs/arm64-v8a/`.
