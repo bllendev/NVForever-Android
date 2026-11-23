@@ -142,7 +142,7 @@
     <string name="settings_driver_system_note">El controlador con el que vino tu teléfono.</string>
     <string name="settings_driver_install">Instalar un zip de controlador...</string>
     <string name="settings_driver_delete">Borrar este controlador</string>
-    <string name="settings_driver_none_note">No hay ningún controlador propio instalado. Instalar uno todavía no está hecho en esta versión.</string>
+    <string name="settings_driver_none_note">No hay ningún controlador propio instalado. El zip del controlador lo pones tú; NVForever no incluye ninguno.</string>
     <string name="settings_debug_row">Depuración</string>
     <string name="settings_debug_note">Pruebas de fallo y registros. Para informar de errores.</string>
     <string name="settings_rerun_setup">Repetir la preparación</string>

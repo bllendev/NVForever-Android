@@ -171,7 +171,7 @@
     <string name="settings_driver_system_note">The driver your phone came with.</string>
     <string name="settings_driver_install">Install driver zip...</string>
     <string name="settings_driver_delete">Delete this driver</string>
-    <string name="settings_driver_none_note">No custom driver is installed. Installing one is not built into this version yet.</string>
+    <string name="settings_driver_none_note">No custom driver is installed. A driver zip is a file you supply; NVForever ships none.</string>
     <string name="settings_debug_row">Debug</string>
     <string name="settings_debug_note">Crash tests and logs. For bug reports.</string>
     <string name="settings_rerun_setup">Re-run setup</string>
