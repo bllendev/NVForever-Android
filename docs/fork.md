@@ -52,7 +52,7 @@ path = "src/desktop.rs"
 - `src/odin/` is everything the fork adds, declared from there rather than from `main.rs`
   (the fork's own engine parts keep their files beside `main.rs`, reached with `#[path]`).
 
-`main.rs` therefore differs from upstream by one `pub mod odin;`, one changed line and two
+`main.rs` therefore differs from upstream by one `pub mod odin;`, two changed lines and two
 added calls:
 
 | hook | where | why |
@@ -61,9 +61,10 @@ added calls:
 | `odin::args()` instead of `std::env::args().collect()` | first lines of `main` | an Android activity has no argv, so the shell hands the game a command line |
 | `odin::init(&mut app);` | after `anti_lag::AntiLagInitPlugin` | what the Vulkan instance and device must be asked for *before* `DefaultPlugins`, which is where the renderer reads those settings |
 | `odin::before_run(&mut app);` | just before `app.run()` | the fork's own plugins, then the platform shell's |
+| `odin::developer_data(args.data.is_some())` instead of `args.data.is_some()` | `let developer_data` in `main` | every Android start names `--data` (the active data profile's folder) and is still a player's start, so the profile's own plugins.txt is the load order |
 
 Keep it that way. `git diff upstream/main -- engine/nvforever/src/main.rs` should stay around
-ten lines; those three regions have been touched twice each in upstream's whole history, so a
+ten lines; those four regions have been touched twice each in upstream's whole history, so a
 sync almost never has to merge anything there.
 
 New fork code goes in `src/odin/` (or in a file declared from it), never into `main.rs`'s
