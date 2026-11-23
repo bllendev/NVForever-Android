@@ -47,5 +47,8 @@ nvf-screenshot-*.png
 /android/local.properties
 /android/**/build/
 /android/**/jniLibs/
+# libadrenotools (BSD-2-Clause), downloaded at a pinned commit by CI and never committed:
+# android/app/src/main/cpp/CMakeLists.txt.
+/android/app/src/main/cpp/libadrenotools/
 *.apk
 *.keystore

@@ -6,6 +6,9 @@ plugins {
     id("com.android.application")
 }
 
+// Whether the libadrenotools sources are in place (see the externalNativeBuild block below).
+val adrenotoolsPresent = file("src/main/cpp/libadrenotools/CMakeLists.txt").exists()
+
 android {
     // The game data is read from any folder the player picks (default /storage/emulated/0/NVForever/Data).
     namespace = "org.nvforever.android"
@@ -26,6 +29,38 @@ android {
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
+    // libadrenotools and its hook libraries, for the launcher's optional "GPU driver" choice
+    // (src/main/cpp/CMakeLists.txt, docs/odin-debug.md). Its sources are never committed: CI
+    // downloads them at pinned commits into src/main/cpp/libadrenotools/ before this build
+    // runs. Without them there is no native build at all, so a local `gradle assembleDebug`
+    // works exactly as it did and the APK simply carries no libadrenotools.
+    if (adrenotoolsPresent) {
+        // The NDK AGP builds the C/C++ with. Without this AGP wants its own default version,
+        // which is not the one CI installs (NDK_VERSION in .github/workflows/odin-android.yml).
+        // It matters only here: with no native build AGP never looks for an NDK at all.
+        providers.environmentVariable("NDK_VERSION").orNull?.let { ndkVersion = it }
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
+        }
+        defaultConfig {
+            externalNativeBuild {
+                cmake {
+                    // The NDK's default for CMake, named rather than assumed: libadrenotools
+                    // and its hook library each carry their own copy, which is what the
+                    // private linker namespace the hooks live in needs.
+                    arguments += "-DANDROID_STL=c++_static"
+                    // 16 KB pages, as the engine's own library already is and as CI checks
+                    // every packaged library for. NDK 28 does this anyway; asked for by name
+                    // so the build does not depend on that staying the default.
+                    arguments += "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+                }
+            }
+        }
+    }
+
     buildTypes {
         // Both build types package the RELEASE Rust library (see cargoNdkBuild): Bevy compiled
         // without optimisation runs at a few frames per second, which tests nothing useful.
@@ -44,6 +79,8 @@ android {
     // so the libraries are extracted at install time (extractNativeLibs=true) instead of
     // being mapped straight out of the APK, which would leave that folder empty. Nothing
     // about the game changes; both libraries are 16 KB-page aligned either way.
+    // libadrenotools needs the same thing for the same reason: its hook libraries are opened
+    // by path out of that folder, and its own header says the app must package them this way.
     packaging {
         jniLibs {
             useLegacyPackaging = true
