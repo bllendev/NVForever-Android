@@ -7,15 +7,18 @@
 //!
 //! 1. `pub mod odin;`, this module;
 //! 2. [`args`] instead of `std::env::args()`, so a platform shell can hand the game a command
-//!    line of its own (an Android activity has no argv);
+//!    line of its own (an Android activity has no argv), and can pass the fork's own flags
+//!    (`--player-start`) without upstream's parser knowing them;
 //! 3. [`init`] before `DefaultPlugins` (what the Vulkan instance and device must be asked
 //!    for before the renderer exists) and [`before_run`] just before `App::run` (the fork's
-//!    own plugins, then the platform shell's).
+//!    own plugins, then the platform shell's);
+//! 4. [`developer_data`] where `main` decides whether `--data` makes this a developer run.
 //!
 //! The entry points: [`desktop`] is what the desktop binary calls, [`run`] and [`run_with`]
 //! what an Android activity calls (`nvf-android`'s `android_main`).
 
 use bevy::app::{App, AppExit};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 // The fork's engine parts stay in their own files beside main.rs, declared here rather than
@@ -54,6 +57,21 @@ pub const VULKAN_VALIDATION_DEEP_ENV: &str = "NVF_VULKAN_VALIDATION_DEEP";
 /// (`bevy::render::gpu_breadcrumbs`) as well, which is where the markers are recorded.
 pub const GPU_BREADCRUMBS_ENV: &str = "NVF_GPU_BREADCRUMBS";
 
+/// Set (anything but `0`) to say this run is a player's start even though `--data` names a
+/// game folder, so the home's own plugins.txt is the load order ([`developer_data`]). The
+/// Android shell exports it on every start, restarts included
+/// (`nvf_android::paths::set_environment`), because every Android start names `--data`: the
+/// active data profile's Data folder.
+pub const PLAYER_START_ENV: &str = "NVF_PLAYER_START";
+
+/// The command line's form of [`PLAYER_START_ENV`], which the Android launcher writes into
+/// the line it hands the game. [`args`] takes it off the line again: it is the fork's own
+/// flag, and upstream's parser knows nothing of it.
+pub const PLAYER_START_FLAG: &str = "--player-start";
+
+/// Whether [`PLAYER_START_FLAG`] was on the line [`args`] handed the game.
+static PLAYER_START: AtomicBool = AtomicBool::new(false);
+
 /// The command line [`run`] was given, read once by [`args`]. Unset for a desktop run, which
 /// has its own argv.
 static LINE: Mutex<Option<Vec<String>>> = Mutex::new(None);
@@ -85,10 +103,48 @@ pub fn run_with(line: Vec<String>, extend: impl FnOnce(&mut App) + Send + 'stati
 }
 
 /// The command line the run was started with: the one [`run`] was given, else this process's
-/// own (a desktop run). Called by `main` before anything is parsed.
+/// own (a desktop run), without the fork's own flags. Called by `main` before anything is
+/// parsed.
 pub(crate) fn args() -> Vec<String> {
     let line = LINE.lock().expect("the engine starts once, from one thread").take();
-    line.unwrap_or_else(|| std::env::args().collect())
+    let (line, player_start) = split_player_start(line.unwrap_or_else(|| std::env::args().collect()));
+    if player_start {
+        PLAYER_START.store(true, Ordering::Relaxed);
+    }
+    line
+}
+
+/// `line` without [`PLAYER_START_FLAG`], and whether it was there.
+fn split_player_start(line: Vec<String>) -> (Vec<String>, bool) {
+    let mut found = false;
+    let kept = line
+        .into_iter()
+        .filter(|a| {
+            found |= a == PLAYER_START_FLAG;
+            a != PLAYER_START_FLAG
+        })
+        .collect();
+    (kept, found)
+}
+
+/// Whether this run is a player's start: the flag was on the line, or the platform shell
+/// exported [`PLAYER_START_ENV`].
+pub fn player_start() -> bool {
+    PLAYER_START.load(Ordering::Relaxed) || std::env::var_os(PLAYER_START_ENV).is_some_and(|v| v != "0")
+}
+
+/// Whether this run keeps the fixed masters as its load order and reports nothing, instead
+/// of reading the home's own plugins.txt: a developer or smoke run, which is any run that
+/// names its own `--data`. A player's start is a player's start even so ([`player_start`]),
+/// which is what every Android start is: the launcher always names the active data profile's
+/// folder with `--data`, and without that no mod plugin of that profile could ever load.
+pub(crate) fn developer_data(data_given: bool) -> bool {
+    is_developer_data(data_given, player_start())
+}
+
+/// [`developer_data`] on its two answers alone.
+fn is_developer_data(data_given: bool, player_start: bool) -> bool {
+    data_given && !player_start
 }
 
 /// What must be asked of the Vulkan instance and device before `DefaultPlugins`, which is
@@ -122,5 +178,33 @@ pub(crate) fn before_run(app: &mut App) {
     let extend = EXTEND.lock().expect("the engine starts once, from one thread").take();
     if let Some(extend) = extend {
         extend(app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_developer_data, split_player_start, PLAYER_START_FLAG};
+
+    fn line(a: &[&str]) -> Vec<String> {
+        std::iter::once("nvforever").chain(a.iter().copied()).map(String::from).collect()
+    }
+
+    #[test]
+    fn the_player_start_flag_leaves_the_line_before_the_game_s_parser_sees_it() {
+        let (kept, found) = split_player_start(line(&["--play", "--data", "/d", PLAYER_START_FLAG, "--menu"]));
+        assert!(found);
+        assert_eq!(kept, line(&["--play", "--data", "/d", "--menu"]), "upstream's Args knows nothing of the flag");
+        let (kept, found) = split_player_start(line(&["--play", "--data", "/d"]));
+        assert!(!found, "a desktop start does not pass it");
+        assert_eq!(kept, line(&["--play", "--data", "/d"]));
+    }
+
+    #[test]
+    fn a_player_s_start_reads_the_home_s_own_plugin_list_under_data() {
+        // A developer or smoke run: --data alone still means the fixed masters.
+        assert!(is_developer_data(true, false), "--data alone is a developer run");
+        assert!(!is_developer_data(true, true), "--data with a player's start is one (Android's profiles)");
+        assert!(!is_developer_data(false, false), "no --data is a player's start");
+        assert!(!is_developer_data(false, true));
     }
 }
