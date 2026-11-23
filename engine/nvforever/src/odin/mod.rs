@@ -22,6 +22,29 @@ use std::sync::Mutex;
 // in it. `#[path]` so the files keep the names the docs and the log lines use.
 #[path = "../gpu_recorder/mod.rs"]
 pub mod gpu_recorder;
+#[path = "../vulkan_validation.rs"]
+pub mod vulkan_validation;
+
+/// Set (any value) to skip the Pip-Boy's hidden warm-up while a load is covered: a crash
+/// test the Android launcher offers, not a test aid (`pipboy_arm`).
+pub const NO_PIPBOY_WARM_ENV: &str = "NVF_NO_PIPBOY_WARM";
+
+/// Set (any value) to draw no V.A.T.S. part outline (no mask camera): a crash test the
+/// Android launcher offers (`vats_highlight`). V.A.T.S. itself is unchanged.
+pub const NO_VATS_OUTLINE_ENV: &str = "NVF_NO_VATS_OUTLINE";
+
+/// Set (any value) to run with the Khronos Vulkan validation layer: a crash test the Android
+/// launcher offers, much slower than a normal run (`vulkan_validation`).
+pub const VULKAN_VALIDATION_ENV: &str = "NVF_VULKAN_VALIDATION";
+
+/// What the platform shell (`nvf-android`) says it made of the validation layer's library,
+/// for the one line the run log gets (`vulkan_validation`). Unset elsewhere.
+pub const VULKAN_VALIDATION_LIB_ENV: &str = "NVF_VULKAN_VALIDATION_LIB";
+
+/// Which of the validation layer's deeper checks to ask for on top of the core ones, as a
+/// comma list of `sync` and `gpuav` (`1` is both): a crash test the Android launcher offers
+/// in two switches of its own (`vulkan_validation`). Needs the validation switch as well.
+pub const VULKAN_VALIDATION_DEEP_ENV: &str = "NVF_VULKAN_VALIDATION_DEEP";
 
 /// Set (anything but `0`) to have every render-graph node write a GPU marker before and
 /// after its work, so a lost device names the node the GPU hung in: a crash test the Android
@@ -73,6 +96,10 @@ pub(crate) fn init(app: &mut App) {
     // Nothing is enabled on a driver without it.
     let mut settings = app.world_mut().get_resource_or_init::<bevy::render::renderer::raw_vulkan_init::RawVulkanInitSettings>();
     gpu_recorder::fault::ask_for_extension(&mut settings);
+    // The validation layer's deeper checks (synchronization, GPU-assisted), asked for on the
+    // instance through VK_EXT_layer_settings. Nothing without both crash-test switches
+    // (`vulkan_validation`).
+    vulkan_validation::ask_for_layer_settings(&mut settings);
 }
 
 /// The fork's own plugins and then the platform shell's, on the configured game just before
@@ -82,6 +109,9 @@ pub(crate) fn before_run(app: &mut App) {
     // The bounded GPU flight recorder, written only when the device is lost (gpu_recorder/,
     // the Odin 3's DeviceLost). Its `finish` wants the render world, which exists by now.
     app.add_plugins(gpu_recorder::GpuRecorderPlugin);
+    // The Vulkan validation layer's crash-test switch: one startup line when it is on,
+    // nothing at all when it is off (vulkan_validation.rs).
+    app.add_plugins(vulkan_validation::VulkanValidationPlugin);
     let extend = EXTEND.lock().expect("the engine starts once, from one thread").take();
     if let Some(extend) = extend {
         extend(app);
