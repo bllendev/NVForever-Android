@@ -78,6 +78,17 @@ def main():
                 if DASHES.search(line):
                     problems.append("%s:%d: an em dash or en dash" % (rel(path), number))
 
+    # aapt2 rejects a bare apostrophe or double quote inside a string ("Invalid unicode
+    # escape sequence"), which plain XML parsing and javac never notice.
+    element = re.compile(r"<(string|item)\b[^>]*>(.*?)</\1>", re.S)
+    for path in files:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        for match in element.finditer(text):
+            if re.search(r"(?<!\\)['\"]", match.group(2)):
+                number = text.count("\n", 0, match.start()) + 1
+                problems.append("%s:%d: an unescaped ' or \" (write \\' or \\\")" % (rel(path), number))
+
     return fail(problems)
 
 
