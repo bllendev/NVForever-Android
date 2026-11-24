@@ -85,7 +85,7 @@ static DUMPED: AtomicBool = AtomicBool::new(false);
 static FAULT: OnceLock<Option<String>> = OnceLock::new();
 /// The last reading of the figures too costly to read every frame, and when it was taken.
 static SAMPLED: Mutex<(Sampled, Option<std::time::Instant>)> = Mutex::new((
-    Sampled { age_secs: None, allocated_bytes: None, reserved_bytes: None, blocks: None, allocations: None, vram_use_mb: None, rss_bytes: None, wrist_cache_bytes: None },
+    Sampled { age_secs: None, allocated_bytes: None, reserved_bytes: None, blocks: None, allocations: None, vram_use_mb: None, rss_bytes: None, wrist_cache_bytes: None, proc_mem: None },
     None,
 ));
 
@@ -175,6 +175,14 @@ impl Plugin for GpuRecorderPlugin {
     fn finish(&self, app: &mut App) {
         fault::report_start(app);
         breadcrumbs::report_start();
+        // Android: which allocator this build's allocations go to, and the first reading of
+        // the figures an out-of-memory abort is read back against (`odin::alloc`,
+        // `odin::proc_mem`). Nothing is read or said on any other platform.
+        #[cfg(target_os = "android")]
+        {
+            let mem = crate::odin::proc_mem::sample().map_or_else(String::new, |m| format!("; {}", m.text()));
+            info!("android memory: this build's allocator is {}{mem}", crate::odin::alloc::NAME);
+        }
     }
 }
 
@@ -268,6 +276,10 @@ fn record(
         // atomic loads, once every SUMMARY_SECS.
         rss_bytes: rss::rss_bytes(),
         wrist_cache_bytes: Some(nvf_play::wrist_local::cache_bytes()),
+        // Android only: the mappings against their limit, the allocator's own figures and
+        // the resident set's two parts (`odin::proc_mem`). Two small /proc reads and one
+        // pass over /proc/self/maps, once every SUMMARY_SECS; nothing at all elsewhere.
+        proc_mem: crate::odin::proc_mem::sample(),
     };
     if let Ok(mut held) = SAMPLED.try_lock() {
         *held = (sampled, Some(std::time::Instant::now()));

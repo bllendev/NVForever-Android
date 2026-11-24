@@ -47,3 +47,8 @@ blake3 = { version = "1", features = ["pure"] }
 default = ["native-activity"]
 native-activity = ["bevy/android-native-activity"]
 game-activity = ["bevy/android-game-activity"]
+# The allocator experiment (nvforever's odin/alloc.rs, docs/odin-debug.md): the game's
+# allocations go to mimalloc instead of bionic's Scudo. `#[global_allocator]` is resolved at
+# link time, so this is a build choice and there is no launcher switch for it. Off in CI until
+# a real aarch64-linux-android build of it has been seen to finish (mimalloc compiles C).
+odin-mimalloc = ["nvforever/odin-mimalloc"]

@@ -27,6 +27,11 @@ pub struct Sampled {
     /// (`nvf_play::wrist_local::cache_bytes`): the outline grids and the pictures its
     /// screen wears, the one part of the glance that holds anything of a size.
     pub wrist_cache_bytes: Option<u64>,
+    /// What the process says of its own memory on Android (`odin::proc_mem`): the address
+    /// space and resident set, the mappings against `vm.max_map_count`, and the allocator's
+    /// own figures. `None` everywhere else. The out-of-memory abort of 2026-11-24 failed a
+    /// 64 KB allocation with 10 GB of the phone free, which only these can explain.
+    pub proc_mem: Option<crate::odin::proc_mem::ProcMem>,
 }
 
 pub(super) const MB: f64 = 1024.0 * 1024.0;
@@ -52,6 +57,11 @@ impl Sampled {
         }
         if let Some(wrist) = self.wrist_cache_bytes.filter(|&b| b > 0) {
             parts.push(format!("wrist caches {:.1} MB", mb(wrist)));
+        }
+        // Android's own figures last: they are the longest, and they are the ones an
+        // out-of-memory abort is read back against (`odin::proc_mem`).
+        if let Some(text) = self.proc_mem.as_ref().map(crate::odin::proc_mem::ProcMem::text).filter(|t| !t.is_empty()) {
+            parts.push(text);
         }
         if parts.is_empty() {
             return String::new();

@@ -94,6 +94,108 @@ independent of the breadcrumbs and of each other.
 | No decals | `no-decals true` | `NVF_NO_DECALS=1` | No decal is placed (blood, bullet holes). The shots and their impacts are unchanged. |
 | No heat haze | `no-heat-haze true` | `NVF_NO_HEAT_HAZE=1` | The heat-haze pass records nothing. It is a post-process pass, not a transparent draw, and is off in every preset anyway. |
 
+## Running out of memory: what the run log now says
+
+The owner's session of 2026-11-24 (`0.8.1-odin.31`) aborted after about three minutes of play
+at Primm at night with `out of memory: an allocation of 67600 bytes failed`, then 47,488,
+65,536 and 65,536 bytes. The phone has 15 GB of RAM and about 10 GB of it was free, so this
+was **not** the machine running out of memory. The process's resident memory had climbed
+2,583 -> 3,993 MB over those three minutes and never once fallen, while the GPU allocator's
+own figures went 685 -> 1,606 -> 784 MB: it gave 820 MB of blocks back and the process's
+resident memory did not move.
+
+A 64 KB allocation that fails with 10 GB free has a short list of causes, and the run log
+could not tell them apart, so every run now carries the figures that can. They are free
+(three small `/proc` reads and one pass over `/proc/self/maps`, once every ten seconds) and
+there is no switch for them.
+
+- **The mapping limit.** Android's allocator (Scudo) serves anything over its largest primary
+  size class from its secondary allocator, which `mmap`s each allocation with guard pages of
+  its own; the graphics driver maps its buffers and every library and archive is mapped too.
+  `vm.max_map_count` (65,530 by default) is a hard ceiling on the lot, and the `mmap` that
+  crosses it fails however much memory is free. The summary now counts the lines of
+  `/proc/self/maps` against that number.
+- **The allocator's own arenas.** `mallinfo`'s `uordblks` (handed out) and `hblkhd` (mapped)
+  say whether the memory is in use or merely held.
+- **Where the resident memory sits.** `/proc/self/status`'s `VmSize`, `VmRSS`, `RssAnon` and
+  `RssFile`: anonymous memory is the heap's and the driver's, file-backed is the mapped
+  libraries and archives.
+
+Engine code: `engine/nvforever/src/odin/proc_mem.rs`, with one line of upstream's `crash.rs`
+calling it. Nothing is read or written on Windows or the desktop.
+
+### The ten-second summary line
+
+The recorder's existing line gains one clause at its end, for example:
+
+```
+gpu recorder: last 128 frames: 24.6 ms mean, 85.1 ms worst; uploads 10435 writes, 82.5 MB;
+pipelines busy at most 0; readbacks at most 2; ran ao-lighting; gpu allocated 844 MB,
+reserved 1235 MB in 22 blocks, 3441 live allocations; resident 3993 MB; wrist caches 4.8 MB;
+VmSize 9122 MB, VmRSS 3993 MB (anon 3310 MB, file 683 MB); 48213 mappings of 65530;
+malloc in use 1420 MB, mapped 1902 MB (read 0.0 s ago)
+```
+
+(one line in the log; wrapped here). One line at the start says which allocator the build
+uses and gives the first reading:
+
+```
+android memory: this build's allocator is the system's (bionic's Scudo); VmSize 8140 MB,
+VmRSS 2054 MB (anon 1455 MB, file 599 MB); 12033 mappings of 65530; malloc in use 701 MB,
+mapped 992 MB
+```
+
+### The dump an allocation failure writes
+
+The first allocation that fails writes this under the `out of memory` line, in the same run
+log the launcher's **Export debug log** carries. It allocates nothing: the buffers and the
+group table are in place before the failure, the files are read with `open`/`read`/`close`
+rather than `std::fs` (whose path handling allocates), and each line goes straight into the
+log's existing buffer.
+
+```
+20261124-014240 ERROR nvforever::crash: out of memory: an allocation of 67600 bytes failed (…)
+android memory: an allocation of 67600 bytes failed; this process's own memory follows
+android memory: VmSize 9122 MB, VmRSS 3993 MB (anon 3310 MB, file 683 MB)
+android memory: 64997 mappings, 99 % of the 65530 this process may have (/proc/sys/vm/max_map_count): an mmap past that fails however much memory is free
+android memory: mallinfo: 1420 MB handed out, 1902 MB mapped by the allocator (uordblks, hblkhd)
+android memory: /proc/self/maps by name, the 25 with the most mappings first (64997 mappings, 11204 MB in all):
+android memory:     48213      1507 MB  [anon:scudo:secondary]
+android memory:     12044      3310 MB  [anon:scudo:primary]
+android memory:      3102      2904 MB  /dev/kgsl* (the graphics driver)
+android memory:       812       683 MB  Fallout - Textures.bsa
+android memory:       634        44 MB  libnvf_android.so
+android memory:       192        12 MB  (unnamed)
+android memory:        64        28 MB  (every further name, past the 64 the dump keeps apart)
+```
+
+The counts are what matter: that line is how the next abort says whether it was the mapping
+limit, and which kind of mapping used it up. The sizes say where the resident memory went.
+
+## Crash test: another memory allocator (a build choice, off)
+
+If the mappings turn out to be the allocator's, the fix is a different allocator. That cannot
+be a launcher switch: `#[global_allocator]` is resolved when the library is linked, so a run
+cannot change its allocator, and there is no file key and no environment variable for it.
+It is the cargo feature **`odin-mimalloc`** on `nvf-android` instead (which turns on
+`nvforever/odin-mimalloc`), and what it changes is the allocator upstream's
+`crash::SaysWhenEmpty` wraps: bionic's Scudo by default, [mimalloc](https://github.com/microsoft/mimalloc)
+(MIT) with the feature. mimalloc takes its memory in large arenas and hands pieces of them
+out, so the same play would make orders of magnitude fewer mappings. Engine code:
+`engine/nvforever/src/odin/alloc.rs`.
+
+**It is off in every build, CI's included, and has never been compiled.** mimalloc builds a C
+library, so it needs the NDK's compiler for `aarch64-linux-android`; there was no NDK on the
+machine this was written on, so no real build of it has been seen to finish. Before turning it
+on in `.github/workflows/odin-android.yml`, run
+
+```
+cargo build -p nvf-android --target aarch64-linux-android --features odin-mimalloc --release
+```
+
+with `ANDROID_NDK_HOME` set, and only then. The startup line above says which allocator a
+build actually has, so an APK can never be mistaken for the other one.
+
 ## Iteration
 
 - Pushing `odin/**` builds an APK and uploads a GitHub Actions artifact; it does not publish a release. `odin-v*` tags build, verify and publish a GitHub prerelease. Create each new tag from the tested commit, never move a published tag.
