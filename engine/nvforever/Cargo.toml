@@ -116,8 +116,14 @@ libc = "0.2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # The page size behind /proc/self/statm's resident pages (gpu_recorder/rss.rs): sysconf,
-# as proc(5) says to read it. The same version the Linux build already takes.
+# as proc(5) says to read it; and the /proc reads, mallinfo and the mapping count behind
+# odin/proc_mem.rs. The same version the Linux build already takes.
 libc = "0.2"
+# Only with the `odin-mimalloc` feature, which no build turns on yet (odin/alloc.rs,
+# docs/odin-debug.md): mimalloc instead of bionic's Scudo as the allocator
+# `crash::SaysWhenEmpty` wraps, to see whether the mappings a long session makes are
+# Scudo's. MIT (mimalloc and libmimalloc-sys; the vendored mimalloc C source is MIT).
+mimalloc = { version = "0.1", optional = true }
 
 [build-dependencies]
 # The program icon in the Windows executable (build.rs); MIT.
@@ -141,3 +147,8 @@ profile = ["bevy/trace", "fnv-phys/solver-timers"]
 tracy = ["profile", "bevy/trace_tracy", "dep:tracy-client"]
 # Tracy with every allocation tracked too (slower).
 tracy-memory = ["tracy", "bevy/trace_tracy_memory"]
+# The fork's allocator experiment (odin/alloc.rs, docs/odin-debug.md): on Android the game's
+# allocations go to mimalloc instead of bionic's Scudo. Nothing on any other target. Off in
+# every build, CI's included, until a real aarch64-linux-android build of it has been seen to
+# finish: mimalloc compiles C, so it needs the NDK's compiler.
+odin-mimalloc = ["dep:mimalloc"]

@@ -26,6 +26,15 @@ use std::sync::Mutex;
 // beside main.rs.
 pub mod gpu_driver;
 
+// Which allocator upstream's `crash::SaysWhenEmpty` wraps: the system's, or mimalloc in an
+// `odin-mimalloc` build of the Android library (an experiment, off by default).
+pub mod alloc;
+
+// What this process's own memory is doing on Android (the mappings against their limit, the
+// allocator's figures, /proc/self/status) and the dump an allocation failure writes.
+// Fork-only code, so it lives here rather than beside main.rs.
+pub mod proc_mem;
+
 // The fork's engine parts stay in their own files beside main.rs, declared here rather than
 // in it. `#[path]` so the files keep the names the docs and the log lines use.
 #[path = "../gpu_recorder/mod.rs"]

@@ -331,13 +331,19 @@ static ALLOC_FAILS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32:
 /// Rust aborts when an allocation fails and its caller cannot go on: on Windows that is a
 /// fail-fast, which no exception filter sees (native_crash.rs), so the run log just stopped.
 /// Rust's own "memory allocation of N bytes failed" goes to the console only.
+///
+/// What it wraps is `odin::alloc::BACKEND`: the system's allocator everywhere, or mimalloc
+/// in an `odin-mimalloc` build of the Android library (the fork's experiment, off by default).
 pub struct SaysWhenEmpty;
 
-// SAFETY: every call goes to the system allocator unchanged; a null answer is only noted.
+/// The allocator every call is handed to (`odin::alloc`).
+use crate::odin::alloc::BACKEND;
+
+// SAFETY: every call goes to the backing allocator unchanged; a null answer is only noted.
 unsafe impl std::alloc::GlobalAlloc for SaysWhenEmpty {
     unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
-        // SAFETY: the caller's contract is System's.
-        let p = unsafe { std::alloc::System.alloc(layout) };
+        // SAFETY: the caller's contract is the backing allocator's.
+        let p = unsafe { BACKEND.alloc(layout) };
         if p.is_null() {
             alloc_failed(layout.size());
         }
@@ -345,13 +351,13 @@ unsafe impl std::alloc::GlobalAlloc for SaysWhenEmpty {
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
-        // SAFETY: the caller's contract is System's.
-        unsafe { std::alloc::System.dealloc(ptr, layout) }
+        // SAFETY: the caller's contract is the backing allocator's.
+        unsafe { BACKEND.dealloc(ptr, layout) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
-        // SAFETY: the caller's contract is System's.
-        let p = unsafe { std::alloc::System.alloc_zeroed(layout) };
+        // SAFETY: the caller's contract is the backing allocator's.
+        let p = unsafe { BACKEND.alloc_zeroed(layout) };
         if p.is_null() {
             alloc_failed(layout.size());
         }
@@ -359,8 +365,8 @@ unsafe impl std::alloc::GlobalAlloc for SaysWhenEmpty {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
-        // SAFETY: the caller's contract is System's.
-        let p = unsafe { std::alloc::System.realloc(ptr, layout, new_size) };
+        // SAFETY: the caller's contract is the backing allocator's.
+        let p = unsafe { BACKEND.realloc(ptr, layout, new_size) };
         if p.is_null() {
             alloc_failed(new_size);
         }
@@ -388,6 +394,11 @@ fn alloc_failed(size: usize) {
             s / 60 % 60,
             s % 60
         );
+        // The Android fork: once, what this process's own memory was doing when the first
+        // allocation failed (the mappings against vm.max_map_count, the allocator's figures,
+        // /proc/self/maps grouped by name). Nothing off Android, and nothing that allocates:
+        // there is no memory left to allocate with (`odin::proc_mem`).
+        crate::odin::proc_mem::dump_once(f, size);
         let _ = f.flush();
     }
 }

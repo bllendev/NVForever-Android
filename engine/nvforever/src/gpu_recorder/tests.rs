@@ -86,6 +86,16 @@ fn sampled() -> Sampled {
         vram_use_mb: Some((1420, 1520)),
         rss_bytes: Some(2390 * MB),
         wrist_cache_bytes: Some(3 * MB / 2),
+        proc_mem: Some(crate::odin::proc_mem::ProcMem {
+            vm_size_kb: Some(9_340_928),
+            vm_rss_kb: Some(2_447_360),
+            rss_anon_kb: Some(1_748_992),
+            rss_file_kb: Some(698_368),
+            maps: Some(48_213),
+            max_maps: Some(65_530),
+            uordblks: Some(1_489_076_224),
+            hblkhd: Some(1_994_391_552),
+        }),
     }
 }
 
@@ -99,6 +109,10 @@ fn the_sampled_figures_name_their_age_and_go_quiet_when_nothing_was_read() {
     // (the out-of-memory abort of 2026-11-22), and the glance's caches with it.
     assert!(text.contains("resident 2390 MB"), "{text}");
     assert!(text.contains("wrist caches 1.5 MB"), "{text}");
+    // Android's own figures: the mappings against vm.max_map_count are what a 64 KB
+    // allocation failing with 10 GB free is read against (`odin::proc_mem`, 2026-11-24).
+    assert!(text.contains("48213 mappings of 65530"), "{text}");
+    assert!(text.contains("malloc in use 1420 MB, mapped 1902 MB"), "{text}");
     assert_eq!(Sampled::default().text(), "", "nothing read: no clause at all");
     // Only the budget read (no Vulkan allocator report): just that part.
     let budget_only = Sampled { vram_use_mb: Some((100, 200)), ..Sampled::default() };

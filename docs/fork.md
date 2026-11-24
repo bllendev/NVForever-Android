@@ -109,7 +109,7 @@ fork files named below).
 | 23 | `engine/Cargo.lock` | the fork's crates (take upstream's lock and build, never merge it) |
 | 21 | `engine/nvf-play/src/flashlight.rs` | the glance owns a hold of the Pip-Boy key (body in `wrist_menu_key.rs`) |
 | 20 | `engine/nvf-play/src/weapon_wheel.rs` | the hotkeys give up the vertical D-pad (test in `weapon_wheel_dpad.rs`) |
-| 20 | `engine/nvforever/src/crash.rs` | the Android crash file |
+| 20 | `engine/nvforever/src/crash.rs` | the Android crash file; which allocator `SaysWhenEmpty` wraps (`odin/alloc.rs`) and the memory dump a failed allocation writes (`odin/proc_mem.rs`) |
 | 16 | `crates/nvf-settings-layout/src/lib.rs` | the fork's settings rows and their place |
 | 15 | `engine/nvforever/src/reports/mod.rs` | reports off on Android unless asked for |
 | 14 | `engine/nvforever/src/pipboy_controls.rs` | the glance's pages |
