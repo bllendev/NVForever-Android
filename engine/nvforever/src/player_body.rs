@@ -125,39 +125,10 @@ const PIPBOY_BLEND: f32 = 8.0 / 30.0;
 /// `Fallout.ini` the same].
 pub const PIPBOY_FOV: f32 = 47.0;
 
-/// The field of view the arm is drawn with for the live wrist map's glance
-/// (`crate::odin::wrist_screen`), degrees as [`PIPBOY_FOV`] counts them. The menus' 47 fills the
-/// picture with the device, which is what a menu wants; a glance keeps the road ahead in
-/// view, so the whole Pip-Boy sits in the lower left instead. The lens draws the rig
-/// across the view about the eye, so a narrow arms view throws what is off the eye's axis
-/// off the picture as well: at the menus' 47 the hand fills the screen and the device is
-/// past the left edge, at 85 the device is still cut by it, at 110 it is whole and the
-/// road ahead stays clear [design: fitted on the desktop against the vanilla Pip-Boy 3000
-/// at Goodsprings, 2026-11-21, spikes/001-live-wrist-world].
-const WRIST_FOV: f32 = 110.0;
-
-/// How far below the eye the glance holds the arm, game units: a menu puts the device in
-/// the middle of the view, a glance keeps it under the road ahead [design: fitted on the
-/// desktop at Goodsprings, 2026-11-21, spikes/001-live-wrist-world]. `NVF_WRIST_DROP`
-/// overrides it while it is being fitted.
-const WRIST_DROP: f32 = 3.0;
-
-fn wrist_drop() -> f32 {
-    std::env::var("NVF_WRIST_DROP").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(WRIST_DROP)
-}
-
-/// How far left of the eye the glance holds the arm, game units, at the Glance position
-/// row's Lower left (`nvf_play::wrist_arm::Position`, the default): the owner's first
-/// Odin photo had the device in the middle right of a 16:9 picture, over the way ahead,
-/// where the reference framing keeps it low on the left with the world clear beside it
-/// [design: the owner, 2026-11-21]. Centre is 0. `NVF_WRIST_SIDE` overrides it while it
-/// is being fitted. Fitted on the desktop at Goodsprings, 1920 × 1080: at 26 the device
-/// ran off the left edge, at 14 it sits whole in the lower left with the road ahead clear.
-const WRIST_SIDE: f32 = 14.0;
-
-fn wrist_side() -> f32 {
-    std::env::var("NVF_WRIST_SIDE").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(WRIST_SIDE)
-}
+// Where the glance holds the arm, the view it is drawn through and the frame it hangs
+// off: the fork's own (engine/nvforever/src/wrist_lens.rs, declared from `odin`;
+// docs/fork.md). Only the hooks below are in this file.
+use crate::odin::wrist_lens::{lens_at, view_frame, WRIST_FOV};
 
 /// The field of view the first-person arms and weapon are drawn with otherwise, degrees
 /// as [`PIPBOY_FOV`] [documented: `Fallout_default.ini` `fDefault1stPersonFOV=55`,
@@ -3127,31 +3098,6 @@ fn place_lens(rig: &Rig, eye: Vec3, view: Quat, k: f32, drop: f32, side: f32, tr
     }
 }
 
-/// The view's own frame in the rig's space (game axes: x east, y north, z up), looking
-/// along its +Y with +Z up — the heading turned about the world's up, then the pitch:
-/// exactly the frame the camera is given (`nvf_play::space::look_rotation`, the same two
-/// angles in Bevy's axes), so the arms' frame and the view's are one thing.
-pub fn view_frame(heading: f32, pitch: f32) -> Quat {
-    Quat::from_rotation_z(-heading) * Quat::from_rotation_x(pitch)
-}
-
-/// Where the lens node stands: at the eye, moved down the world by `drop` and along the
-/// view's own right by `side` ([`place_lens`]).
-///
-/// The frame must be the view's own. The arms were placed in the shortest turn from +Y to
-/// the look direction (`Quat::from_rotation_arc`) until 2026-11-22, which points the same
-/// way but rolls about the look by an angle that grows with the heading and the pitch, and
-/// which has no answer at all when the view faces −Y (an arbitrary perpendicular axis is
-/// chosen there). The scale across the view cannot tell ([`place_lens`]'s `diag(k, 1, k)`
-/// is the same at any roll about +Y) and `drop` is along the world's up, so ordinary play
-/// and the menus' raise never showed it; the glance's `side`, the one offset in the frame's
-/// own axes, rode the roll: turning a full circle swung the device round the picture and
-/// snapped it as the view passed south [observed: the owner's Odin clip of build map.14,
-/// where the Pip-Boy drifts across the glass through a 360 and leaves the frame].
-fn lens_at(eye: Vec3, view: Quat, drop: f32, side: f32) -> Vec3 {
-    eye - Vec3::Z * drop + view * Vec3::X * side
-}
-
 /// Pose the third-person rig with a furniture clip alone and place it at `root`
 /// (`crate::furniture`); returns the eye. The clips of one use play in different frames,
 /// so a new clip replaces the last at once instead of fading in.
@@ -3963,7 +3909,7 @@ fn drive_body(
     let pipboy = (pip.on_arm() && pip.warming.is_none()).then_some(pip.clip_time).or_else(|| wrist.as_deref().and_then(|w| w.arm_clip_time()));
     // The glance's own raise, where it is the one holding the arm (the menus' is not it):
     // how far the device is up, 0 to 1. It holds the arm rigidly to the view, so the sway
-    // is faded out with it (`view_sway::faded`) and the device sits where the view puts it
+    // is faded out with it (`odin::sway_fade`) and the device sits where the view puts it
     // (`lens_at`) [design: the owner's Odin feedback on map.14, 2026-11-22].
     let glance = match (pip.on_arm() && pip.warming.is_none(), pipboy) {
         (false, Some(t)) => pipboy_ease(t),
@@ -4027,7 +3973,7 @@ fn drive_body(
     // While the glance holds the arm it is the view's, rigidly: no lag, no bob and nothing
     // to catch up when a turn stops. Eased in and out with its raise, so the arm still
     // comes up and goes down smoothly.
-    let sway = crate::view_sway::faded(sway, glance);
+    let sway = crate::odin::sway_fade::faded(sway, glance);
     let mut moved = [sway != SwayPose::NONE, false];
     // The head bob in first person moves the whole arms rig, camera node, arms and
     // weapon together (`head_bob.rs`).
@@ -4196,9 +4142,9 @@ fn drive_body(
         let view = view_frame(player.heading, player.pitch);
         // The glance holds the arm lower than a menu would and, unless the player asked
         // for Centre, over to the left, so the way ahead is read beside the device
-        // (`WRIST_DROP`, `WRIST_SIDE`, `wrist_arm::Position`).
+        // (`odin::wrist_lens::offsets`, `wrist_arm::Position`).
         let centred = wrist.as_deref().is_some_and(|w| w.centred());
-        let (drop, side) = (wrist_drop() * glance, if centred { 0.0 } else { -wrist_side() * glance });
+        let (drop, side) = crate::odin::wrist_lens::offsets(glance, centred);
         place_lens(f, eye, view, k, drop, side, &mut transforms);
         lens_k = k;
     }
@@ -4394,59 +4340,6 @@ fn drive_body(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The arms' frame is the view's own: it looks where the view looks and its right is
-    /// the view's right, at every heading and pitch, and it turns smoothly all the way
-    /// round. (`Quat::from_rotation_arc`, which placed them until 2026-11-22, points the
-    /// same way but rolls about the look — and south, where the view faces −Y, it has no
-    /// answer at all.)
-    #[test]
-    fn the_arms_frame_is_the_views_own_the_whole_way_round() {
-        let turns = (0..=72).map(|i| i as f32 * std::f32::consts::TAU / 72.0);
-        for pitch in [-1.2, -0.35, 0.0, 0.35, 1.2] {
-            for heading in turns.clone() {
-                let view = view_frame(heading, pitch);
-                // It looks where the view looks.
-                let look = Vec3::from_array(nvf_play::space::look_dir(heading, pitch));
-                assert!((view * Vec3::Y).distance(look) < 1e-5, "{heading} {pitch}: {} against {look}", view * Vec3::Y);
-                // Its right is the heading's right, level with the world whatever the pitch:
-                // what the camera itself calls right (`space::look_rotation`).
-                let right = Vec3::new(heading.cos(), -heading.sin(), 0.0);
-                assert!((view * Vec3::X).distance(right) < 1e-5, "{heading} {pitch}: {} against {right}", view * Vec3::X);
-            }
-        }
-    }
-
-    /// The glance's device sits in the same place in the picture at every heading: its
-    /// drop and its side offset are in the view's own frame, so a full turn moves it not at
-    /// all and nothing jumps as the view passes south [the owner's Odin clip, map.14].
-    #[test]
-    fn the_glances_device_keeps_its_place_in_the_picture_through_a_full_turn() {
-        let eye = Vec3::new(120.0, -40.0, 96.0);
-        let (drop, side) = (WRIST_DROP, -WRIST_SIDE);
-        for pitch in [-0.6, 0.0, 0.6] {
-            let mut was: Option<Vec3> = None;
-            for i in 0..=360 {
-                let heading = i as f32 * std::f32::consts::TAU / 360.0;
-                let view = view_frame(heading, pitch);
-                // Where the lens node stands, read in the view's own frame: the same offset
-                // from the eye at every heading.
-                let seen = view.inverse() * (lens_at(eye, view, drop, side) - eye);
-                let want = view.inverse() * (-Vec3::Z * drop) + Vec3::X * side;
-                assert!(seen.distance(want) < 1e-4, "{heading}: {seen} against {want}");
-                if let Some(was) = was {
-                    // And it never jumps: a degree of turn moves it a hair at the most.
-                    assert!(seen.distance(was) < 1e-3, "{heading}: it jumped from {was} to {seen}");
-                }
-                was = Some(seen);
-            }
-        }
-        // With no glance up (the menus' raise, ordinary play) the node is the eye itself,
-        // whatever the frame: nothing of this touches them.
-        for heading in [0.0, 1.0, std::f32::consts::PI] {
-            assert_eq!(lens_at(eye, view_frame(heading, 0.2), 0.0, 0.0), eye);
-        }
-    }
 
     #[test]
     fn the_hand_over_sets_off_softly_and_ends_at_rest() {
