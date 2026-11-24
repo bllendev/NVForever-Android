@@ -999,32 +999,11 @@ fn spawn_row<'a>(p: &'a mut ChildSpawnerCommands, bar: Bar, x: f32, y: f32, widt
     p.spawn((PipRow { bar, color, width, count }, at(x, y, width, TICK.y)))
 }
 
-/// One of the four meters the Glance's **HUD on the Pip-Boy** row takes off the screen
-/// and leaves to the device's own pages (`crate::wrist_hud`): the health bar and its
-/// label, the action points bar and its label, the weapon's condition row, the ammo
-/// counter. The brackets, the compass, the crosshair and the messages are not among them
-/// — only the meters the Pip-Boy's own STATUS page shows [design: the owner, 2026-11-21].
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum MeterKind {
-    Hp,
-    Ap,
-    Cnd,
-    Ammo,
-}
-
-impl MeterKind {
-    /// The four, in the order `crate::wrist_hud` keeps their flashes in.
-    pub const ALL: [MeterKind; 4] = [MeterKind::Hp, MeterKind::Ap, MeterKind::Cnd, MeterKind::Ammo];
-
-    pub fn at(self) -> usize {
-        self as usize
-    }
-}
-
-/// The root of a meter's own nodes, so one row can be hidden without the piece it stands
-/// in (the compass shares the health piece, the brackets frame both).
-#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Meter(pub MeterKind);
+// Which meter each of the HUD's nodes below belongs to, so the fork's live wrist map can
+// take the four the Pip-Boy's own pages show off the screen (`crate::wrist_hud`). The two
+// are the fork's own (engine/nvf-play/src/wrist_meters.rs, docs/fork.md), re-exported here
+// so `hud::Meter` stays the name the drawers use.
+pub use crate::wrist_meters::{Meter, MeterKind};
 
 /// A bracket: the game's picture `x` right of its piece's corner, or plain lines where its
 /// lines are.

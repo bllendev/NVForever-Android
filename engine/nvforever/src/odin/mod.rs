@@ -30,8 +30,12 @@ pub mod gpu_driver;
 // in it. `#[path]` so the files keep the names the docs and the log lines use.
 #[path = "../gpu_recorder/mod.rs"]
 pub mod gpu_recorder;
+#[path = "../sway_fade.rs"]
+pub mod sway_fade;
 #[path = "../vulkan_validation.rs"]
 pub mod vulkan_validation;
+#[path = "../wrist_lens.rs"]
+pub mod wrist_lens;
 #[path = "../wrist_screen.rs"]
 pub mod wrist_screen;
 
