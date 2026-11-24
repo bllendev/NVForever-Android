@@ -19,6 +19,14 @@ never as a long-lived merge.
 7. `feat(wrist): a live glance at the Pip-Boy: its map, its pages and the HUD on it`
 8. `feat(hud): a Hide HUD part that keeps Quick Loot, on by default`
 9. `ci: keep the fork rebased on upstream NVForever`
+10. `feat(android): data profiles in the engine, and mods can load at last`
+11. `feat(android): the launcher rewritten, with data profiles and a hidden Debug screen`
+12. `diag(odin): breadcrumbs inside the transparent pass, and five crash-test switches`
+13. `feat(android): the renderer can start on a Vulkan driver the player supplied`
+14. `build(android): Gradle and CI build libadrenotools and its hook libraries`
+15. `feat(android): GpuDrivers, the real body behind the launcher's Graphics driver row`
+16. `docs(android): the custom GPU driver, its licences and two smoke scenarios`
+17. `refactor(fork): fork logic out of upstream files, into fork-owned modules`
 
 `git log --oneline upstream/main..main` is the live list. Keep it a stack: new work is a
 commit on top, not a merge of upstream into it.
@@ -70,6 +78,50 @@ sync almost never has to merge anything there.
 New fork code goes in `src/odin/` (or in a file declared from it), never into `main.rs`'s
 `mod` list or plugin chains. A fork change to an *existing* upstream file is fine: those
 conflicts are small and local.
+
+## Conflict hotspots
+
+The upstream files the stack still edits, by how many lines of them it changes
+(`git diff --stat upstream/main..HEAD -- engine crates`, leaving out `src/odin/`, which is
+ours). The longer the entry, the likelier a sync has to merge it by hand: when one grows,
+move its body into a fork-owned file and leave a hook, as the sync of 2026-11-23 did (the
+fork files named below).
+
+| lines | file | what the fork does there |
+| ---: | --- | --- |
+| 88 | `engine/vendor/bevy_render/src/renderer/render_context.rs` | the GPU flight recorder's breadcrumbs round every graph node |
+| 79 | `engine/vendor/wgpu-hal/src/vulkan/instance.rs` | a Vulkan driver the player supplied (libadrenotools), the validation layer |
+| 67 | `engine/nvf-play/src/quick_loot.rs` | the list's D-pad scrolling and Keep Quick Loot (body in `quick_loot_dpad.rs`) |
+| 66 | `engine/nvforever/src/player_body.rs` | the glance's hold of the arm (body in `wrist_lens.rs`, `sway_fade.rs`) |
+| 65 | `engine/vendor/README.md` | why winit, wgpu-hal and bevy_render are patched here |
+| 52 | `engine/nvforever/src/handoff.rs` | Android has no second process to hand off to |
+| 49 | `engine/nvf-assets/src/nif_material.rs` | the crash tests: no soft particles, no decals, no heat haze |
+| 43 | `engine/nvf-play/src/bindings.rs` | the Glance at Pip-Boy control, `bound`, the pad-allowing presses |
+| 42 | `engine/nvf-play/src/hud.rs` | the meter tags the glance hides (bodies in `wrist_meters.rs`) |
+| 41 | `engine/nvforever/Cargo.toml` | the library target, the Android dependencies |
+| 40 | `engine/vendor/bevy_render/src/renderer/mod.rs` | readback attribution and the device-lost report |
+| 39 | `engine/nvf-play/src/pipboy/data/outline.rs` | the local map's outline for the glance |
+| 36 | `engine/nvf-play/src/pipboy/data.rs` | the glance reads the map pages without the menus |
+| 34 | `engine/vendor/bevy_render/src/gpu_readback.rs` | which readback a stall belongs to |
+| 26 | `engine/nvf-play/src/tweaks.rs` | Hide HUD Key: Keep Quick Loot |
+| 24 | `engine/nvforever/src/reports/upload.rs` | Android's own upload path |
+| 23 | `engine/nvf-play/src/settings_layout.rs` | the fork's rows in the two counted lists |
+| 23 | `engine/Cargo.lock` | the fork's crates (take upstream's lock and build, never merge it) |
+| 21 | `engine/nvf-play/src/flashlight.rs` | the glance owns a hold of the Pip-Boy key (body in `wrist_menu_key.rs`) |
+| 20 | `engine/nvf-play/src/weapon_wheel.rs` | the hotkeys give up the vertical D-pad (test in `weapon_wheel_dpad.rs`) |
+| 20 | `engine/nvforever/src/crash.rs` | the Android crash file |
+| 16 | `crates/nvf-settings-layout/src/lib.rs` | the fork's settings rows and their place |
+| 15 | `engine/nvforever/src/reports/mod.rs` | reports off on Android unless asked for |
+| 14 | `engine/nvforever/src/pipboy_controls.rs` | the glance's pages |
+| 11 | `engine/nvforever/src/main.rs` | the five hooks of the table above |
+| 11 | `engine/nvf-play/src/lib.rs` | the fork's modules and their plugins |
+
+The rest are ten lines or fewer each: `particles.rs`, `decals.rs`, `effect_particles.rs`,
+`reflection.rs`, `vats_highlight.rs`, `dlss/mod.rs`, `heat_haze.rs`, `terrain_shadows.rs`,
+`ssao.rs`, `sun_heightfield.rs`, `minimap_render.rs`, `cloud_shadows.rs`, `pipboy_arm.rs`,
+`reticle.rs`, `player.rs`, `interface.rs`, `pipboy/data/model.rs`, the two `nif_surface_blend`
+and `nif_material.wesl` lines, `engine/Cargo.toml`, `crates/nvf-dlss-files/Cargo.toml` and
+`engine/nvf-assets/src/lib.rs` (mostly a crash-test switch or one `cfg` for Android).
 
 ### Starting the game
 
