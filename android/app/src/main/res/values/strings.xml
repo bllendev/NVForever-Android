@@ -257,7 +257,7 @@
 
     <!-- Settings. -->
     <string name="settings_title">Settings</string>
-    <string name="settings_note">Graphics, audio and key bindings are the game's own: Pause, then Settings.</string>
+    <string name="settings_note">Graphics, audio and key bindings are the game\'s own: Pause, then Settings.</string>
     <string name="settings_group_controls">Controls</string>
     <string name="settings_group_device">Device</string>
     <string name="settings_group_data">Data</string>
