@@ -9,11 +9,20 @@
 //!
 //! | upstream file | hook | what it reaches |
 //! | --- | --- | --- |
-//! | `main.rs` | `mod odin;` | this module |
+//! | `main.rs` | `pub mod odin;` | this module |
+//! | `main.rs` | the Android plugin list | [`mem_log::MemoryLogPlugin`] |
 //! | `android.rs` | the home folder's name | [`home::DIR`] |
+//! | `crash.rs` | the allocator `SaysWhenEmpty` wraps | [`alloc::BACKEND`] |
+//! | `crash.rs` | one dump when an allocation fails | [`proc_mem::dump_once`] |
 //!
 //! The Android-only parts of each module are behind `cfg(target_os = "android")`, while their
 //! parsing and their wording are plain functions, built and tested everywhere.
 
+/// Which allocator the game's allocations go to (`crash.rs`'s `SaysWhenEmpty` wraps it).
+pub mod alloc;
 /// The Android home folder's name, which the fork keeps as earlier builds left it.
 pub mod home;
+/// The memory summary line in the Android run log (added to the Android plugin list only).
+pub mod mem_log;
+/// What this process's own memory is doing, and the dump on a failed allocation.
+pub mod proc_mem;
