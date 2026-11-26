@@ -35,6 +35,10 @@ enum PluginChange { Toggle, Up, Down }
 
 /// Called by the Activity's JNI adapter. Replies contain either `data` or a visible `error`.
 pub fn request(home: &Path, text: &str, mut get: impl FnMut(&str) -> Result<String, String>) -> String {
+    // The Android fork reads the player's game folder in place instead of importing a copy
+    // of it: this makes that folder the launcher's `[Game] Path` when the launcher has none
+    // that works, and does nothing otherwise (crate::odin).
+    crate::odin::adopt(home);
     let home = EngineHome::new(home);
     let result = serde_json::from_str::<Request>(text).map_err(|e| e.to_string())
         .and_then(|r| handle(&home, r, &mut get));
