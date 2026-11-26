@@ -8,6 +8,11 @@ publish = false
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+# The Android fork's allocator experiment, passed to the engine (odin/alloc.rs). Off: the
+# published APK keeps bionic's Scudo, exactly as before.
+odin-mimalloc = ["nvforever/odin-mimalloc"]
+
 [target.'cfg(target_os = "android")'.dependencies]
 bevy = { workspace = true, features = ["android-native-activity"] }
 nvforever = { path = "../nvforever" }

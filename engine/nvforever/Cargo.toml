@@ -117,6 +117,14 @@ libc = "0.2"
 [target.'cfg(target_os = "android")'.dependencies]
 bevy = { workspace = true, features = ["android-native-activity"] }
 jni = "0.21"
+# The Android fork's memory diagnostics (odin/proc_mem.rs): open(2), read(2), close(2) and
+# mallinfo(3), because the failure path they run on has no memory to allocate a path or a
+# buffer with. A version already in the build (MIT/Apache-2.0).
+libc = "0.2"
+# The Android fork's allocator experiment (odin/alloc.rs), only in an `odin-mimalloc` build:
+# mimalloc takes its memory in large arenas instead of mapping each large allocation, which
+# is what the mapping count in the run log is there to test. Off by default; MIT.
+mimalloc = { version = "0.1", optional = true }
 
 [build-dependencies]
 # The program icon in the Windows executable (build.rs); MIT.
@@ -152,3 +160,7 @@ profile = ["bevy/trace", "fnv-phys/solver-timers"]
 tracy = ["profile", "bevy/trace_tracy", "dep:tracy-client"]
 # Tracy with every allocation tracked too (slower).
 tracy-memory = ["tracy", "bevy/trace_tracy_memory"]
+# The Android fork: the game's allocations go to mimalloc instead of bionic's Scudo
+# (odin/alloc.rs). An experiment about the mapping count, off in every build the fork
+# publishes, and never compiled yet (it builds a C library, so it needs the NDK).
+odin-mimalloc = ["dep:mimalloc"]
