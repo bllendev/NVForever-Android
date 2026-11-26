@@ -33,7 +33,24 @@
 //! /storage/emulated/0, and folders under Android/data are closed to file managers from
 //! Android 11 on.]`
 
+//! # The in-app updater
+//!
+//! Upstream's Android updater is careful and fails closed: it will not install an APK whose
+//! package name or signing certificate differs from the installed app's, and it will not
+//! download one at all without a `SHA256SUMS.txt` on the same release
+//! (`UpdatePolicy.verifyApkMetadata`, `mobile::check_update`). That is exactly right, and it
+//! means an updater pointed at upstream's releases would download an APK onto this fork's
+//! install and then delete it, because this fork is a different package signed with a
+//! different key.
+//!
+//! So on Android it asks **this** repository instead ([`RELEASES`], [`DOWNLOADS`]), which
+//! publishes `SHA256SUMS.txt` and both APKs beside it (docs/fork.md, "The release scheme").
+//! A release carries two APKs, one of them `-debug`, so [`apk_for_this_app`] keeps the two
+//! apps apart: the debug app is only ever offered the `-debug` asset, and the app the owner
+//! plays only the other. The desktop launcher is unchanged and still asks upstream.
+
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The file naming the game folder to read in place, beside the engine home in the app's
 /// private files directory. Keep the name the same as `OdinFork.DATA_PATH`.
@@ -59,6 +76,50 @@ pub fn configured_data_dir(files: &Path) -> Option<PathBuf> {
     // counts too, so the tests can use a folder of their own on any machine.
     let absolute = line.starts_with('/') || Path::new(line).is_absolute();
     (absolute && !line.contains('\0')).then(|| PathBuf::from(line))
+}
+
+/// The release list the Android app asks about updates: this fork's own.
+pub const FORK_RELEASES: &str = "https://api.github.com/repos/bllendev/NVForever-Android/releases?per_page=10";
+/// Where this fork's release assets are downloaded from.
+pub const FORK_DOWNLOADS: &str = "https://github.com/bllendev/NVForever-Android/releases/download/";
+/// Upstream's release list, which the desktop launcher keeps asking.
+pub const UPSTREAM_RELEASES: &str = "https://api.github.com/repos/LootJunkieAzza/NVForever/releases?per_page=10";
+/// Upstream's release assets, which the desktop launcher keeps asking.
+pub const UPSTREAM_DOWNLOADS: &str = "https://github.com/LootJunkieAzza/NVForever/releases/download/";
+
+/// The release list this build asks about updates (`news::RELEASES`).
+pub const RELEASES: &str = if cfg!(target_os = "android") { FORK_RELEASES } else { UPSTREAM_RELEASES };
+/// The only prefix a release asset's download URL may have (`mobile::REPO_DOWNLOADS`).
+pub const DOWNLOADS: &str = if cfg!(target_os = "android") { FORK_DOWNLOADS } else { UPSTREAM_DOWNLOADS };
+
+/// What the `-debug` application id ends with, which is how a process can tell which of the
+/// fork's two apps it is without asking Java.
+const DEBUG_SUFFIX: &str = ".debug";
+
+/// Set by [`adopt`] from the home's path, because the private files directory is under the
+/// application id and the debug variant's ends with [`DEBUG_SUFFIX`].
+static DEBUG_APP: AtomicBool = AtomicBool::new(false);
+
+/// Whether a path lies under the debug variant's app storage.
+pub fn debug_app_home(home: &Path) -> bool {
+    home.components().any(|part| part.as_os_str().to_string_lossy().ends_with(DEBUG_SUFFIX))
+}
+
+/// Whether this process is the debug app, as last seen by [`adopt`].
+pub fn debug_app() -> bool {
+    DEBUG_APP.load(Ordering::Relaxed)
+}
+
+/// Whether a release asset's file name is the APK for the app to play, or for the debug one.
+pub fn apk_matches(name: &str, debug: bool) -> bool {
+    name.to_ascii_lowercase().contains("-debug") == debug
+}
+
+/// Whether a release asset's file name is the APK for **this** app: a release carries the
+/// app to play and a `-debug` one beside it, and installing the other over this one would be
+/// refused by Android anyway (a different package name), so it is never offered.
+pub fn apk_for_this_app(name: &str) -> bool {
+    apk_matches(name, debug_app())
 }
 
 /// The game this launcher should read in place, most wanted first: the folder named in
@@ -92,11 +153,13 @@ pub enum Adopted {
     Failed(String),
 }
 
-/// The fork's one hook in `mobile::request`: make the folder this device reads in place the
-/// launcher's game folder, when the launcher has none that works.
+/// The fork's one hook in `mobile::request`: note which of the fork's two apps this is (for
+/// [`apk_for_this_app`]), and make the folder this device reads in place the launcher's game
+/// folder when the launcher has none that works.
 ///
-/// `files` is the app's private files directory, which is the engine home's parent.
+/// The home's parent is the app's private files directory.
 pub fn adopt(home: &Path) -> Adopted {
+    DEBUG_APP.store(debug_app_home(home), Ordering::Relaxed);
     let Some(files) = home.parent() else { return Adopted::Nothing };
     let config = fnv_install::EngineHome::new(home).config_file();
     let ini = std::fs::read_to_string(&config).unwrap_or_default();
@@ -131,6 +194,40 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// The Android app asks this fork's releases, because upstream's updater would refuse
+    /// upstream's APK on this package anyway; the desktop launcher keeps asking upstream.
+    #[test]
+    fn the_android_updater_asks_this_forks_releases() {
+        assert!(FORK_RELEASES.starts_with("https://api.github.com/repos/bllendev/NVForever-Android/"));
+        assert!(FORK_DOWNLOADS.starts_with("https://github.com/bllendev/NVForever-Android/releases/download/"));
+        assert!(FORK_DOWNLOADS.ends_with('/'), "a prefix every asset URL must start with");
+        let fork = cfg!(target_os = "android");
+        assert_eq!(RELEASES == FORK_RELEASES, fork);
+        assert_eq!(DOWNLOADS == FORK_DOWNLOADS, fork);
+        assert_eq!(RELEASES == UPSTREAM_RELEASES, !fork);
+        assert_eq!(DOWNLOADS == UPSTREAM_DOWNLOADS, !fork);
+        // The same release list the news falls back to (`news::RELEASES`).
+        assert_eq!(crate::news::RELEASES, RELEASES);
+    }
+
+    /// A release carries both APKs, and each of the two apps is offered only its own: the
+    /// private files directory is under the application id, so the path says which app this is.
+    #[test]
+    fn each_app_is_offered_only_its_own_apk() {
+        let play = Path::new("/data/user/0/org.nvforever.android.odin/files/NVForever");
+        let debug = Path::new("/data/user/0/org.nvforever.android.odin.debug/files/NVForever");
+        assert!(!debug_app_home(play));
+        assert!(debug_app_home(debug));
+
+        assert!(apk_matches("NVForever-0.8.1-odin.32-arm64.apk", false));
+        assert!(!apk_matches("NVForever-0.8.1-odin.32-arm64-debug.apk", false));
+        assert!(!apk_matches("NVForever-0.8.1-odin.32-arm64.apk", true));
+        assert!(apk_matches("NVForever-0.8.1-odin.32-arm64-DEBUG.apk", true), "the name's case is not the test");
+        // An app that has not been noted yet is the app to play, which is what every other
+        // test in this crate and every release before the debug variant assumes.
+        assert!(apk_for_this_app("NVForever-0.8.1-odin.32-arm64.apk"));
     }
 
     /// The one line of `data-path.txt`: space, a comment and CRLF are all ordinary in a file
