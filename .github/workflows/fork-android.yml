@@ -98,6 +98,9 @@ jobs:
             android/app/src/main/java/org/nvforever/android/OdinStorage.java \
             android/app/src/main/java/org/nvforever/android/OdinFork.java
 
+      - name: The desktop engine's Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
       - name: The fork's engine and launcher tests
         shell: bash
         run: |
