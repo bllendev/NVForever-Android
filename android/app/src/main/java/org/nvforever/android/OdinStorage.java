@@ -41,12 +41,15 @@ final class OdinStorage {
      * folder in place and cannot currently open it.
      */
     static void promptIfNeeded(Activity activity) {
-        if (!OdinFork.readsInPlace(activity.getFilesDir()) || granted(activity)) return;
+        // Asked whenever access is missing, not only when data-path.txt exists: an install that
+        // never chose a folder reads the shared default one, which needs the same access.
+        if (granted(activity)) return;
         if (Build.VERSION.SDK_INT < 30) {
             activity.requestPermissions(new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, REQUEST_LEGACY_READ);
             return;
         }
-        String folder = OdinFork.dataPath(activity.getFilesDir());
+        String chosen = OdinFork.dataPath(activity.getFilesDir());
+        String folder = chosen != null ? chosen : OdinFork.SHARED_DATA;
         new AlertDialog.Builder(activity)
             .setTitle("Allow access to your game folder")
             .setMessage("NVForever reads your game files where they are, at " + folder
