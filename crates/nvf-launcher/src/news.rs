@@ -18,7 +18,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub const SITE_NEWS: &str = "https://nv-forever.com/news.json";
-pub const RELEASES: &str = "https://api.github.com/repos/LootJunkieAzza/NVForever/releases?per_page=10";
+// The Android fork asks its own repository, because its APK is a different package signed
+// with a different key and upstream's updater rightly refuses to install it (crate::odin).
+pub const RELEASES: &str = crate::odin::RELEASES;
 pub const SITE: &str = "https://nv-forever.com";
 const CACHE_FILE: &str = "launcher-news.json";
 /// The longest a news image may be; a bigger one is left out.

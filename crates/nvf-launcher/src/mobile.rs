@@ -180,7 +180,7 @@ fn handle(home: &EngineHome, req: Request, get: &mut impl FnMut(&str) -> Result<
     }
 }
 
-const REPO_DOWNLOADS: &str = "https://github.com/LootJunkieAzza/NVForever/releases/download/";
+const REPO_DOWNLOADS: &str = crate::odin::DOWNLOADS;
 const CHECKSUMS_NAME: &str = "SHA256SUMS.txt";
 
 fn safe_component(s: &str) -> bool {
@@ -255,6 +255,8 @@ fn select_android_apk<'a>(assets: &'a [news::Asset], tag: &str) -> Option<&'a ne
             && !lower.contains("x86")
             && !lower.contains("armeabi")
             && repo_asset_url(&a.browser_download_url, tag, &a.name)
+            // The fork publishes the app to play and a `-debug` one beside it (crate::odin).
+            && crate::odin::apk_for_this_app(&lower)
     }).collect();
     let is_arm64 = |name: &str| {
         let lower = name.to_ascii_lowercase();
