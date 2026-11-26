@@ -1,0 +1,335 @@
+name: Fork Android APK
+
+# The fork's own Android build (docs/fork.md). Upstream's android.yml stays as it is and
+# keeps running; this one is what produces the APKs the owner installs, because upstream's
+# publishes neither a signed release nor an optimised native library.
+#
+# Every push and pull request builds both variants and uploads them as artifacts only.
+# A tag publishes them:
+#   android-v<version>              a release
+#   android-v<version>-test.<n>     a prerelease (so is -rc.<n>)
+# The assets are named for any ARM64 Android device, not for one handheld.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Cargo profile for the native library'
+        default: release-quick
+        type: choice
+        options: [release-quick, release]
+  push:
+    branches: ['odin/**']
+    tags: ['android-v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  # A branch push and the pull request for the same branch share this group, so the sync
+  # branch is not built twice over.
+  group: fork-android-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  controls:
+    name: Fork and launcher controls
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: fork-android-controls
+          save-if: ${{ startsWith(github.ref, 'refs/heads/odin/') }}
+
+      - name: Java 17 and the pinned Android platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35'
+
+      - name: Import, APK and fork tooling controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tools/android/tests
+          "$JAVA_HOME/bin/java" -Djava.awt.headless=true tools/android/LauncherIcons.java --check
+
+      - name: Launcher logic controls, upstream's and the fork's
+        shell: bash
+        run: |
+          set -euo pipefail
+          tests="$RUNNER_TEMP/java-tests"
+          mkdir -p "$tests"
+          "$JAVA_HOME/bin/javac" -encoding UTF-8 -d "$tests" \
+            android/app/src/main/java/org/nvforever/android/InstallConfig.java \
+            android/app/src/main/java/org/nvforever/android/OdinFork.java \
+            android/app/src/main/java/org/nvforever/android/HandoffCoordinator.java \
+            android/app/src/main/java/org/nvforever/android/LoadingState.java \
+            android/app/src/main/java/org/nvforever/android/GyroMotion.java \
+            android/app/src/main/java/org/nvforever/android/PerformanceThermals.java \
+            android/app/src/main/java/org/nvforever/android/MarkdownParser.java \
+            android/app/src/main/java/org/nvforever/android/UpdatePolicy.java \
+            android/app/src/test/java/org/nvforever/android/InstallConfigTest.java \
+            android/tests/OdinForkTest.java android/tests/HandoffCoordinatorTest.java \
+            android/tests/GyroMotionTest.java android/tests/AndroidPerformanceTest.java \
+            android/tests/MarkdownParserTest.java android/tests/UpdatePolicyTest.java
+          for control in InstallConfigTest OdinForkTest HandoffCoordinatorTest GyroMotionTest \
+                         AndroidPerformanceTest MarkdownParserTest UpdatePolicyTest; do
+            "$JAVA_HOME/bin/java" -cp "$tests" "org.nvforever.android.$control"
+          done
+
+      - name: The fork's storage prompt compiles against the platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$JAVA_HOME/bin/javac" -encoding UTF-8 -source 17 -target 17 \
+            -cp "$ANDROID_HOME/platforms/android-35/android.jar" -d "$RUNNER_TEMP/storage-check" \
+            android/app/src/main/java/org/nvforever/android/OdinStorage.java \
+            android/app/src/main/java/org/nvforever/android/OdinFork.java
+
+      - name: The fork's engine and launcher tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path engine/Cargo.toml -p nvforever --lib --locked --jobs 2 -- odin
+          cargo test -p nvf-launcher --no-default-features --features mobile --lib --locked --jobs 2
+
+  apk:
+    name: Both APKs, signed and verified
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      NDK_VERSION: '28.2.13676358'
+      BUILD_TOOLS: '35.0.1'
+      CARGO_TERM_COLOR: always
+      # The owner's installed build is versionCode 36; an APK that does not raise it cannot
+      # be installed over it, so the build refuses to publish one.
+      MIN_VERSION_CODE: '36'
+      # The certificate the fork's keystore holds. A build signed by anything else is not
+      # ours and would not install over the owner's app, so it fails here instead.
+      SIGNER_SHA256: '50ce2c81a82786f46813a83873df575fccd5c6f236fcef009e99e974324388b1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: The version this build calls itself
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/android-v* ]]; then
+            version="${GITHUB_REF_NAME#android-v}"
+            profile=release
+          else
+            # Not a tag: Gradle's own default (android/gradle.properties).
+            version=$(sed -n 's/^nvfAndroidVersionName=//p' android/gradle.properties)
+            profile=release-quick
+          fi
+          if [[ -n "${{ inputs.profile }}" ]]; then profile='${{ inputs.profile }}'; fi
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "profile=$profile" >> "$GITHUB_OUTPUT"
+          echo "Version $version, native library profile $profile" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: engine -> target-android
+          shared-key: fork-android-arm64-${{ steps.version.outputs.profile }}
+          save-if: ${{ startsWith(github.ref, 'refs/heads/odin/') }}
+
+      - name: Java 17 and the pinned Android SDK and NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' "build-tools;$BUILD_TOOLS" "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Verified Gradle 8.11.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 https://services.gradle.org/distributions/gradle-8.11.1-bin.zip --output "$RUNNER_TEMP/gradle.zip"
+          echo "f397b287023acdba1e9f6fc5ea72d22dd63669d59ed4a289a29b1a76eee151c6  $RUNNER_TEMP/gradle.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gradle-8.11.1/bin" >> "$GITHUB_PATH"
+
+      - name: Build both variants with an optimised native library
+        shell: bash
+        run: python3 tools/android/build.py --profile '${{ steps.version.outputs.profile }}' --variant both --jobs 2
+        env:
+          NVF_ANDROID_VERSION_NAME: ${{ steps.version.outputs.version }}
+          CARGO_PROFILE_RELEASE_QUICK_STRIP: symbols
+          CARGO_PROFILE_RELEASE_QUICK_DEBUG: 'false'
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+          CARGO_PROFILE_RELEASE_DEBUG: 'false'
+
+      - name: Sign both APKs with the fork's key
+        env:
+          ODIN_KEYSTORE_B64: ${{ secrets.ODIN_KEYSTORE_B64 }}
+          # The keystore the fork has always used is a PKCS#12 one whose password and alias
+          # are the Android debug defaults; the other three secrets exist so a future
+          # keystore can differ without another change here.
+          ODIN_KEYSTORE_PASSWORD: ${{ secrets.ODIN_KEYSTORE_PASSWORD }}
+          ODIN_KEY_ALIAS: ${{ secrets.ODIN_KEY_ALIAS }}
+          ODIN_KEY_PASSWORD: ${{ secrets.ODIN_KEY_PASSWORD }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$ODIN_KEYSTORE_B64"
+          ks=$(mktemp)
+          trap 'rm -f "$ks"' EXIT
+          printf '%s' "$ODIN_KEYSTORE_B64" | base64 -d > "$ks"
+          store_pass="${ODIN_KEYSTORE_PASSWORD:-android}"
+          alias="${ODIN_KEY_ALIAS:-androiddebugkey}"
+          key_pass="${ODIN_KEY_PASSWORD:-$store_pass}"
+          mkdir -p dist
+          sign() {
+            "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" sign \
+              --ks "$ks" --ks-type PKCS12 --ks-key-alias "$alias" \
+              --ks-pass "pass:$store_pass" --key-pass "pass:$key_pass" \
+              --v4-signing-enabled false --out "$2" "$1"
+          }
+          sign android/app/build/outputs/apk/release/app-release-unsigned.apk "dist/NVForever-$VERSION-arm64.apk"
+          sign android/app/build/outputs/apk/debug/app-debug.apk "dist/NVForever-$VERSION-arm64-debug.apk"
+
+      - name: Verify both packages, their signer and their 16 KB alignment
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$ANDROID_HOME/build-tools/$BUILD_TOOLS"
+          # Android 15 runs on devices with 16 KB pages, where a library whose LOAD segments
+          # are aligned to less than that cannot be mapped at all.
+          align16() {
+            readelf -lW "$1" | awk '$1 == "LOAD" { count++; if (strtonum($NF) < 16384) bad = 1 } END { exit (!count || bad) }'
+          }
+          : > dist/signer.txt
+          : > dist/package.txt
+          for variant in release debug; do
+            if [ "$variant" = release ]; then
+              apk="dist/NVForever-$VERSION-arm64.apk"
+              expected_package=org.nvforever.android.odin
+            else
+              apk="dist/NVForever-$VERSION-arm64-debug.apk"
+              expected_package=org.nvforever.android.odin.debug
+            fi
+            "$tools/zipalign" -c -P 16 4 "$apk"
+            {
+              echo "== $(basename "$apk")"
+              "$tools/apksigner" verify --verbose --print-certs "$apk"
+            } | tee -a dist/signer.txt | grep -q "SHA-256 digest: $SIGNER_SHA256"
+            badging=$("$tools/aapt2" dump badging "$apk")
+            {
+              echo "== $(basename "$apk")"
+              echo "$badging"
+            } >> dist/package.txt
+            grep -q "package: name='$expected_package'" <<< "$badging"
+            grep -q "native-code: 'arm64-v8a'" <<< "$badging"
+            code=$(sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" <<< "$badging" | head -1)
+            if [ "$code" -le "$MIN_VERSION_CODE" ]; then
+              echo "versionCode $code would not install over the owner's build ($MIN_VERSION_CODE)" >&2
+              exit 1
+            fi
+            # Upstream's own checks: ARM64 only, no game data, no LAN uploader, archive CRCs,
+            # and from this fork on, the 16 KB alignment above as well.
+            python3 tools/android/verify_apk.py "$apk" > "dist/verification-$variant.json"
+            manifest=$("$tools/aapt2" dump xmltree --file AndroidManifest.xml "$apk")
+            grep -Eq 'A: (http://schemas\.android\.com/apk/res/)?android:usesCleartextTraffic\(0x010104ec\)=false' <<< "$manifest"
+            grep -Eq 'extractNativeLibs[^=]*=(true|0xffffffff)' <<< "$manifest"
+            # Every packaged library, not only the engine's.
+            libs="$RUNNER_TEMP/libs-$variant"
+            rm -rf "$libs"
+            mkdir -p "$libs"
+            for so in $(unzip -Z1 "$apk" 'lib/*'); do
+              unzip -o -j "$apk" "$so" -d "$libs" > /dev/null
+              align16 "$libs/$(basename "$so")"
+            done
+          done
+
+      - name: Stage the licence notices this APK carries
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="dist/NVForever-$VERSION-arm64.apk"
+          for notice in LICENSE.txt LEGAL.txt THIRD-PARTY-LICENSES.txt NDK-NOTICE.txt NDK-NOTICE.toolchain.txt SOURCE.txt; do
+            unzip -p "$apk" "assets/$notice" > "dist/$notice"
+            test -s "dist/$notice"
+          done
+          cd dist
+          sha256sum NVForever-*.apk > SHA256SUMS.txt
+          cat SHA256SUMS.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: NVForever-android-arm64-${{ github.run_number }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/android-v')
+    needs: [controls, apk]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: NVForever-android-arm64-${{ github.run_number }}
+      - name: Publish the verified APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum -c SHA256SUMS.txt
+          version="${GITHUB_REF_NAME#android-v}"
+          args=(--repo "$GITHUB_REPOSITORY" --verify-tag --title "NVForever Android $version")
+          if [[ "$version" == *-test.* || "$version" == *-rc.* ]]; then args+=(--prerelease); fi
+          cat > notes.md <<'NOTES'
+          An ARM64 Android build of NVForever. It needs your own clean Fallout: New Vegas
+          Data folder and includes no game files.
+
+          Two APKs, both signed with the same key:
+
+          - the one without a suffix is the one to play.
+          - the `-debug` one installs beside it as a separate app, with its own saves, for
+            testing a build without touching the one you play.
+
+          Tested on: AYN Odin 3 (Android 15). Any other ARM64 device running Android 10 or
+          later may work and has not been tested.
+
+          Check the download against `SHA256SUMS.txt`; `signer.txt` is the signing
+          certificate and `package.txt` what both APKs declare.
+          NOTES
+          echo "" >> notes.md
+          echo "Build: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >> notes.md
+          gh release create "$GITHUB_REF_NAME" \
+            NVForever-"$version"-arm64.apk NVForever-"$version"-arm64-debug.apk \
+            SHA256SUMS.txt signer.txt package.txt \
+            LICENSE.txt LEGAL.txt THIRD-PARTY-LICENSES.txt \
+            NDK-NOTICE.txt NDK-NOTICE.toolchain.txt SOURCE.txt \
+            "${args[@]}" --notes-file notes.md

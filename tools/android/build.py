@@ -72,6 +72,11 @@ def main() -> None:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--tests", action="store_true", help="Cross-check authored engine tests (does not execute them)")
     parser.add_argument("--gradle-build-dir", type=Path, help="Optional separate Gradle output/cache directory")
+    # The Android fork publishes an optimised library in both variants: Bevy compiled at
+    # opt-level 1 runs at a few frames a second on a handheld (docs/fork.md).
+    parser.add_argument("--profile", default="android-dev", help="Cargo profile for the native library")
+    parser.add_argument("--variant", default="debug", choices=("debug", "release", "both"),
+                        help="Which APK variants Gradle assembles")
     args = parser.parse_args()
     if args.ndk is None or args.jobs < 1:
         parser.error("set ANDROID_NDK_HOME or --ndk, and a positive --jobs")
@@ -89,11 +94,14 @@ def main() -> None:
     if args.tests:
         command.append("--tests")
     if not args.check:
-        command.extend(["--profile", "android-dev"])
+        command.extend(["--profile", args.profile])
     subprocess.run(command, cwd=ROOT, env=env, check=True)
     if args.check:
         return
-    library = args.target_dir / TARGET / "android-dev/libnvf_android.so"
+    # Cargo puts the `dev` and `release` profiles in folders of those names and every other
+    # profile in a folder of its own name.
+    built = {"dev": "debug"}.get(args.profile, args.profile)
+    library = args.target_dir / TARGET / built / "libnvf_android.so"
     libraries = ROOT / "native-libs/arm64-v8a"
     libraries.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(library, libraries / library.name)
@@ -114,9 +122,14 @@ def main() -> None:
         command.extend(["--project-cache-dir", str(args.gradle_build_dir / "project-cache")])
     # Incremental APK updates can retain an obsolete native payload outside the
     # active ZIP directory. Recreate app packaging, preserving the Rust cache.
-    command.extend([":app:clean", ":app:assembleDebug"])
+    variants = ("debug", "release") if args.variant == "both" else (args.variant,)
+    command.append(":app:clean")
+    command.extend(f":app:assemble{variant.capitalize()}" for variant in variants)
     subprocess.run(command, cwd=ROOT / "android", env=env, check=True)
-    print((args.gradle_build_dir / "app" if args.gradle_build_dir else ROOT / "android/app/build") / "outputs/apk/debug/app-debug.apk")
+    outputs = (args.gradle_build_dir / "app" if args.gradle_build_dir else ROOT / "android/app/build") / "outputs/apk"
+    for variant in variants:
+        name = "app-debug.apk" if variant == "debug" else "app-release-unsigned.apk"
+        print(outputs / variant / name)
 
 
 if __name__ == "__main__":
