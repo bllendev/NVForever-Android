@@ -15,15 +15,17 @@ def explicitVersionCode = providers.environmentVariable('NVF_ANDROID_VERSION_COD
 def resolvedApplicationId = providers.gradleProperty('nvfApplicationId')
     .getOrElse('org.nvforever.android')
 def deriveVersionCode = { String name ->
-    // `-odin.<n>` is the fork's revision and counts exactly as upstream's `-android-r<n>`.
-    def m = (name =~ /^v?(\d+)\.(\d+)\.(\d+)(?:-(?:android-r|odin\.)(\d+))?/)
+    // `-odin.<n>`, `-test.<n>` and `-rc.<n>` are the fork's revisions and count exactly as
+    // upstream's `-android-r<n>`. A plain `x.y.z` release sorts after every revision of its
+    // version (999), so a release always installs over the tests that led to it.
+    def m = (name =~ /^v?(\d+)\.(\d+)\.(\d+)(-(?:android-r|odin\.|test\.|rc\.)(\d+))?/)
     if (!m.find()) {
         throw new GradleException("Cannot derive monotonic versionCode from versionName '${name}'; set NVF_ANDROID_VERSION_CODE")
     }
     int major = m.group(1) as int
     int minor = m.group(2) as int
     int patch = m.group(3) as int
-    int rev = m.group(4) ? (m.group(4) as int) : 0
+    int rev = m.group(4) ? (m.group(5) as int) : 999
     return major * 10000000 + minor * 100000 + patch * 1000 + rev
 }
 def resolvedVersionCode = explicitVersionCode != null
