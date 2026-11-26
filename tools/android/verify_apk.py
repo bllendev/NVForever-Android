@@ -13,6 +13,11 @@ import zipfile
 
 CLASSIC_CASING = "assets/dialogue/classic.png"
 
+# The smallest ELF LOAD alignment every packaged library must have. Android 15 ships on
+# devices whose pages are 16 KB, and the dynamic linker there cannot map a segment aligned
+# to less than the page size, so a 4 KB-aligned library installs and then fails to start.
+LOAD_ALIGNMENT = 16 * 1024
+
 REQUIRED = {
     "AndroidManifest.xml", "classes.dex",
     "lib/arm64-v8a/libnvf_android.so", "lib/arm64-v8a/libc++_shared.so",
@@ -63,8 +68,11 @@ def verify(path: Path) -> dict:
                     raise ValueError(f"Truncated ELF program header table: {name}")
                 loads = [struct.unpack_from("<Q", table, at + 48)[0] for at in range(0, len(table), size)
                          if len(table) - at >= 56 and struct.unpack_from("<I", table, at)[0] == 1]
-                if not loads or min(loads) < 4096:
-                    raise ValueError(f"Invalid ELF load alignment: {name}")
+                # 16 KB, not 4 KB: Android 15 runs on devices with 16 KB pages, and a
+                # library whose LOAD segments are only 4 KB-aligned will not load there.
+                # A library with no LOAD segment at all fails too.
+                if not loads or min(loads) < LOAD_ALIGNMENT:
+                    raise ValueError(f"Invalid ELF load alignment: {name} ({min(loads, default=0)} < {LOAD_ALIGNMENT})")
                 alignments[name] = min(loads)
         # Verify archive CRCs, including classes, native code and schemas.
         bad = apk.testzip()

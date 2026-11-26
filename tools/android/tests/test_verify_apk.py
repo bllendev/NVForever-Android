@@ -11,23 +11,23 @@ verify_apk = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify_apk)
 
 
-def library(machine=183):
+def library(machine=183, alignment=16384):
     data = bytearray(120)
     data[:6] = b"\x7fELF\x02\x01"
     struct.pack_into("<HH", data, 16, 3, machine)
     struct.pack_into("<Q", data, 32, 64)
     struct.pack_into("<HH", data, 54, 56, 1)
     struct.pack_into("<I", data, 64, 1)
-    struct.pack_into("<Q", data, 112, 16384)
+    struct.pack_into("<Q", data, 112, alignment)
     return data
 
 
 class ApkTests(unittest.TestCase):
-    def apk(self, root, *, machine=183, missing=None, extra=None, secondary_dex=None):
+    def apk(self, root, *, machine=183, missing=None, extra=None, secondary_dex=None, alignment=16384):
         path = Path(root) / "fixture.apk"
         with zipfile.ZipFile(path, "w") as archive:
             for name in verify_apk.REQUIRED - {missing}:
-                archive.writestr(name, library(machine) if name.endswith(".so") else b"authored fixture")
+                archive.writestr(name, library(machine, alignment) if name.endswith(".so") else b"authored fixture")
             if extra:
                 archive.writestr(extra, b"authored fixture")
             if secondary_dex is not None:
@@ -41,6 +41,12 @@ class ApkTests(unittest.TestCase):
             self.assertEqual(set(result["elfLoadAlignments"].values()), {16384})
             self.assertEqual(len(result["sha256"]), 64)
             self.assertEqual(result["classicCasingSha256"], hashlib.sha256(b"authored fixture").hexdigest())
+
+    def test_rejects_a_four_kilobyte_aligned_library(self):
+        # A device with 16 KB pages (Android 15) cannot load it, so it must not be published.
+        with tempfile.TemporaryDirectory(prefix="nvf-apk-test-") as root:
+            with self.assertRaisesRegex(ValueError, "Invalid ELF load alignment"):
+                verify_apk.verify(self.apk(root, alignment=4096))
 
     def test_rejects_x86_library_in_arm64_directory(self):
         with tempfile.TemporaryDirectory(prefix="nvf-apk-test-") as root:
