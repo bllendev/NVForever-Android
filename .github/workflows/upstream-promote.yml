@@ -1,0 +1,58 @@
+name: Upstream promote
+
+# Makes the tested odin/upstream-sync branch the new base (SYNC_BASE, default
+# odin/android-base). Manual only, with a typed confirmation. The current base is first saved
+# as backup/<base>-<date>-<sha>, then the base is moved to the sync branch's commit. It
+# refuses unless the sync branch has a successful Fork Android APK build of exactly that
+# commit, and unless the sync branch still contains the base it is replacing's upstream.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tested:
+        description: "I installed the odin/upstream-sync APK on the device and the saves are intact (type: yes)"
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.repository == 'bllendev/NVForever-Android' && inputs.tested == 'yes'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BASE: ${{ vars.SYNC_BASE || 'odin/android-base' }}
+      SYNC: odin/upstream-sync
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the sync branch
+        run: |
+          set -euo pipefail
+          git fetch origin "$SYNC" "$BASE"
+          sync_sha=$(git rev-parse "origin/$SYNC")
+          echo "SYNC_SHA=$sync_sha" >> "$GITHUB_ENV"
+          ok=$(gh run list --workflow fork-android.yml --branch "$SYNC" --json headSha,conclusion \
+                 --jq "[.[] | select(.headSha == \"$sync_sha\" and .conclusion == \"success\")] | length")
+          if [ "$ok" = "0" ]; then
+            echo "No successful Fork Android APK build of $SYNC at ${sync_sha::9}; refusing." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Back up the base, then move it
+        run: |
+          set -euo pipefail
+          old=$(git rev-parse "origin/$BASE")
+          backup="backup/$BASE-$(date -u +%Y%m%d)-${old::9}"
+          git push origin "$old:refs/heads/$backup"
+          git push --force-with-lease="$BASE:$old" origin "$SYNC_SHA:refs/heads/$BASE"
+          echo "Promoted $SYNC ${SYNC_SHA::9} to $BASE (was ${old::9}, saved as $backup)." | tee -a "$GITHUB_STEP_SUMMARY"
