@@ -24,6 +24,9 @@ macro_rules! eprintln {
 }
 
 mod activators;
+/// The Android fork's own code, in files of its own (docs/fork.md). The hooks that reach it
+/// are listed there and in `odin/mod.rs`. Public, as the fork's platform shells reach it.
+pub mod odin;
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(any(target_os = "android", test))]

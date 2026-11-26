@@ -9,8 +9,14 @@ def resolvedVersionName = providers.environmentVariable('NVF_ANDROID_VERSION_NAM
 def explicitVersionCode = providers.environmentVariable('NVF_ANDROID_VERSION_CODE')
     .orElse(providers.gradleProperty('nvfAndroidVersionCode'))
     .orNull
+// The fork's application id is one Gradle property (gradle.properties `nvfApplicationId`),
+// so renaming the installed package is one line; the namespace and the Java package stay
+// upstream's (docs/fork.md).
+def resolvedApplicationId = providers.gradleProperty('nvfApplicationId')
+    .getOrElse('org.nvforever.android')
 def deriveVersionCode = { String name ->
-    def m = (name =~ /^v?(\d+)\.(\d+)\.(\d+)(?:-android-r(\d+))?/)
+    // `-odin.<n>` is the fork's revision and counts exactly as upstream's `-android-r<n>`.
+    def m = (name =~ /^v?(\d+)\.(\d+)\.(\d+)(?:-(?:android-r|odin\.)(\d+))?/)
     if (!m.find()) {
         throw new GradleException("Cannot derive monotonic versionCode from versionName '${name}'; set NVF_ANDROID_VERSION_CODE")
     }
@@ -31,7 +37,7 @@ android {
     namespace 'org.nvforever.android'
     compileSdk 35
     defaultConfig {
-        applicationId 'org.nvforever.android'
+        applicationId resolvedApplicationId
         minSdk 29
         targetSdk 35
         versionCode resolvedVersionCode
@@ -42,7 +48,14 @@ android {
     sourceSets.main.assets.srcDirs = ['../../runtime-assets']
     sourceSets.main.jniLibs.srcDirs = ['../../native-libs']
     packaging { jniLibs { useLegacyPackaging = true } }
-    buildTypes { release { minifyEnabled false } }
+    buildTypes {
+        release { minifyEnabled false }
+        // The debug variant is a separate installed package (`.debug`), so it sits beside the
+        // build being played and has app storage, and therefore saves, of its own; both
+        // variants package the same native library, built with the same Rust profile
+        // (docs/fork.md, "Debug and release").
+        debug { applicationIdSuffix '.debug'; debuggable true }
+    }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
 

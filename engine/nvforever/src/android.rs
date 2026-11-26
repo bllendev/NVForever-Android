@@ -44,7 +44,9 @@ pub fn prepare() -> Result<Vec<String>, String> {
         .internal_data_path()
         .ok_or("Android internal files directory is unavailable")?;
     // Before the engine starts any threads. Saves/logs and the imported game are separate.
-    std::env::set_var("NVFOREVER_HOME", files.join("home"));
+    // The folder's name is the Android fork's (`odin::home`): every install of the fork
+    // already keeps its saves there.
+    std::env::set_var("NVFOREVER_HOME", files.join(crate::odin::home::DIR));
     std::env::set_var("NVF_REPORTS", "0");
     std::env::set_var("WGPU_BACKEND", "vulkan");
     std::env::set_var(

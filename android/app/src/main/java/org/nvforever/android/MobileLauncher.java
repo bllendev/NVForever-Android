@@ -79,7 +79,7 @@ final class MobileLauncher {
 
     MobileLauncher(LauncherActivity activity) throws IOException, JSONException {
         this.activity = activity;
-        home = new java.io.File(activity.getFilesDir(), "home").getAbsolutePath();
+        home = OdinFork.home(activity.getFilesDir()).getAbsolutePath();
         state = object("state");
         JSONObject palette = state.getJSONObject("theme");
         bg = color(palette, "bg"); panel = color(palette, "panel"); card = color(palette, "card");

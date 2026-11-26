@@ -140,7 +140,7 @@ public final class LauncherActivity extends Activity {
                     String ini = findChild(tree, root, "Fallout_default.ini");
                     if (ini != null) copyFile(tree, ini, new File(imported, "Fallout_default.ini"));
                 }
-                File home = new File(getFilesDir(), "home");
+                File home = OdinFork.home(getFilesDir());
                 if (!home.isDirectory() && !home.mkdirs()) throw new IOException("Cannot create settings directory");
                 android.util.AtomicFile config = new android.util.AtomicFile(new File(home, "NVForever.ini"));
                 FileOutputStream out = null;
@@ -224,7 +224,7 @@ public final class LauncherActivity extends Activity {
         new Thread(() -> {
             try {
                 copyAsset("schemas", new File(getFilesDir(), "runtime/schemas"));
-                copyAsset("lang", new File(getFilesDir(), "home/lang"));
+                copyAsset("lang", new File(OdinFork.home(getFilesDir()), "lang"));
                 runOnUiThread(() -> {
                     if (isDestroyed() || isFinishing()) return;
                     busy = false;
