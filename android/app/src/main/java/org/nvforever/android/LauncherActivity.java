@@ -27,6 +27,9 @@ public final class LauncherActivity extends Activity {
         if (android.os.Build.VERSION.SDK_INT >= 30) getWindow().setDecorFitsSystemWindows(false);
         getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         try {
+            // The fork reads the game folder in place, which needs all files access
+            // (OdinStorage); asked for before the launcher reads that folder.
+            OdinStorage.promptIfNeeded(this);
             launcher = new MobileLauncher(this);
         } catch (IOException | org.json.JSONException | LinkageError e) {
             new android.app.AlertDialog.Builder(this).setTitle("NVForever launcher")

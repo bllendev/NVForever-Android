@@ -2,9 +2,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- The Android fork reads the player's game folder where it is, in shared storage,
+         instead of importing a copy of it into app storage (docs/fork.md): all files access
+         is what lets this process open that folder from Android 11 on, and the legacy read
+         permission is the same thing on Android 10. Nothing is ever written there: the game
+         files are opened read-only, and the saves, settings and logs stay in app storage. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-feature android:name="android.hardware.vulkan.level" android:version="1" android:required="true" />
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x00401000" android:required="true" />
-    <application android:label="NVForever" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="false" android:usesCleartextTraffic="false" android:hasCode="true" android:theme="@android:style/Theme.Material.NoActionBar">
+    <application android:label="NVForever" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="false" android:usesCleartextTraffic="false" android:hasCode="true" android:requestLegacyExternalStorage="true" android:theme="@android:style/Theme.Material.NoActionBar">
         <activity android:name=".LauncherActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

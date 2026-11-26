@@ -12,6 +12,8 @@ pub mod launch;
 #[cfg(any(feature = "mobile", test))]
 pub mod mobile;
 pub mod news;
+/// What the Android fork adds to the launcher, in a file of its own (docs/fork.md).
+pub mod odin;
 #[cfg(feature = "desktop")]
 mod reports;
 pub mod start;
