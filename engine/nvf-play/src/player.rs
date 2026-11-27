@@ -1076,6 +1076,8 @@ type LookContext<'w, 's> = (
     Option<Res<'w, crate::pad::TouchDeviceSwitch>>,
     Option<Res<'w, crate::controller_aim::Options>>,
     Option<Res<'w, crate::aim_zoom::AimZoom>>,
+    // The Android fork's row that lets a controller have the gyro too (crate::odin).
+    Option<Res<'w, crate::odin::controller_gyro::Options>>,
 );
 
 /// How fast the Smooth Camera tweak's look catches up with the input, per second (ours)
@@ -1102,7 +1104,7 @@ pub(crate) fn mouse_look(
     (free_cam, photo): (Option<Res<crate::free_cam::FreeCam>>, Option<Res<crate::photo_mode::PhotoMode>>),
     kill_cam: Option<Res<crate::kill_cam::KillCam>>,
     assist: Option<Res<crate::aim_assist::AimAssistState>>,
-    (talk, switches, mut mouse_guard, gyro, platform, touch_switch, controller_aim, ads): LookContext<'_, '_>,
+    (talk, switches, mut mouse_guard, gyro, platform, touch_switch, controller_aim, ads, pad_gyro): LookContext<'_, '_>,
     (tweaks, mut smooth): (Option<Res<crate::tweaks::TweakSettings>>, Local<Vec2>),
 ) {
     if platform.as_deref().is_some_and(|gate| !gate.allows_actions()) { *smooth = Vec2::ZERO; return; }
@@ -1179,7 +1181,9 @@ pub(crate) fn mouse_look(
         Some(t) => delta * Vec2::new(t.aim_turn_x, t.aim_turn_y),
         None => delta,
     };
-    let gyro_radians = if bindings.device == crate::bindings::InputDevice::KeyboardMouse
+    // Keyboard and Mouse is upstream's own answer; the Android fork's row is what can also
+    // admit the gyro with a controller in hand (crate::odin::controller_gyro).
+    let gyro_radians = if crate::odin::controller_gyro::look_allows(pad_gyro.as_deref(), bindings.device)
         && !dialogue
         && touch_switch.as_deref().is_none_or(crate::pad::TouchDeviceSwitch::allows_actions)
     {

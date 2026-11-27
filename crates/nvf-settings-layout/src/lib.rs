@@ -85,7 +85,7 @@ pub const ANDROID_SECTIONS: &[Section] = &[
     section("Gameplay", Some("Dialogue"), &["touch-dialogue", "dialogue-choice-text-size", "dialogue-subtitle-text-size", "dialogue-touch-choice", "dialogue-speaker-side", "dialogue-device-side-v1", "dialogue-theme-v1", "dialogue-background-opacity-v1", "dialogue-background-tint-v1", "dialogue-frame-opacity-v1", "dialogue-hints-v1"]),
     section("Display", Some("Interface"), &["hud-scale-v2", "hud-health-size-v1", "hud-action-points-size-v1", "hud-compass-size-v1", "settings-menu-scale-v1", "barter-menu-size-v1", "repair-menu-size-v1", "workbench-menu-size-v1"]),
     section("Gameplay", Some("Inventory menus"), &["touch-barter-v1", "touch-maintenance-v1", "touch-terminal-v1", "touch-companion-v1"]),
-    section("Controls", Some("Touch"), &["touch-layout-editor-v1", "touch-practice-v1", "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-swipe-v1", "touch-pipboy-distance-v1", "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-dismiss-side-v2", "touch-pipboy-dismiss-travel-v1", "touch-pipboy-close-button", "touch-pipboy-button-graphics", "touch-pipboy-model-wheel", "touch-direct-pipboy-v1", "touch-world-activation-v1", "touch-icon-family", "adaptive-touch-actions", "lockpick-touch", "lockpick-touch-size", "lockpick-touch-hints", "touch-gyro-v1", "touch-gyro-sensitivity-v1", "touch-gyro-ads-v1", "touch-gyro-toggle-v1", "touch-gyro-ads-only-v1", "touch-gyro-recenter-v1", "touch-gyro-invert-x-v1", "touch-gyro-invert-y-v1", "touch-analog-movement-v1", "touch-fire-drag-look-v1", "touch-auto-move-lock-v1", "touch-vats-double-tap-v1", "touch-vats-targeting-v1"]),
+    section("Controls", Some("Touch"), &["touch-layout-editor-v1", "touch-practice-v1", "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-size", "touch-hotbar-tray", "touch-tray-editor-v1", "touch-bottom-swipe-target-v1", "touch-pipboy-swipe-v1", "touch-pipboy-distance-v1", "touch-pipboy-dismiss-left", "touch-pipboy-dismiss-right", "touch-pipboy-dismiss-side-v2", "touch-pipboy-dismiss-travel-v1", "touch-pipboy-close-button", "touch-pipboy-button-graphics", "touch-pipboy-model-wheel", "touch-direct-pipboy-v1", "touch-world-activation-v1", "touch-icon-family", "adaptive-touch-actions", "lockpick-touch", "lockpick-touch-size", "lockpick-touch-hints", "touch-gyro-v1", "touch-gyro-sensitivity-v1", "touch-gyro-ads-v1", "touch-gyro-toggle-v1", "touch-gyro-ads-only-v1", "touch-gyro-recenter-v1", "touch-gyro-invert-x-v1", "touch-gyro-invert-y-v1", "odin-controller-gyro-v1", "touch-analog-movement-v1", "touch-fire-drag-look-v1", "touch-auto-move-lock-v1", "touch-vats-double-tap-v1", "touch-vats-targeting-v1"]),
     section(CONTROLS_TAB, Some("Controller"), &ANDROID_CONTROLLER_KEYS),
     section("Display", Some("Mobile performance"), &["mobile-performance", "mobile-fps", "mobile-resolution", "mobile-thermal-auto", "mobile-thermal-status"]),
 ];
@@ -104,6 +104,8 @@ pub const MOBILE_SECTIONS: &[Section] = &[
         "touch-gyro-v1", "touch-gyro-recenter-v1", "touch-gyro-toggle-v1",
         "touch-gyro-ads-only-v1", "touch-gyro-invert-x-v1", "touch-gyro-invert-y-v1",
         "touch-gyro-sensitivity-v1", "touch-gyro-ads-v1",
+        // The Android fork's own row, beside upstream's gyro rows (docs/fork.md).
+        "odin-controller-gyro-v1",
     ]),
     section(MOBILE_TAB, Some("Inventory and quick access"), &[
         "touch-hotbar", "touch-hotbar-slots", "touch-hotbar-tray", "touch-tray-editor-v1", "touch-hotbar-size",
@@ -1078,6 +1080,8 @@ pub const NEEDS: &[(&str, &str, &str)] = &[
     ("touch-gyro-invert-y-v1", "touch-gyro-v1", "Needs Gyroscope."),
     ("touch-gyro-sensitivity-v1", "touch-gyro-v1", "Needs Gyroscope."),
     ("touch-gyro-ads-v1", "touch-gyro-v1", "Needs Gyroscope."),
+    // The Android fork's row (docs/fork.md), under the same switch as upstream's gyro rows.
+    ("odin-controller-gyro-v1", "touch-gyro-v1", "Needs Gyroscope."),
     ("touch-hotbar-slots", "touch-hotbar", "Needs Touch hotbar."),
     ("touch-hotbar-size", "touch-hotbar", "Needs Touch hotbar."),
     ("touch-hotbar-tray", "touch-hotbar", "Needs Touch hotbar."),

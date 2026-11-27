@@ -1006,6 +1006,8 @@ mod android_profile_tests {
         ("touch-gyro-recenter-v1", "Controller"),
         ("touch-gyro-invert-x-v1", "Controller"),
         ("touch-gyro-invert-y-v1", "Controller"),
+        // The Android fork's own row, beside upstream's gyro rows (docs/fork.md).
+        ("odin-controller-gyro-v1", "Controller"),
         ("touch-analog-movement-v1", "Touch"),
         ("touch-fire-drag-look-v1", "Touch"),
         ("touch-auto-move-lock-v1", "Touch"),

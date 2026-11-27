@@ -36,6 +36,7 @@ Everything, including every part the fork used to have of its own:
 | the signed, verified, published APK | `.github/workflows/fork-android.yml` | upstream publishes an unsigned release and a debug-signed test APK, and builds the Rust at `opt-level = 1` |
 | 16 KB ELF load alignment | `tools/android/verify_apk.py` | upstream's check accepts 4 KB, which does not load on a 16 KB-page device (Android 15) |
 | the updater pointed at this repository | `crates/nvf-launcher/src/odin.rs` | upstream's fails closed on a different package name and signer, which is exactly what this fork is |
+| the device gyro with a controller in hand | `engine/nvf-play/src/odin/controller_gyro.rs` | upstream's gyro is a touch feature that a selected controller cancels, so on a handheld with sticks it does nothing (the owner, 2026-11-26) |
 | the rebase workflows | `.github/workflows/upstream-{sync,promote}.yml` | the stack is replayed, so it needs replaying every day and promoting by hand |
 
 Phases 2 to 4, with the old stack's commits to port from, are in
@@ -52,7 +53,7 @@ The cost of carrying this fork is the number of **upstream lines** it changes, b
 one of them is a line a rebase can conflict on. So:
 
 - the fork's code lives in files of its own: `engine/nvforever/src/odin/`,
-  `crates/nvf-launcher/src/odin.rs`, `android/.../OdinFork.java`, `android/.../OdinStorage.java`,
+  `engine/nvf-play/src/odin/`, `crates/nvf-launcher/src/odin.rs`, `android/.../OdinFork.java`, `android/.../OdinStorage.java`,
   `android/tests/OdinForkTest.java`, `tools/android/tests/test_fork.py`,
   `.github/workflows/fork-android.yml`;
 - an upstream file gets a **hook**: one or two lines that call into those files;
@@ -66,6 +67,10 @@ The hooks, in full, as of this stack:
 | `engine/nvforever/src/android.rs` | 1 | `NVFOREVER_HOME` joins `odin::home::DIR` |
 | `engine/nvforever/src/crash.rs` | 2 blocks | `SaysWhenEmpty` wraps `odin::alloc::BACKEND`; `odin::proc_mem::dump_once` on a failed allocation |
 | `engine/nvforever/Cargo.toml` | 2 blocks | `libc` and the optional `mimalloc` on Android, the `odin-mimalloc` feature |
+| `engine/nvforever/src/touch/gyro.rs` | 4 blocks | `odin::controller_gyro::install`, its `poll` parameter, and three terms of `poll` |
+| `engine/nvf-play/src/lib.rs` | 1 | `pub mod odin;` |
+| `engine/nvf-play/src/player.rs` | 2 | `odin::controller_gyro::look_allows` in the look route's device gate |
+| `crates/nvf-settings-layout/src/lib.rs` | 3 | `odin-controller-gyro-v1` in two sections and in `NEEDS` |
 | `crates/nvf-launcher/src/lib.rs` | 1 | `pub mod odin;` |
 | `crates/nvf-launcher/src/mobile.rs` | 1 | `odin::adopt(home)` at the top of `request` |
 | `crates/nvf-launcher/src/news.rs` | 1 | `RELEASES` is `odin::RELEASES` |
