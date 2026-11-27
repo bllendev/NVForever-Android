@@ -821,6 +821,10 @@ fn systems_of<'a>(
                     let entity = commands
                         .spawn((Mesh3d(mesh.clone()), MeshMaterial3d(def.material.clone()), Transform::IDENTITY, Visibility::Hidden, NotShadowCaster, NoFrustumCulling, ChildOf(root)))
                         .id();
+                    // The fork's crash test (gpu_recorder/transparent_chunks.rs): the chunk
+                    // report names a chunk by what is drawn in it, so the drawn entity
+                    // carries its model while that switch is on.
+                    crate::odin::gpu_recorder::transparent_chunks::tag(commands, entity, || format!("particles {} {}", path.as_deref().unwrap_or("?"), def.name));
                     if let Some(layer) = layer {
                         commands.entity(entity).insert(layer.clone());
                     }

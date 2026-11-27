@@ -204,6 +204,9 @@ pub fn draw(
         }));
         let mesh = models.meshes.add(particle_mesh());
         let entity = commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(material), Transform::IDENTITY, Visibility::Hidden, NotShadowCaster, NoFrustumCulling, ChildOf(root))).id();
+        // The fork's crash test (gpu_recorder/transparent_chunks.rs): what the chunk report
+        // calls it.
+        crate::odin::gpu_recorder::transparent_chunks::tag(&mut commands, entity, || format!("effect particles {} {}", a.shader.edid, path.as_deref().unwrap_or("?")));
         st.plays += 1;
         let who = if a.on == FormId::PLAYER_REF.0 { "the player".to_string() } else { script.as_deref().and_then(|s| s.rt.as_ref()).map_or_else(|| format!("{:08X}", a.on), |rt| rt.game.data.name(FormId(a.on)).to_string()) };
         info!(

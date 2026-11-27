@@ -1631,6 +1631,7 @@ pub fn produce_cloud_shadows(
     let shadows_on = switches.0.is_some_and(|s| s.enabled);
     let cover_on = switches.1.is_some_and(|v| v.0);
     let Some(sky) = sky else { return };
+    crate::odin::gpu_recorder::mark(crate::odin::gpu_recorder::ring::feature::CLOUD_SHADOWS);
     // The wind's displacement runs on whatever happens below (indoors too).
     let cal = calibration();
     let secs = cloud_seconds(&time);

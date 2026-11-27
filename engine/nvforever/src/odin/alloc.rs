@@ -42,7 +42,7 @@ pub const BACKEND: Backend = mimalloc::MiMalloc;
 pub const BACKEND: Backend = std::alloc::System;
 
 /// What the run log says this build's allocator is, in the one startup line
-/// (`mem_log`'s summary carries the figures; this says what made them).
+/// (the recorder's summary carries the figures; this says what made them).
 pub const NAME: &str = if cfg!(all(target_os = "android", feature = "odin-mimalloc")) {
     "mimalloc (the odin-mimalloc build)"
 } else if cfg!(target_os = "android") {

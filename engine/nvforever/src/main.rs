@@ -1887,7 +1887,7 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     #[cfg(target_os = "android")]
     {
         app.insert_resource(bevy::winit::WinitSettings::mobile());
-        app.add_plugins((touch::TouchControlsPlugin, android_controller::AndroidControllersPlugin::native(), android_loading::AndroidLoadingPlugin, android_render_diagnostics::AndroidRenderDiagnosticsPlugin, android_render_admission::AndroidRenderAdmissionPlugin, odin::mem_log::MemoryLogPlugin));
+        app.add_plugins((touch::TouchControlsPlugin, android_controller::AndroidControllersPlugin::native(), android_loading::AndroidLoadingPlugin, android_render_diagnostics::AndroidRenderDiagnosticsPlugin, android_render_admission::AndroidRenderAdmissionPlugin));
     }
     // NVF_FIXED_FRAME_TIME_MS=<ms>: every frame moves the clocks on by that much, whatever the
     // real frame took (Bevy's `TimeUpdateStrategy::ManualDuration`, set before Bevy's time
@@ -1901,6 +1901,9 @@ fn run_with_args(line: Vec<String>) -> AppExit {
     // Asks for VK_AMD_anti_lag or VK_NV_low_latency2 when Bevy creates the device: before
     // DefaultPlugins (anti_lag.rs, nv_low_latency.rs).
     app.add_plugins(anti_lag::AntiLagInitPlugin);
+    // The Android fork, before DefaultPlugins for the same reason: VK_EXT_device_fault, so a
+    // lost device can say what faulted (odin/, docs/fork.md).
+    odin::init(&mut app);
     // The upscaler this run starts with, before the renderer exists: Streamline must be loaded
     // and initialised before the Vulkan instance is made (dlss/, #2198), so the settings' INI is
     // read here by the rows' own rules and precedence, as `apply_stored` applies them at
@@ -2666,6 +2669,9 @@ fn run_with_args(line: Vec<String>) -> AppExit {
             s.set_executor(bevy::ecs::schedule::SingleThreadedExecutor::new());
         });
     }
+    // The Android fork's own plugins, last: every one of them orders its systems against
+    // named sets, so nothing about when they run depends on this (odin/, docs/fork.md).
+    odin::before_run(&mut app);
     let exit = app.run();
     // The app and its renderer are gone; Streamline shut down before the device and instance it
     // used (dlss/, "Shutdown"). Nothing when Streamline was not loaded.
