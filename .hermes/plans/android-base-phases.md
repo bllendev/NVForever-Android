@@ -129,18 +129,38 @@ device still loses its graphics device on upstream's base.
   `mobile.rs`.
 - Keep this out of anything offered upstream: it is a design argument, not a patch.
 
-### 4.2 The wrist live map, Glance at Pip-Boy (M)
+### 4.2 The wrist live map, Glance at Pip-Boy (M): done 2026-11-27
 
-- Port from: `bc1b4ed92`.
+Ported onto upstream's base as three commits on `odin/p4-wrist`. What was re-placed
+rather than re-applied, and what is left:
+
+- the hooks are listed in docs/fork.md's table, which is now the record of where each one
+  sits; `wrist_screen` is declared from `odin/mod.rs` with a `#[path]` and its plugin goes
+  in from one line in `main.rs`'s play branch (upstream has no `before_run`).
+- **Left as follow-up: a touch trigger of its own.** Upstream's touch controls are a
+  `BUTTONS` table in `engine/nvforever/src/touch.rs` indexed by position, with named
+  indices (`PAUSE_BUTTON`, `TAB_BUTTON`, `gyro::BUTTON`) and a couple of dozen tests that
+  index it by number, and no per-button switch to hang an off-by-default row on. Adding a
+  Glance button means appending an entry, a row in `touch_ui_options`, and re-checking
+  every index: more than the "if small" this was given. Meanwhile the glance **is** already
+  reachable by touch: upstream's Pip-Boy button pushes `Control::MenuMode` while it is
+  held, and the glance follows a hold of Menu Mode wherever it has no binding of its own
+  (`flashlight::MenuKeyHold::glancing`), so a long press of that button raises the arm and
+  a tap opens the Pip-Boy, exactly as on the controller.
+
+- Ported from: `bc1b4ed92`, with `3a1b86ca4`'s `take_choice` refactor folded in.
 - Hooks in `player_body.rs`, `hud.rs`, `bindings.rs`, `pipboy/data*.rs`, `flashlight.rs`,
   `weapon_wheel.rs`, with the bodies in fork-owned files (`wrist_lens.rs`, `sway_fade.rs`,
   `wrist_meters.rs`, `wrist_menu_key.rs`). Every one of those upstream files is churned by
   their touch work, so expect to re-place the hooks rather than re-apply the diff.
 - `3a1b86ca4` is the later refactor of its five settings rows down to one `take_choice`.
 
-### 4.3 Quick Loot D-pad, and Hide HUD that keeps Quick Loot (S)
+### 4.3 Quick Loot D-pad, and Hide HUD that keeps Quick Loot (S): done 2026-11-27
 
-- Port from: `2af65959d` and `7826e6cdd`.
+The body is in `engine/nvf-play/src/quick_loot_dpad.rs` as planned; `quick_loot.rs` keeps
+one field and six lines, `weapon_wheel.rs` two. Still worth offering upstream.
+
+- Ported from: `2af65959d` and `7826e6cdd`.
 - One field, three lines, the body in a `#[path]` child (`quick_loot_dpad.rs`). Their touch
   work moved `quick_loot.rs` and `hud.rs`, so the hooks need re-placing.
 - Small, platform-neutral and upstream-shaped: they already have five other `hide-hud-*` tweak
