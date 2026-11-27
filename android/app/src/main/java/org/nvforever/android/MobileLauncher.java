@@ -336,7 +336,7 @@ final class MobileLauncher {
     private void gamePage() {
         LinearLayout box = card("Game folder");
         String folder = state.isNull("folder") ? null : state.optString("folder", null);
-        if (OdinFork.inPlaceFolder(activity, folder)) {
+        if (OdinFork.inPlaceFolder(activity.getExternalFilesDir(null), folder)) {
             // The fork reads the player's own folder where it is (OdinFork, crate::odin).
             add(box, label("Ready · reading your game files in place", 16, text));
             add(box, label(folder, 15, weak));
