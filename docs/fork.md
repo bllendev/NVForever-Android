@@ -37,6 +37,9 @@ Everything, including every part the fork used to have of its own:
 | a gamepad that works the whole launcher | `OdinLauncher` | upstream's launcher has no `KeyEvent`, `onKeyDown` or focus handling: it is touch only |
 | the device gyro with a controller in hand | `engine/nvf-play/src/odin/controller_gyro.rs` | upstream's gyro is a touch feature that a selected controller cancels, so on a handheld with sticks it does nothing (the owner, 2026-11-26) |
 | the memory diagnostics | `engine/nvforever/src/odin/{proc_mem,alloc,mem_log}.rs` | the owner's 2026-11-24 run died on a 67,600-byte allocation with 10 GB free; nothing upstream has can see a mapping-count ceiling |
+| the crash-test switches | `engine/nvforever/src/odin/crash_tests.rs`, `OdinCrashTests.java`, `OdinAdvanced.java` | the device loses its GPU in play, and narrowing that down means leaving one drawn feature out at a time, on the device (docs/odin-debug.md) |
+| the GPU flight recorder, breadcrumbs and the device-fault query | `engine/nvforever/src/gpu_recorder/`, the vendored `bevy_render` | upstream's loss says one line and nothing about which node the GPU was in |
+| the Khronos validation layer in the APK | `.github/workflows/fork-android.yml`, `engine/nvforever/src/odin/vulkan_validation.rs` | the only thing that can say whether the API use before the loss was valid |
 | a debug variant beside the release one | `android/app/build.gradle` (`applicationIdSuffix '.debug'`) | a test build with its own saves |
 | the signed, verified, published APK | `.github/workflows/fork-android.yml` | upstream publishes an unsigned release and a debug-signed test APK, and builds the Rust at `opt-level = 1` |
 | 16 KB ELF load alignment | `tools/android/verify_apk.py` | upstream's check accepts 4 KB, which does not load on a 16 KB-page device (Android 15) |
@@ -49,6 +52,9 @@ Everything, including every part the fork used to have of its own:
 Phases 2 to 4, with the old stack's commits to port from, are in
 `.hermes/plans/android-base-phases.md`.
 
+`docs/odin-debug.md` is the fork's own page for the crash tests and the GPU diagnostics:
+what to turn on when the device dies again, and what the run log then says.
+
 `docs/android.md` and `docs/design/android.md` are upstream's and are deliberately left
 alone, so they describe upstream's defaults: the `org.nvforever.android` package, the
 `files/home` engine home and the importer. Where they differ from what this fork builds, this
@@ -60,10 +66,11 @@ The cost of carrying this fork is the number of **upstream lines** it changes, b
 one of them is a line a rebase can conflict on. So:
 
 - the fork's code lives in files of its own: `engine/nvforever/src/odin/`,
-  `engine/nvf-play/src/odin/`, `crates/nvf-launcher/src/odin.rs`, `android/.../OdinFork.java`,
-  `android/.../OdinStorage.java`, `android/.../OdinLauncher.java`,
-  `android/.../OdinFolderPicker.java`, `android/.../SaveBackup.java`,
-  `android/.../DebugReport.java`, `android/tests/{OdinFork,SaveBackup,DebugReport}Test.java`,
+  `engine/nvf-play/src/odin/`, `engine/nvforever/src/gpu_recorder/` (declared from `odin/mod.rs`,
+  kept by that name because its log lines and docs use it), `crates/nvf-launcher/src/odin.rs`,
+  `android/.../OdinFork.java`, `android/.../OdinStorage.java`, `android/.../OdinLauncher.java`,
+  `android/.../OdinFolderPicker.java`, `android/.../SaveBackup.java`, `android/.../DebugReport.java`,
+  `android/.../OdinCrashTests.java`, `android/.../OdinAdvanced.java`, `android/tests/*Test.java` (the fork's),
   `tools/android/tests/test_fork.py`, `.github/workflows/fork-android.yml`;
 - an upstream file gets a **hook**: one or two lines that call into those files;
 - a hook that grows a body is moved back into a fork-owned file, leaving the call behind.
@@ -73,8 +80,15 @@ The hooks, in full, as of this stack:
 | upstream file | lines | the hook |
 | --- | :-: | --- |
 | `engine/nvforever/src/main.rs` | 3 | `pub mod odin;`, `odin::mem_log::MemoryLogPlugin` in the Android plugin list, and `odin::wrist_screen::WristScreenPlugin` in the play branch's |
-| `engine/nvforever/src/android.rs` | 1 | `NVFOREVER_HOME` joins `odin::home::DIR` |
-| `engine/nvforever/src/crash.rs` | 2 blocks | `SaysWhenEmpty` wraps `odin::alloc::BACKEND`; `odin::proc_mem::dump_once` on a failed allocation |
+| `engine/nvforever/src/android.rs` | 1 block | `NVFOREVER_HOME` joins `odin::home::DIR`, and `odin::crash_tests::apply` on the same home |
+| `engine/nvforever/src/crash.rs` | 6 blocks | `SaysWhenEmpty` wraps `odin::alloc::BACKEND`; `odin::proc_mem::dump_once` on a failed allocation; `odin::gpu_recorder`'s `note_lost`, `log_dump_once` and `report_section` on the two lost-device paths |
+| `engine/nvforever/src/dlss/mod.rs` | 1 | the renderer's instance flags go through `odin::vulkan_validation::instance_flags` |
+| `engine/nvforever/src/reports/mod.rs` | 1 block | `odin::vulkan_validation::log_directives` joins the run log's filter |
+| `vats_highlight.rs`, `particles.rs`, `effect_particles.rs`, `decals.rs`, `heat_haze.rs`, `pipboy_arm.rs` | 1 gate each | `odin::crash_tests` |
+| `particles.rs`, `effect_particles.rs`, `decals.rs` | 1 call each | `odin::gpu_recorder::transparent_chunks::tag` |
+| `cloud_shadows.rs`, `minimap_render.rs`, `reflection.rs`, `ssao.rs`, `sun_heightfield.rs`, `terrain_shadows.rs`, `vats_highlight.rs` | 1 `mark` each (2 in `ssao.rs` and `terrain_shadows.rs`) | `odin::gpu_recorder::mark` |
+| `engine/nvf-assets/src/{lib,nif_material,particles}.rs` | 3 blocks | `nif_material::no_soft_particles`, the crash test `nvf_assets` cannot reach `odin` for |
+| the vendored `bevy_render` | 6 blocks | the breadcrumbs, the upload and readback counters and the readback label (`engine/vendor/README.md`) |
 | `engine/nvforever/Cargo.toml` | 2 blocks | `libc` and the optional `mimalloc` on Android, the `odin-mimalloc` feature |
 | `engine/nvforever/src/touch/gyro.rs` | 4 blocks | `odin::controller_gyro::install`, its `poll` parameter, and three terms of `poll` |
 | `engine/nvf-play/src/lib.rs` | 1 | `pub mod odin;` |
@@ -82,7 +96,7 @@ The hooks, in full, as of this stack:
 | `crates/nvf-settings-layout/src/lib.rs` | 3 | `odin-controller-gyro-v1` in two sections and in `NEEDS` |
 | `crates/nvf-launcher/src/lib.rs` | 1 | `pub mod odin;` |
 | `crates/nvf-launcher/src/mobile.rs` | 4 blocks | `odin::adopt(home)` at the top of `request`; three fork fields in `State`; `Request::Odin` and its arm; `odin::chosen_save` in `Start` |
-| `android/.../MobileLauncher.java` | 11 words, 9 lines | `OdinFork.home`; upstream's builders, palette and pages stop being `private`; the `odin` field; one call per page, the focus ring and the two render hooks |
+| `android/.../MobileLauncher.java` | 11 words, 9 lines | `OdinFork.home`; upstream's builders, palette and pages stop being `private`; the `odin` field; one call per page, the focus ring, the two render hooks and `OdinAdvanced.attach` on the build line |
 | `android/.../LauncherActivity.java` | 4 blocks | `OdinFork.home` twice, `OdinStorage.promptIfNeeded`, the three key and motion overrides, the export result, the save a start loads |
 | `crates/nvf-launcher/src/news.rs` | 1 | `RELEASES` is `odin::RELEASES` |
 | `android/app/build.gradle` | 4 blocks | the application id property, the debug suffix, the `-odin.<n>` revision |
@@ -247,6 +261,9 @@ pull request with the whole clean-room checklist ticked (its `CLAUDE.md` and
    the double-space problem; the all files permission is a Play Store blocker for them and not
    for a sideloaded fork, so it has to be framed as an option.
 4. **A release build path that is not `opt-level = 1`.**
-5. Later, from phases 3 and 4: the GPU flight recorder and breadcrumbs, the Turnip driver
-   choice, Quick Loot D-pad scrolling, gamepad navigation in the launcher, launcher string
-   resources.
+5. **The GPU flight recorder, the breadcrumbs and the readback label** (phase 3, on this
+   branch now). The readback label and the upload counters are small and platform-neutral;
+   the breadcrumbs are a larger argument, and the crash-test switches are the fork's own
+   problem, not upstream's.
+6. Later, from phase 4: the Turnip driver choice, Quick Loot D-pad scrolling, gamepad
+   navigation in the launcher, launcher string resources.
