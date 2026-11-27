@@ -136,9 +136,7 @@ pub fn query(device: &wgpu::Device) -> Option<String> {
     }
     let mut addresses = vec![vk::DeviceFaultAddressInfoEXT::default(); counts.address_info_count as usize];
     let mut vendors = vec![vk::DeviceFaultVendorInfoEXT::default(); counts.vendor_info_count as usize];
-    let mut info = vk::DeviceFaultInfoEXT::default();
-    info.p_address_infos = addresses.as_mut_ptr();
-    info.p_vendor_infos = vendors.as_mut_ptr();
+    let mut info = vk::DeviceFaultInfoEXT { p_address_infos: addresses.as_mut_ptr(), p_vendor_infos: vendors.as_mut_ptr(), ..Default::default() };
     // The vendor binary is not asked for (module notes): tell the driver its size is zero.
     counts.vendor_binary_size = 0;
     // SAFETY: both arrays hold the counts the call just reported, and the info's pointers

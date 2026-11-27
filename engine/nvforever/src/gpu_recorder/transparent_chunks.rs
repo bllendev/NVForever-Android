@@ -245,7 +245,7 @@ fn describe(chunk: &Chunk) -> String {
 }
 
 /// The chunks a frame's table holds, if it was kept.
-fn table<'a>(frames: &'a [(u64, Vec<Chunk>)], frame: u64) -> Option<&'a [Chunk]> {
+fn table(frames: &[(u64, Vec<Chunk>)], frame: u64) -> Option<&[Chunk]> {
     frames.iter().find(|(kept, _)| *kept == frame).map(|(_, chunks)| chunks.as_slice())
 }
 
@@ -355,6 +355,7 @@ fn label(world: &World, cache: &PipelineCache, chunk: &Chunk, entities: &[Entity
 /// Order-independent transparency is not supported: a view that asks for it draws no
 /// transparent item at all while the switch is on, and says so once. NVForever asks for it
 /// nowhere, and the crash test is not worth a second path through the OIT buffers.
+#[expect(clippy::type_complexity, reason = "the view's parts, as Bevy's own transparent pass takes them")]
 fn transparent_pass_3d_chunks(
     world: &World,
     view: ViewQuery<(&ExtractedCamera, &ExtractedView, &ViewTarget, &ViewDepthStencilTexture, Option<&MainPassResolutionOverride>, Has<OrderIndependentTransparencySettings>)>,
@@ -379,7 +380,7 @@ fn transparent_pass_3d_chunks(
     let items: Vec<Item> = phase
         .items
         .values()
-        .map(|item| Item { draw_function: item.draw_function.0, pipeline: item.pipeline.id(), batch: item.batch_range.len() as usize })
+        .map(|item| Item { draw_function: item.draw_function.0, pipeline: item.pipeline.id(), batch: item.batch_range.len() })
         .collect();
     let entities: Vec<Entity> = phase.items.keys().map(|(entity, _)| *entity).collect();
     let mut chunks = plan(&items, MAX_CHUNKS);
