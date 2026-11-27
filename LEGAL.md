@@ -175,6 +175,15 @@ release (Download DLSS…, [docs/dlss.md](docs/dlss.md)). NVForever ships no NVI
 the files come from NVIDIA's release on the player's request, and nothing of them is hosted,
 mirrored or bundled by the project.
 
+The Android fork's APK carries `libVkLayer_khronos_validation.so`, the Khronos Group's
+Vulkan validation layer, for one of the launcher's crash tests
+([docs/odin-debug.md](docs/odin-debug.md)). It is **licensed Apache-2.0 by the Khronos
+Group and its contributors**, is no part of NVForever and is never committed to this
+repository: the fork's APK workflow downloads it from a pinned
+[Vulkan-ValidationLayers](https://github.com/KhronosGroup/Vulkan-ValidationLayers) release,
+checks the release asset and the library against pinned SHA-256 hashes, and packages that
+one library unchanged. Its licence text travels with the Khronos release it came from.
+
 The capture plugin `nvf_capture` is a separate program that runs inside the original
 game. It is under the same licence with an additional permission under GPLv3 section 7
 to be combined with the game and the xNVSE script extender

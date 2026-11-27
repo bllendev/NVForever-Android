@@ -362,7 +362,12 @@ pub fn folders() -> Option<(PathBuf, PathBuf)> {
 /// they replace it, the code does not].
 pub fn log_filter() -> String {
     let ini = EngineHome::user().and_then(|h| std::fs::read_to_string(h.config_file()).ok()).unwrap_or_default();
-    let extra = log_directives(&ini);
+    let mut extra = log_directives(&ini);
+    // The Android fork's validation crash test: Bevy's default holds everything under `wgpu`
+    // at error, which would swallow every message the layer writes (odin/vulkan_validation.rs).
+    if let Some(validation) = crate::odin::vulkan_validation::log_directives() {
+        extra = if extra.is_empty() { validation.to_string() } else { format!("{extra},{validation}") };
+    }
     if extra.is_empty() {
         return bevy::log::DEFAULT_FILTER.to_string();
     }
