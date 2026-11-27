@@ -1575,6 +1575,33 @@ impl ControlInput<'_, '_> {
         keys() || self.touch_direction(c, Ask::JustPressed)
     }
 
+    /// As [`pressed`](Self::pressed), with the pad's own press left out when `allow_pad`
+    /// is false: the Quick Loot list has the D-pad's Up and Down while it scrolls with
+    /// them, so a control bound to either is not pressed by them, while its key or mouse
+    /// button still works (the Keyboard and Mouse With a Controller tweak;
+    /// `crate::quick_loot_dpad`).
+    pub(crate) fn pressed_with_pad(&self, c: Control, allow_pad: bool) -> bool {
+        if allow_pad || !self.controller() {
+            return self.pressed(c);
+        }
+        if self.suppressed() || self.held(c) {
+            return false;
+        }
+        (keys_with_pad() && self.keys_pressed(c)) || self.touch_direction(c, Ask::Pressed)
+    }
+
+    /// As [`just_pressed`](Self::just_pressed), with the pad's own press left out when
+    /// `allow_pad` is false ([`pressed_with_pad`](Self::pressed_with_pad)).
+    pub(crate) fn just_pressed_with_pad(&self, c: Control, allow_pad: bool) -> bool {
+        if allow_pad || !self.controller() {
+            return self.just_pressed(c);
+        }
+        if self.suppressed() || self.held(c) {
+            return false;
+        }
+        keys_with_pad() && self.physical_just_pressed(c)
+    }
+
     /// Released this frame, and neither of its inputs is still down.
     pub fn just_released(&self, c: Control) -> bool {
         if self.held(c) || self.captured() {

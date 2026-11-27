@@ -148,6 +148,7 @@ pub mod maintenance_touch;
 pub mod repeat;
 pub mod reputation;
 pub mod quick_loot;
+pub mod quick_loot_dpad;
 pub mod reticle;
 pub mod rumble;
 pub mod save;
