@@ -15,6 +15,7 @@
 //! | `crash.rs` | the allocator `SaysWhenEmpty` wraps | [`alloc::BACKEND`] |
 //! | `crash.rs` | one dump when an allocation fails | [`proc_mem::dump_once`] |
 //! | `touch/gyro.rs` | the settings row, and three terms of `poll` | [`controller_gyro`] |
+//! | `main.rs` | the play branch's plugin list | [`wrist_screen::WristScreenPlugin`] |
 //!
 //! The Android-only parts of each module are behind `cfg(target_os = "android")`, while their
 //! parsing and their wording are plain functions, built and tested everywhere.
@@ -30,3 +31,9 @@ pub mod home;
 pub mod mem_log;
 /// What this process's own memory is doing, and the dump on a failed allocation.
 pub mod proc_mem;
+/// The live glance at the Pip-Boy: the screen drawn on the arm while the game runs. It
+/// lives beside the rest of nvforever's modules because it reaches deep into them
+/// (`player_body`, `pipboy_controls`), and is declared from here so the fork's own code is
+/// all one list.
+#[path = "../wrist_screen.rs"]
+pub mod wrist_screen;

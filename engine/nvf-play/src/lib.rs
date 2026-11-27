@@ -192,6 +192,11 @@ pub mod voice;
 pub mod voice_filter;
 pub mod wait;
 pub mod world_sounds;
+pub mod wrist_arm;
+pub mod wrist_hud;
+pub mod wrist_live;
+pub mod wrist_page;
+pub mod wrist_local;
 pub mod xp_meter;
 /// What the Android fork adds to the play layer, in files of its own (docs/fork.md).
 pub mod odin;
@@ -500,6 +505,11 @@ impl Plugin for PlayPlugin {
             .add_plugins(sup_shots::SupShotsPlugin)
             .add_plugins(tiles::TilesPlugin)
             .add_plugins(pipboy::PipBoyPlugin)
+            // Off unless the player opts in (the `wrist-map` row, or `NVF_WRIST_LIVE=1`);
+            // inert otherwise.
+            .add_plugins(wrist_arm::WristLivePlugin)
+            .add_plugins(wrist_hud::WristHudPlugin)
+            .add_plugins(wrist_local::WristLocalPlugin)
             .add_plugins(terminal::TerminalPlugin)
             .add_plugins(tutorial_menu::TutorialMenuPlugin)
             .add_plugins(credits::CreditsPlugin)

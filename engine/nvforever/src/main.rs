@@ -2339,6 +2339,11 @@ fn run_with_args(line: Vec<String>) -> AppExit {
             // The Vigor Tester's machine: its camera and lights, the room behind it.
             app.add_plugins(vigor_view::VigorViewPlugin);
             app.add_plugins((player_body::PlayerBodyPlugin { first_person_body: args.first_person_body, weapon_sway: args.weapon_sway, head_bob: args.head_bob, weapon_lower: !args.no_weapon_lower, true_iron_sights: !args.no_true_iron_sights }, stealth_field::StealthFieldPlugin, pipboy_arm::PipBoyArmPlugin, deaths::DeathsPlugin, limbs::LimbsPlugin, ragdoll::RagdollPlugin, swing_traps::SwingTrapsPlugin, wrecks::WrecksPlugin, shot_fx::ShotFxPlugin, particles::ParticlesPlugin, dismember::DismemberPlugin, grass_fire_fx::GrassFireFxPlugin));
+            // The fork's live glance at the Pip-Boy (odin/mod.rs, wrist_screen.rs): only a
+            // run that plays has a body to raise it on, and it is inert unless the player
+            // opts in. Its systems name what they run after and before, so going in here
+            // changes nothing else.
+            app.add_plugins(odin::wrist_screen::WristScreenPlugin);
             app.insert_resource(nvf_play::aim_zoom::Scope3d { on: args.scope_3d, lens: false });
             // Advanced Movement's parts are off unless switched on, Advanced Recoil on under
             // the Global Toggle [design: the owner, 2026-11-16, "make sure all advanced
