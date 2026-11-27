@@ -335,6 +335,15 @@ final class MobileLauncher {
 
     private void gamePage() {
         LinearLayout box = card("Game folder");
+        String folder = state.isNull("folder") ? null : state.optString("folder", null);
+        if (OdinFork.inPlaceFolder(activity, folder)) {
+            // The fork reads the player's own folder where it is (OdinFork, crate::odin).
+            add(box, label("Ready · reading your game files in place", 16, text));
+            add(box, label(folder, 15, weak));
+            add(box, label("Nothing is copied: NVForever reads this folder directly and never changes it. Importing a copy is still possible, but it needs free space for the whole game.", 15, weak));
+            add(box, tap("Import a copy instead", false, editable(), activity::pickGame));
+            return;
+        }
         add(box, label(state.isNull("folder") ? "No complete game folder is ready." : "Ready · imported game files", 16, text));
         add(box, label("Choose your Fallout: New Vegas folder or its Data folder. This makes a full copy in app storage and never changes your originals. Saves and settings are separate; uninstalling removes app files.", 15, weak));
         add(box, tap(state.isNull("folder") ? "Import game folder" : "Replace imported game folder", true, editable(), activity::pickGame));

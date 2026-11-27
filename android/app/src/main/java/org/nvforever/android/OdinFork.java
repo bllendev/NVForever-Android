@@ -77,4 +77,13 @@ final class OdinFork {
     static boolean readsInPlace(File filesDir) {
         return dataPath(filesDir) != null;
     }
+    /**
+     * Whether the launcher's game folder is read where it is rather than a copy the importer
+     * made: imports live under the app's external files directory, anything else is in place.
+     */
+    static boolean inPlaceFolder(android.content.Context context, String folder) {
+        if (folder == null) return false;
+        File imports = context.getExternalFilesDir(null);
+        return imports == null || !folder.startsWith(imports.getAbsolutePath());
+    }
 }
