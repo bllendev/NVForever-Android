@@ -86,7 +86,6 @@ pub fn init(app: &mut App) {
     // The validation layer's deeper checks (synchronization, GPU-assisted), asked for on the
     // instance through VK_EXT_layer_settings. Nothing without both crash-test switches.
     vulkan_validation::ask_for_layer_settings(&mut settings);
-    drop(settings);
     // The layer's own library, loaded before the renderer makes its instance
     // (vulkan_validation.rs). Nothing with the switch off.
     vulkan_validation::prepare();
