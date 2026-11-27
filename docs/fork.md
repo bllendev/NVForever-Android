@@ -42,6 +42,9 @@ Everything, including every part the fork used to have of its own:
 | 16 KB ELF load alignment | `tools/android/verify_apk.py` | upstream's check accepts 4 KB, which does not load on a 16 KB-page device (Android 15) |
 | the updater pointed at this repository | `crates/nvf-launcher/src/odin.rs` | upstream's fails closed on a different package name and signer, which is exactly what this fork is |
 | the rebase workflows | `.github/workflows/upstream-{sync,promote}.yml` | the stack is replayed, so it needs replaying every day and promoting by hand |
+| the live glance at the Pip-Boy | `engine/nvf-play/src/wrist_{arm,hud,live,local,page}.rs`, `engine/nvforever/src/wrist_screen.rs` | the owner's live wrist map: the device raised on the arm with the game still running, which is what he plays with on the Odin |
+| Quick Loot scrolled with the D-pad | `engine/nvf-play/src/quick_loot_dpad.rs` | on a controller the list could only be scrolled with the look stick |
+| Hide HUD Key: Keep Quick Loot | the `tweak-hide-hud-quick-loot` row | "just the HUD gone but Quick Loot to stay" |
 
 Phases 2 to 4, with the old stack's commits to port from, are in
 `.hermes/plans/android-base-phases.md`.
@@ -69,7 +72,7 @@ The hooks, in full, as of this stack:
 
 | upstream file | lines | the hook |
 | --- | :-: | --- |
-| `engine/nvforever/src/main.rs` | 2 | `pub mod odin;`, and `odin::mem_log::MemoryLogPlugin` in the Android plugin list |
+| `engine/nvforever/src/main.rs` | 3 | `pub mod odin;`, `odin::mem_log::MemoryLogPlugin` in the Android plugin list, and `odin::wrist_screen::WristScreenPlugin` in the play branch's |
 | `engine/nvforever/src/android.rs` | 1 | `NVFOREVER_HOME` joins `odin::home::DIR` |
 | `engine/nvforever/src/crash.rs` | 2 blocks | `SaysWhenEmpty` wraps `odin::alloc::BACKEND`; `odin::proc_mem::dump_once` on a failed allocation |
 | `engine/nvforever/Cargo.toml` | 2 blocks | `libc` and the optional `mimalloc` on Android, the `odin-mimalloc` feature |
@@ -86,6 +89,18 @@ The hooks, in full, as of this stack:
 | `android/app/src/main/AndroidManifest.xml` | 3 | the storage permissions |
 | `tools/android/build.py` | 2 blocks | `--profile` and `--variant` |
 | `tools/android/verify_apk.py` | 2 blocks | the 16 KB alignment |
+| `engine/nvforever/src/player_body.rs` | 4 blocks | the glance's arms view, drop and side; `place_lens` takes the view's own frame; `drive_body` reads `wrist_arm::WristLive` |
+| `engine/nvforever/src/view_sway.rs` | 1 block | `faded`, the pose held rigidly while the glance is up |
+| `engine/nvforever/src/pipboy_controls.rs` | 1 block | the tab knob follows the glance's page |
+| `engine/nvf-play/src/lib.rs` | 2 blocks | the `wrist_*` and `quick_loot_dpad` modules, and the three glance plugins |
+| `engine/nvf-play/src/bindings.rs` | 4 blocks | `Control::GlancePipBoy`, `held` and `bound` for the glance, `pressed_with_pad` for the list's D-pad |
+| `engine/nvf-play/src/flashlight.rs` | 2 blocks | `MenuKeyHold` hands a hold past the glance's moment to the glance |
+| `engine/nvf-play/src/hud.rs` | 3 blocks | the `Meter` markers the glance's HUD row hides by, `HudHidden::quick_loot` and `hides_quick_loot` |
+| `engine/nvf-play/src/quick_loot.rs` | 1 field, 6 lines | `owns_vertical_dpad`, the calls into `quick_loot_dpad`, and `hides_quick_loot` in `follow` and `draw` |
+| `engine/nvf-play/src/weapon_wheel.rs` | 2 | one resource and `quick_loot_dpad::binds` round the hotkeys' presses |
+| `engine/nvf-play/src/pipboy/data{,/model,/outline}.rs` | 4 blocks | `outline::cast` shared with `wrist_local`, `MapPicture` for `WorldMap`, two visibility widenings |
+| `engine/nvf-play/src/reticle.rs` | 1 | the crosshair goes while the glance is up |
+| `engine/nvf-play/src/interface.rs` | 1 | `own_texture` is public, for the glance's map picture |
 
 `git diff upstream/main -- engine crates android tools` should stay about that size. When one
 of those grows, move its body into a fork-owned file and leave the hook.
