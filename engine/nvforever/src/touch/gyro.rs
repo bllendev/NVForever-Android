@@ -161,6 +161,9 @@ pub(super) struct State {
     epoch: Option<u64>,
     timestamp: u64,
     polled: bool,
+    /// The fork's controller-gyro row as it was last frame, so changing it discards the
+    /// sensor reference exactly as changing one of upstream's rows does (crate::odin).
+    pad: Option<crate::odin::controller_gyro::OnPad>,
     requested: bool,
     available: bool,
     error: bool,
@@ -320,6 +323,8 @@ pub(super) fn install(app: &mut App) {
         },
     );
     settings::set_choice_action(app, KEYS[5], |name| name == "Recenter now");
+    // The Android fork's row beside these: the gyro with a controller in hand (crate::odin).
+    crate::odin::controller_gyro::install(app);
 }
 
 type CaptureContext<'w> = (
@@ -347,6 +352,8 @@ fn poll(
         MessageReader<bevy::window::AppLifecycle>,
         MessageReader<bevy::window::WindowFocused>,
     ),
+    // The Android fork's row, which can give the gyro to a controller (crate::odin).
+    pad_gyro: Option<Res<crate::odin::controller_gyro::Options>>,
 ) {
     look.radians = Vec2::ZERO;
     let viewport = windows
@@ -361,9 +368,19 @@ fn poll(
     }) | focus
         .read()
         .any(|e| viewport.is_some_and(|(id, _)| e.window == id));
-    let changed = interrupted || state.previous != Some(*options) || state.viewport != viewport;
+    // Upstream's gyro is a touch feature and cancels whenever a controller is selected; the
+    // fork's row is what admits it with a pad in hand instead (crate::odin::controller_gyro).
+    let pad = crate::odin::controller_gyro::on_pad(
+        pad_gyro.as_deref(),
+        bindings.as_deref().map(|b| b.device),
+    );
+    let changed = interrupted
+        || state.previous != Some(*options)
+        || state.viewport != viewport
+        || state.pad != Some(pad);
     state.previous = Some(*options);
     state.viewport = viewport;
+    state.pad = Some(pad);
     let allowed = options.enabled
         && !touch.ui_capture
         && touch.playing
@@ -372,10 +389,10 @@ fn poll(
         && layout.editor.is_none()
         && !practice.blocking()
         && !modal.blocking()
-        && layout.config.buttons[BUTTON].visible
+        && (layout.config.buttons[BUTTON].visible || pad.engaged())
         && bindings
             .as_deref()
-            .is_some_and(|b| b.device == InputDevice::KeyboardMouse)
+            .is_some_and(|b| b.device == InputDevice::KeyboardMouse || pad.engaged())
         && device
             .as_deref()
             .is_none_or(nvf_play::pad::TouchDeviceSwitch::allows_actions)
@@ -425,7 +442,13 @@ fn poll(
         }
     }
     let aimed = ads.as_deref().is_some_and(|a| a.aimed);
-    let requested = allowed && !changed && state.active(&options) && (!options.ads_only || aimed);
+    // With a controller in hand the fork's row is the whole activation: no finger is free to
+    // hold the Gyro target, and `Gyro only while aiming` keeps deciding the touch route alone.
+    let requested = allowed
+        && !changed
+        && pad
+            .wanted(aimed)
+            .unwrap_or_else(|| state.active(&options) && (!options.ads_only || aimed));
     if !state.polled || options.enabled || state.requested || changed || state.error {
         let command = if changed {
             "reset"
@@ -512,6 +535,11 @@ fn captions(
 #[cfg(test)]
 #[path = "gyro/inversion_tests.rs"]
 mod inversion_tests;
+
+/// The Android fork's row, over this same sensor route (crate::odin::controller_gyro).
+#[cfg(test)]
+#[path = "../odin/controller_gyro_tests.rs"]
+mod odin_controller_gyro_tests;
 
 #[cfg(test)]
 mod tests {

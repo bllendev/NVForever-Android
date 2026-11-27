@@ -14,12 +14,16 @@
 //! | `android.rs` | the home folder's name | [`home::DIR`] |
 //! | `crash.rs` | the allocator `SaysWhenEmpty` wraps | [`alloc::BACKEND`] |
 //! | `crash.rs` | one dump when an allocation fails | [`proc_mem::dump_once`] |
+//! | `touch/gyro.rs` | the settings row, and three terms of `poll` | [`controller_gyro`] |
 //!
 //! The Android-only parts of each module are behind `cfg(target_os = "android")`, while their
 //! parsing and their wording are plain functions, built and tested everywhere.
 
 /// Which allocator the game's allocations go to (`crash.rs`'s `SaysWhenEmpty` wraps it).
 pub mod alloc;
+/// The device's gyro while a physical controller is in use. It lives in `nvf-play`, because
+/// `player.rs`'s look route is the other place it is hooked and that crate cannot see this one.
+pub use nvf_play::odin::controller_gyro;
 /// The Android home folder's name, which the fork keeps as earlier builds left it.
 pub mod home;
 /// The memory summary line in the Android run log (added to the Android plugin list only).
