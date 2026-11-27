@@ -17,7 +17,8 @@ const IMPORT_FIRST: &str = "Import a complete Fallout: New Vegas folder before s
 enum Request {
     State,
     ValidateImport { path: PathBuf },
-    Start { resume: bool },
+    /// `save`: the Android fork's Load save list picked one (crate::odin).
+    Start { resume: bool, #[serde(default)] save: Option<String> },
     Settings { edits: BTreeMap<String, String> },
     SaveSettings { edits: BTreeMap<String, String> },
     Mods,
@@ -27,6 +28,8 @@ enum Request {
     FetchNews,
     CheckUpdate { current: String },
     Countdown { version: String, at: i64, now: i64 },
+    /// Everything the Android fork's own launcher rows ask for (crate::odin).
+    Odin { ask: crate::odin::Ask },
 }
 
 #[derive(Deserialize)]
@@ -72,6 +75,8 @@ fn handle(home: &EngineHome, req: Request, get: &mut impl FnMut(&str) -> Result<
                 "savePreview": preview,
                 "newsEnabled": news_enabled(),
                 "inPlaceNote": crate::odin::last_note(),
+                "inPlaceChecking": crate::odin::checking(),
+                "lastRunNote": crate::odin::last_run_note(&home.root),
             }))
         }
         Request::ValidateImport { path } => {
@@ -85,12 +90,15 @@ fn handle(home: &EngineHome, req: Request, get: &mut impl FnMut(&str) -> Result<
             }
             Ok(Value::Null)
         }
-        Request::Start { resume } => {
+        Request::Start { resume, save } => {
             let game = ready();
             if !launch::folder_known(game.is_some(), false, None) {
                 return Err(IMPORT_FIRST.into());
             }
-            let start = if resume {
+            // The fork's Load save list starts on a save it names (crate::odin).
+            let start = if let Some(path) = crate::odin::chosen_save(&home.root, save.as_deref())? {
+                launch::Start::Load(path)
+            } else if resume {
                 let (path, _) = newest_save(home).ok_or("No NVForever save is available to continue.")?;
                 launch::Start::Load(path)
             } else {
@@ -175,6 +183,7 @@ fn handle(home: &EngineHome, req: Request, get: &mut impl FnMut(&str) -> Result<
             Ok(json!({"posts": posts, "source": source, "next": next.and_then(|n| n.at.map(|at| json!({"version": n.version, "at": at})))}))
         }
         Request::CheckUpdate { current } => check_update(&current, get),
+        Request::Odin { ask } => crate::odin::handle(&home.root, ask),
         Request::Countdown { version, at, now } => Ok(json!(if at > now {
             format!("{version} · {}", news::countdown_text(at.saturating_sub(now)))
         } else { String::new() })),

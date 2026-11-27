@@ -93,14 +93,24 @@ jobs:
             "$JAVA_HOME/bin/java" -cp "$tests" "org.nvforever.android.$control"
           done
 
-      - name: The fork's storage prompt compiles against the platform
+      - name: The whole launcher compiles against the platform
         shell: bash
         run: |
           set -euo pipefail
-          "$JAVA_HOME/bin/javac" -encoding UTF-8 -source 17 -target 17 \
-            -cp "$ANDROID_HOME/platforms/android-35/android.jar" -d "$RUNNER_TEMP/storage-check" \
-            android/app/src/main/java/org/nvforever/android/OdinStorage.java \
-            android/app/src/main/java/org/nvforever/android/OdinFork.java
+          # aapt2 generates R during the APK build, which this check does not run, so a
+          # stand-in carries the two ids the launcher uses.
+          gen="$RUNNER_TEMP/gen/org/nvforever/android"
+          mkdir -p "$gen"
+          {
+            echo 'package org.nvforever.android;'
+            echo 'public final class R {'
+            echo '    public static final class mipmap { public static final int ic_launcher = 1; }'
+            echo '    public static final class style { public static final int Theme_Material_NoActionBar_Fullscreen = 2; }'
+            echo '}'
+          } > "$gen/R.java"
+          "$JAVA_HOME/bin/javac" -encoding UTF-8 -source 17 -target 17 -nowarn \
+            -cp "$ANDROID_HOME/platforms/android-35/android.jar" -d "$RUNNER_TEMP/launcher-check" \
+            "$gen/R.java" android/app/src/main/java/org/nvforever/android/*.java
 
       - name: The desktop engine's Linux build dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev

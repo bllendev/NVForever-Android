@@ -30,13 +30,16 @@ Everything, including every part the fork used to have of its own:
 | --- | --- | --- |
 | the application id `org.nvforever.android.odin` | `android/gradle.properties` (`nvfApplicationId`) | the owner's install upgrades in place, and upstream's APK and this one never overwrite each other |
 | the engine home `<internal files>/NVForever` | `engine/nvforever/src/odin/home.rs`, `OdinFork.HOME` | every install of the fork keeps its saves, `NVForever.ini`, `plugins.txt` and logs there |
-| the game folder read in place | `crates/nvf-launcher/src/odin.rs`, `OdinStorage`, the manifest's `MANAGE_EXTERNAL_STORAGE` | upstream's importer needs free space equal to the game folder and hides the copy from every file manager |
+| the game folder read in place | `crates/nvf-launcher/src/odin.rs`, `OdinStorage`, `OdinFolderPicker`, the manifest's `MANAGE_EXTERNAL_STORAGE` | upstream's importer needs free space equal to the game folder and hides the copy from every file manager |
+| save backup and restore to `Download/NVForever-backups/<date>/` | `SaveBackup.java`, `OdinLauncher` | saves live where no file app can reach them and uninstalling deletes them; upstream's own doc says to export them and gives no way to |
+| Export debug log, Copy debug summary, and the line about a run that ended unexpectedly | `DebugReport.java`, `OdinLauncher`, `odin::last_run_note` | without it a tester needs `adb` to send anything at all |
+| a Load save list | `odin::saves`, `odin::chosen_save`, `OdinLauncher` | upstream has Continue and a preview card but no way to pick an older save |
+| the device gyro with a controller in hand | `engine/nvf-play/src/odin/controller_gyro.rs` | upstream's gyro is a touch feature that a selected controller cancels, so on a handheld with sticks it does nothing (the owner, 2026-11-26) |
 | the memory diagnostics | `engine/nvforever/src/odin/{proc_mem,alloc,mem_log}.rs` | the owner's 2026-11-24 run died on a 67,600-byte allocation with 10 GB free; nothing upstream has can see a mapping-count ceiling |
 | a debug variant beside the release one | `android/app/build.gradle` (`applicationIdSuffix '.debug'`) | a test build with its own saves |
 | the signed, verified, published APK | `.github/workflows/fork-android.yml` | upstream publishes an unsigned release and a debug-signed test APK, and builds the Rust at `opt-level = 1` |
 | 16 KB ELF load alignment | `tools/android/verify_apk.py` | upstream's check accepts 4 KB, which does not load on a 16 KB-page device (Android 15) |
 | the updater pointed at this repository | `crates/nvf-launcher/src/odin.rs` | upstream's fails closed on a different package name and signer, which is exactly what this fork is |
-| the device gyro with a controller in hand | `engine/nvf-play/src/odin/controller_gyro.rs` | upstream's gyro is a touch feature that a selected controller cancels, so on a handheld with sticks it does nothing (the owner, 2026-11-26) |
 | the rebase workflows | `.github/workflows/upstream-{sync,promote}.yml` | the stack is replayed, so it needs replaying every day and promoting by hand |
 
 Phases 2 to 4, with the old stack's commits to port from, are in
@@ -53,9 +56,11 @@ The cost of carrying this fork is the number of **upstream lines** it changes, b
 one of them is a line a rebase can conflict on. So:
 
 - the fork's code lives in files of its own: `engine/nvforever/src/odin/`,
-  `engine/nvf-play/src/odin/`, `crates/nvf-launcher/src/odin.rs`, `android/.../OdinFork.java`, `android/.../OdinStorage.java`,
-  `android/tests/OdinForkTest.java`, `tools/android/tests/test_fork.py`,
-  `.github/workflows/fork-android.yml`;
+  `engine/nvf-play/src/odin/`, `crates/nvf-launcher/src/odin.rs`, `android/.../OdinFork.java`,
+  `android/.../OdinStorage.java`, `android/.../OdinLauncher.java`,
+  `android/.../OdinFolderPicker.java`, `android/.../SaveBackup.java`,
+  `android/.../DebugReport.java`, `android/tests/{OdinFork,SaveBackup,DebugReport}Test.java`,
+  `tools/android/tests/test_fork.py`, `.github/workflows/fork-android.yml`;
 - an upstream file gets a **hook**: one or two lines that call into those files;
 - a hook that grows a body is moved back into a fork-owned file, leaving the call behind.
 
@@ -72,12 +77,12 @@ The hooks, in full, as of this stack:
 | `engine/nvf-play/src/player.rs` | 2 | `odin::controller_gyro::look_allows` in the look route's device gate |
 | `crates/nvf-settings-layout/src/lib.rs` | 3 | `odin-controller-gyro-v1` in two sections and in `NEEDS` |
 | `crates/nvf-launcher/src/lib.rs` | 1 | `pub mod odin;` |
-| `crates/nvf-launcher/src/mobile.rs` | 1 | `odin::adopt(home)` at the top of `request` |
+| `crates/nvf-launcher/src/mobile.rs` | 4 blocks | `odin::adopt(home)` at the top of `request`; three fork fields in `State`; `Request::Odin` and its arm; `odin::chosen_save` in `Start` |
+| `android/.../MobileLauncher.java` | 11 words, 6 lines | `OdinFork.home`; upstream's builders, palette and pages stop being `private`; the `odin` field; one call per page |
+| `android/.../LauncherActivity.java` | 3 blocks | `OdinFork.home` twice, `OdinStorage.promptIfNeeded`, the export result, the save a start loads |
 | `crates/nvf-launcher/src/news.rs` | 1 | `RELEASES` is `odin::RELEASES` |
 | `android/app/build.gradle` | 4 blocks | the application id property, the debug suffix, the `-odin.<n>` revision |
 | `android/app/src/main/AndroidManifest.xml` | 3 | the storage permissions |
-| `android/.../LauncherActivity.java` | 3 | `OdinFork.home`, twice, and `OdinStorage.promptIfNeeded` |
-| `android/.../MobileLauncher.java` | 1 | `OdinFork.home` |
 | `tools/android/build.py` | 2 blocks | `--profile` and `--variant` |
 | `tools/android/verify_apk.py` | 2 blocks | the 16 KB alignment |
 

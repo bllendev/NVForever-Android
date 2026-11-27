@@ -21,6 +21,8 @@ public final class LauncherActivity extends Activity {
     private File pendingInstallApk;
     private static final int PICK_GAME = 1;
     private static final int REQUEST_UNKNOWN_SOURCES = 2;
+    /** The fork's Export debug log, through the system document picker (OdinLauncher). */
+    static final int ODIN_EXPORT_LOG = 3;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -115,6 +117,10 @@ public final class LauncherActivity extends Activity {
             } else if (apk != null) {
                 launcher.message("Install permission was not granted.");
             }
+            return;
+        }
+        if (request == ODIN_EXPORT_LOG) {
+            launcher.odin.exportTo(result == RESULT_OK && data != null ? data.getData() : null);
             return;
         }
         if (request != PICK_GAME || result != RESULT_OK || data == null || data.getData() == null) return;
@@ -214,11 +220,14 @@ public final class LauncherActivity extends Activity {
             while ((n = in.read(buffer)) != -1) out.write(buffer, 0, n);
         }
     }
-    void prepareAndStart(boolean resume) {
+    void prepareAndStart(boolean resume) { prepareAndStart(resume, null); }
+    /** The fork's Load save list starts on the save it names (OdinLauncher). */
+    void prepareAndStartSave(String save) { prepareAndStart(false, save); }
+    private void prepareAndStart(boolean resume, String save) {
         if (busy || runningGame()) return;
         final String args;
         try {
-            args = launcher.startArgs(resume);
+            args = launcher.startArgs(resume, save);
         } catch (IOException | org.json.JSONException e) {
             launcher.startRefused(e.getMessage());
             return;

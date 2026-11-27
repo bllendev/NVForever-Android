@@ -1,0 +1,426 @@
+package org.nvforever.android;
+
+import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.StringWriter;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.text.DateFormat;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+/**
+ * The rows the Android fork adds to upstream's launcher, and the gamepad that works them
+ * (docs/fork.md).
+ *
+ * <p>Upstream's {@link MobileLauncher} is kept as the launcher: it has the news feed, the
+ * settings catalogue, the mods editor, the save preview and the in-app updater, and this fork
+ * is not going to grow a second one of those. What it does not have is what a handheld needs,
+ * so this adds it, in upstream's own style and from a file of its own:
+ *
+ * <ul>
+ *   <li><b>Use a folder in place</b> on the Game folder page, beside their importer, with a
+ *       folder browser that yields a path ({@link OdinFolderPicker}, {@code crate::odin}).
+ *   <li><b>Back up saves</b> and <b>Restore saves</b> to Download ({@link SaveBackup}).
+ *   <li><b>Export debug log</b>, <b>Copy debug summary</b> and the line that says when the
+ *       last run ended unexpectedly ({@link DebugReport}, {@code crate::odin::last_run_note}).
+ *   <li><b>Load save</b>, a page of the saves newest first, which starts the game on the one
+ *       the player picks through upstream's own one-start request.
+ * </ul>
+ *
+ * <p>Every string is hardcoded English, which is upstream's pattern for this launcher.
+ */
+final class OdinLauncher {
+    /** How much of a report goes on the clipboard, which is not a place for 200 KiB. */
+    private static final int SUMMARY_CHARS = 8000;
+    /** Where a report goes when the device has no document picker. */
+    private static final String REPORTS_TAIL = "NVForever-reports";
+    /** How long the page waits before asking again while a game folder is being looked for. */
+    private static final long RECHECK_MS = 400;
+
+    private final LauncherActivity activity;
+    private final MobileLauncher ui;
+    private JSONArray saveList;
+    private String savesError = "";
+
+    OdinLauncher(LauncherActivity activity, MobileLauncher ui) {
+        this.activity = activity;
+        this.ui = ui;
+    }
+
+    // ---- the engine home's folders ---------------------------------------------------
+
+    private File home() {
+        return OdinFork.home(activity.getFilesDir());
+    }
+
+    private File savesDir() {
+        return new File(home(), "saves");
+    }
+
+    private File logsDir() {
+        return new File(home(), "logs");
+    }
+
+    private static File downloads() {
+        return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+    }
+
+    // ---- the Game folder page --------------------------------------------------------
+
+    /**
+     * What the page says while no complete game folder is known. The look for one runs on a
+     * thread of its own, because a storage card that has gone to sleep can take seconds to
+     * answer, so until it finishes the page says so rather than saying there is nothing.
+     */
+    String noFolderLine() {
+        return ui.state.optBoolean("inPlaceChecking", false)
+            ? "Checking game folder..."
+            : "No complete game folder is ready.";
+    }
+
+    /** Whether the launcher should ask again shortly, because the look is still running. */
+    boolean stillChecking() {
+        return ui.state.optBoolean("inPlaceChecking", false);
+    }
+
+    /** The row that chooses a folder to read in place, beside upstream's importer. */
+    void chooseFolderRow(LinearLayout box) {
+        ui.add(box, ui.label("Or read your game where it is: nothing is copied, no app storage is used, and a mod or a replacement BSA you drop in later is seen at once. This needs Android's All files access.", 15, ui.weak));
+        ui.add(box, ui.tap("Use a folder in place", true, ui.editable(), this::pickInPlace));
+        if (!OdinStorage.granted(activity)) {
+            ui.add(box, ui.tap("Allow access to your game folder", false, true, () -> {
+                OdinStorage.promptIfNeeded(activity);
+            }));
+        }
+        ui.add(box, ui.tap("Look for a game folder again", false, ui.editable(), () -> {
+            try {
+                ui.send("odin", "ask", ask("look_again"));
+                ui.message("Looking for a game folder...");
+                ui.refresh(false, false, null);
+            } catch (IOException | JSONException e) {
+                ui.message(said(e, "Could not look again."));
+            }
+        }));
+    }
+
+    /** The rows shown once the game is read in place: change the folder, or import instead. */
+    void inPlaceRows(LinearLayout box) {
+        ui.add(box, ui.tap("Use a different folder", false, ui.editable(), this::pickInPlace));
+    }
+
+    /**
+     * Ask again shortly while the look for a game folder is still running on its own thread,
+     * so the page stops saying "Checking game folder..." by itself.
+     */
+    void afterRefresh() {
+        if (!stillChecking() || activity.isDestroyed() || activity.isFinishing()) {
+            return;
+        }
+        ui.root.postDelayed(() -> {
+            if (!activity.isDestroyed() && !activity.isFinishing()) {
+                ui.refresh(false, activity.runningGame(), null);
+            }
+        }, RECHECK_MS);
+    }
+
+    private void pickInPlace() {
+        if (!OdinStorage.granted(activity)) {
+            OdinStorage.promptIfNeeded(activity);
+            return;
+        }
+        OdinFolderPicker.show(activity, OdinFolderPicker.startAt(OdinFork.dataPath(activity.getFilesDir())), dir -> {
+            try {
+                Object taken = ui.send("odin", "ask", ask("choose_folder", "path", dir.getAbsolutePath()));
+                ui.refresh(false, false, "Reading your game in place at " + taken + ".");
+            } catch (IOException | JSONException e) {
+                ui.message(said(e, "That folder could not be used."));
+            }
+        });
+    }
+
+    // ---- the Home page ---------------------------------------------------------------
+
+    /** The fork's rows on Home: the last run, the saves tools and the debug report. */
+    void homeRows(LinearLayout about) {
+        String ended = ui.state.isNull("lastRunNote") ? "" : ui.state.optString("lastRunNote", "");
+        if (!ended.isEmpty()) {
+            LinearLayout box = ui.card("The last run ended unexpectedly");
+            ui.add(box, ui.label(ended, 15, ui.text));
+            ui.add(box, ui.tap("Export debug log", true, ui.editable(), this::exportLog));
+            ui.add(box, ui.tap("Copy debug summary", false, ui.editable(), this::copySummary));
+        }
+        LinearLayout saves = ui.card("Saves");
+        ui.add(saves, ui.label("Saves live in this app's own storage, which no file app can reach and which uninstalling deletes. A backup is a plain folder of save files in Download, so it can be copied off the device with anything.", 15, ui.weak));
+        ui.add(saves, ui.tap("Back up saves to Download", false, ui.editable(), this::backUpSaves));
+        ui.add(saves, ui.tap("Restore saves from a backup", false, ui.editable(), this::restoreSaves));
+
+        if (ended.isEmpty()) {
+            LinearLayout report = ui.card("Report a problem");
+            ui.add(report, ui.label("Writes one text file: this build and device, then the newest run log, bounded. No saves, no settings and no device-wide logs, and it is sent nowhere by itself. Review it before sharing.", 15, ui.weak));
+            ui.add(report, ui.tap("Export debug log", false, ui.editable(), this::exportLog));
+            ui.add(report, ui.tap("Copy debug summary", false, ui.editable(), this::copySummary));
+        }
+    }
+
+    // ---- the Load save page ----------------------------------------------------------
+
+    /** The saves, newest first; picking one starts the game on it. */
+    void savesPage() {
+        LinearLayout box = ui.card("Load save");
+        if (ui.state.isNull("folder")) {
+            ui.add(box, ui.label("Set up a game folder first: a save can only be loaded by the game it was made in.", 15, ui.weak));
+            return;
+        }
+        if (saveList == null) {
+            try {
+                saveList = ((JSONObject) ui.send("odin", "ask", ask("saves"))).getJSONArray("saves");
+                savesError = "";
+            } catch (IOException | JSONException | ClassCastException e) {
+                saveList = new JSONArray();
+                savesError = said(e, "The save list could not be read.");
+            }
+        }
+        if (!savesError.isEmpty()) {
+            ui.add(box, ui.label(savesError, 15, ui.weak));
+            return;
+        }
+        if (saveList.length() == 0) {
+            ui.add(box, ui.label("No saves yet. Play, then save from the pause menu.", 15, ui.weak));
+            return;
+        }
+        ui.add(box, ui.label("Newest first. Picking one starts the game on that save.", 15, ui.weak));
+        for (int i = 0; i < saveList.length(); i++) {
+            JSONObject save = saveList.optJSONObject(i);
+            if (save == null) {
+                continue;
+            }
+            String name = save.optString("name", "");
+            ui.add(box, ui.tap(name, i == 0, ui.editable(), () -> activity.prepareAndStartSave(name)));
+            ui.add(box, ui.label(saveDetail(save), 14, ui.weak));
+        }
+    }
+
+    /** Forget the save list, so the page reads it again (a start, or a restore, changes it). */
+    void savesChanged() {
+        saveList = null;
+        savesError = "";
+    }
+
+    /** One save's line: when it was saved, who by and how big the file is. */
+    static String saveDetail(JSONObject save) {
+        long when = save.optLong("savedUnix", 0L);
+        String time = when > 0
+            ? DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, Locale.getDefault())
+                .format(new Date(when * 1000L))
+            : "time unknown";
+        String who = save.optString("player", "");
+        int level = save.optInt("level", 0);
+        String person = who.isEmpty() ? "" : who + (level > 0 ? " level " + level : "");
+        return time + (person.isEmpty() ? "" : "  ·  " + person) + "  ·  " + bytes(save.optLong("size", 0L));
+    }
+
+    /** A file's size, as a player reads one. */
+    static String bytes(long size) {
+        if (size >= 1024L * 1024L) {
+            return String.format(Locale.ROOT, "%.1f MB", size / (1024.0 * 1024.0));
+        }
+        if (size >= 1024L) {
+            return (size / 1024L) + " KB";
+        }
+        return size + " bytes";
+    }
+
+    // ---- backing saves up, and reading them back -------------------------------------
+
+    private void backUpSaves() {
+        File saves = savesDir();
+        int count = SaveBackup.countSaves(saves);
+        if (count == 0) {
+            ui.message("There are no saves to back up yet.");
+            return;
+        }
+        File into = SaveBackup.folderFor(downloads(), System.currentTimeMillis());
+        new AlertDialog.Builder(activity)
+            .setTitle("Back up saves")
+            .setMessage("Copy " + count + (count == 1 ? " save" : " saves") + " to Download/"
+                + SaveBackup.BACKUPS_TAIL + "/" + into.getName()
+                + ". Your saves are left exactly as they are; nothing is deleted.")
+            .setPositiveButton("Back up", (dialog, which) -> {
+                try {
+                    int copied = SaveBackup.backUp(saves, into);
+                    ui.message("Backed up " + copied + (copied == 1 ? " save to Download/" : " saves to Download/")
+                        + SaveBackup.BACKUPS_TAIL + "/" + into.getName() + ".");
+                } catch (IOException e) {
+                    ui.message(said(e, "The backup could not be written. Check that Download is writable."));
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void restoreSaves() {
+        List<File> backups = SaveBackup.backups(downloads());
+        if (backups.isEmpty()) {
+            ui.message("No backups in Download/" + SaveBackup.BACKUPS_TAIL + " yet.");
+            return;
+        }
+        String[] labels = new String[backups.size()];
+        for (int i = 0; i < backups.size(); i++) {
+            File backup = backups.get(i);
+            int count = SaveBackup.countSaves(backup);
+            labels[i] = backup.getName() + "  ·  " + count + (count == 1 ? " save" : " saves");
+        }
+        new AlertDialog.Builder(activity)
+            .setTitle("Restore saves")
+            .setItems(labels, (dialog, which) -> confirmRestore(backups.get(which)))
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void confirmRestore(File backup) {
+        File saves = savesDir();
+        int count = SaveBackup.countSaves(backup);
+        int clashes = SaveBackup.clashes(backup, saves);
+        String warning = clashes == 0
+            ? "None of them has a name you already have."
+            : clashes + (clashes == 1 ? " save of yours has" : " saves of yours have")
+                + " the same name. Each one is copied to <name>.bak beside it before it is written over, so nothing is lost.";
+        new AlertDialog.Builder(activity)
+            .setTitle("Restore " + backup.getName())
+            .setMessage("Copy " + count + (count == 1 ? " save" : " saves") + " back into this app. " + warning)
+            .setPositiveButton("Restore", (dialog, which) -> {
+                try {
+                    int restored = SaveBackup.restore(backup, saves);
+                    savesChanged();
+                    ui.refresh(false, false, "Restored " + restored + (restored == 1 ? " save." : " saves."));
+                } catch (IOException e) {
+                    ui.message(said(e, "The restore could not finish. Your saves were not deleted."));
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    // ---- the debug report ------------------------------------------------------------
+
+    /** This build and this device, the one line of the report that is not a log. */
+    String header() {
+        return "NVForever " + activity.installedVersion() + " (" + activity.getPackageName() + ")"
+            + "\ndevice: " + Build.MANUFACTURER + " " + Build.MODEL + " (" + Build.DEVICE + ")"
+            + "\nAndroid " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + "), "
+            + (Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "unknown ABI")
+            + "\nwritten: " + new Date();
+    }
+
+    private void exportLog() {
+        Intent create = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_TITLE, reportName());
+        try {
+            activity.startActivityForResult(create, LauncherActivity.ODIN_EXPORT_LOG);
+        } catch (android.content.ActivityNotFoundException e) {
+            exportToDownload();
+        }
+    }
+
+    private String reportName() {
+        return "nvforever-report-" + SaveBackup.stamp(System.currentTimeMillis()) + ".txt";
+    }
+
+    /** The document picker came back. A null URI means the player left it. */
+    void exportTo(Uri uri) {
+        if (uri == null) {
+            return;
+        }
+        try (OutputStream out = activity.getContentResolver().openOutputStream(uri)) {
+            if (out == null) {
+                throw new IOException("that file could not be opened for writing");
+            }
+            write(new OutputStreamWriter(out, StandardCharsets.UTF_8));
+            ui.message("Debug log exported. Review it before sharing: it names your folders and mods.");
+        } catch (IOException | RuntimeException e) {
+            ui.message(said(e, "The debug log could not be written there."));
+        }
+    }
+
+    private void exportToDownload() {
+        File dir = new File(downloads(), REPORTS_TAIL);
+        File file = new File(dir, reportName());
+        try {
+            if (!dir.isDirectory() && !dir.mkdirs()) {
+                throw new IOException("Download/" + REPORTS_TAIL + " could not be made");
+            }
+            try (Writer out = new OutputStreamWriter(new java.io.FileOutputStream(file), StandardCharsets.UTF_8)) {
+                write(out);
+            }
+            ui.message("Debug log written to Download/" + REPORTS_TAIL + "/" + file.getName() + ".");
+        } catch (IOException e) {
+            ui.message(said(e, "The debug log could not be written."));
+        }
+    }
+
+    private void write(Writer out) throws IOException {
+        try (Writer closing = out) {
+            DebugReport.write(logsDir(), header(), closing);
+        }
+    }
+
+    private void copySummary() {
+        String summary;
+        try {
+            StringWriter text = new StringWriter();
+            DebugReport.write(logsDir(), header(), text);
+            String whole = text.toString();
+            summary = whole.length() <= SUMMARY_CHARS
+                ? whole
+                : header() + "\n[earlier lines left out; Export debug log keeps them]\n"
+                    + whole.substring(whole.length() - SUMMARY_CHARS);
+        } catch (IOException | RuntimeException e) {
+            ui.message(said(e, "The debug summary could not be read."));
+            return;
+        }
+        ClipboardManager clipboard = (ClipboardManager) activity.getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard == null) {
+            ui.message("This device has no clipboard service.");
+            return;
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("NVForever debug summary", summary));
+        ui.message("Debug summary copied. Review it before sharing: it names your folders and mods.");
+    }
+
+    // ---- small shared things ---------------------------------------------------------
+
+    /** One {@code odin} ask, as upstream's request shape carries it. */
+    private static JSONObject ask(String name, String... pairs) throws JSONException {
+        JSONObject object = new JSONObject();
+        object.put("ask", name);
+        for (int i = 0; i + 1 < pairs.length; i += 2) {
+            object.put(pairs[i], pairs[i + 1]);
+        }
+        return object;
+    }
+
+    /** What to show the player: the error's own words where it has them. */
+    private static String said(Exception e, String fallback) {
+        String message = e.getMessage();
+        return message == null || message.isEmpty() ? fallback : message;
+    }
+}
