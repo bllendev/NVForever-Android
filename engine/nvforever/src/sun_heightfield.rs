@@ -673,6 +673,7 @@ pub(crate) fn update_heightfield(
         work.0 = Some(Work::new(&world));
     }
     let Some(w) = work.0.as_mut() else { return };
+    crate::odin::gpu_recorder::mark(crate::odin::gpu_recorder::ring::feature::SUN_HEIGHTFIELD);
     if w.tracker.world() != Some(world.world) {
         w.tracker.begin(world.world);
         w.loader.schedule(Vec::new());

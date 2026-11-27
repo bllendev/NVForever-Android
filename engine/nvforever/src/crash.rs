@@ -456,6 +456,9 @@ fn note_device_lost(line: &str) {
         if let Ok(mut lost) = DEVICE_LOST.try_lock() {
             lost.get_or_insert_with(|| if what.is_empty() { "no reason given".to_string() } else { what.to_string() });
         }
+        // The Android fork: ask the driver what faulted while the device is still there
+        // (odin/gpu_recorder). Logs nothing: this runs inside the log writer.
+        crate::odin::gpu_recorder::note_lost();
     }
 }
 
@@ -727,10 +730,13 @@ fn set_hook() {
                 }
             }
             error!("render: the graphics device was lost ({what}); the panic below is its consequence and the game stops");
+            // The Android fork: the flight recorder's frames and the driver's fault info,
+            // once (odin/gpu_recorder).
+            crate::odin::gpu_recorder::log_dump_once(what);
         }
         let text = match &lost {
             Some(what) => {
-                report_text("the graphics driver", &lost_message(what), "reported by wgpu", &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), &lost_backtrace(&thread, &location, &message, &backtrace))
+                report_text("the graphics driver", &lost_message(what), "reported by wgpu", &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), &(lost_backtrace(&thread, &location, &message, &backtrace) + &crate::odin::gpu_recorder::report_section()))
             }
             None => report_text(&thread, &message, &location, &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), &backtrace),
         };
@@ -776,7 +782,9 @@ fn set_hook() {
 /// message as the panic hook's, so both group together.
 fn write_lost_report(what: &str) {
     let place = PLACE.try_lock().map(|p| p.clone()).unwrap_or_default();
-    let text = report_text("the graphics driver", &lost_message(what), "reported by wgpu", &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), "none: no panic followed the loss");
+    // The Android fork adds the flight recorder's window under the loss (odin/gpu_recorder).
+    let backtrace = "none: no panic followed the loss".to_string() + &crate::odin::gpu_recorder::report_section();
+    let text = report_text("the graphics driver", &lost_message(what), "reported by wgpu", &place, COMMAND.get().map_or("", |s| s.as_str()), run_log_path(), &backtrace);
     let Some(dir) = LOG_DIR.get() else { return };
     let when = stamp(now_secs());
     let path = dir.join(format!("crash-{when}-{}.txt", std::process::id()));
@@ -840,6 +848,11 @@ fn render_error(error: &bevy::render::error_handler::RenderError, main: &mut Wor
         // No panic came first (#2934): the loss gets its crash report here, and the
         // player is told. Bevy asks again every frame until the game has stopped; once.
         let what = device_lost().unwrap_or_else(|| error.description.clone());
+        // The Android fork: wgpu may report the loss through this handler without a log line
+        // the console writer saw (`note_device_lost`), so the driver is asked what faulted
+        // before the dump, and the dump is logged (odin/gpu_recorder).
+        crate::odin::gpu_recorder::note_lost();
+        crate::odin::gpu_recorder::log_dump_once(&what);
         write_lost_report(&what);
         tell_player_at_start(DEVICE_LOST_TEXT, false);
     }

@@ -56,7 +56,7 @@ use bevy::light::SimulationLightSystems;
 use bevy::math::reflection_matrix;
 use bevy::pbr::DistanceFog;
 use bevy::prelude::*;
-use bevy::render::gpu_readback::ReadbackComplete;
+use bevy::render::gpu_readback::{ReadbackComplete, ReadbackDiagnosticLabel};
 #[cfg(any(not(target_os = "android"), test))]
 use bevy::render::gpu_readback::Readback;
 #[cfg(any(target_os = "android", test))]
@@ -346,7 +346,8 @@ fn read_water_pixels(mut commands: Commands, cache: Res<WaterCache>, mut px: Res
             commands.entity(entity).despawn();
         }
         let Some(counter) = counter else { return };
-        let entity = commands.spawn((Name::new("Water pixel readback"), Readback::buffer(counter.clone()))).observe(
+        crate::odin::gpu_recorder::mark(crate::odin::gpu_recorder::ring::feature::WATER_PIXELS_READBACK);
+        let entity = commands.spawn((Name::new("Water pixel readback"), Readback::buffer(counter.clone()), ReadbackDiagnosticLabel("water-pixels"))).observe(
             |ev: On<ReadbackComplete>, probe: Res<WaterProbe>, mut px: ResMut<WaterPixels>, time: Res<Time<Real>>| {
                 if let Some(sample) = WaterSample::decode(&ev.data) {
                     px.read(sample, &probe, time.elapsed_secs());
@@ -369,7 +370,7 @@ fn request_android_water_pixels(commands: &mut Commands, counter: &Handle<Shader
         return;
     }
     let entity = commands
-        .spawn((Name::new("Water pixel readback"), ReadbackOnce::buffer(counter.clone())))
+        .spawn((Name::new("Water pixel readback"), ReadbackOnce::buffer(counter.clone()), ReadbackDiagnosticLabel("water-pixels")))
         .observe(complete_android_water_pixels)
         .id();
     px.pending = Some((entity, counter.id()));
@@ -668,6 +669,9 @@ fn update_reflection(
         None => Vec4::new(0.0, 0.0, ssr, 0.0),
     };
     cache.set_reflection_plane(&mut materials, plane);
+    if height.is_some() {
+        crate::odin::gpu_recorder::mark(crate::odin::gpu_recorder::ring::feature::WATER_REFLECTION);
+    }
     if camera.is_active != height.is_some() {
         camera.is_active = height.is_some();
         match (height, seen) {

@@ -10,17 +10,22 @@
 //! | upstream file | hook | what it reaches |
 //! | --- | --- | --- |
 //! | `main.rs` | `pub mod odin;` | this module |
-//! | `main.rs` | the Android plugin list | [`mem_log::MemoryLogPlugin`] |
+//! | `main.rs` | before `DefaultPlugins` | [`init`] |
+//! | `main.rs` | just before `App::run` | [`before_run`] |
 //! | `android.rs` | the home folder's name | [`home::DIR`] |
 //! | `android.rs` | the launcher's crash-test switches | [`crash_tests::apply`] |
 //! | `crash.rs` | the allocator `SaysWhenEmpty` wraps | [`alloc::BACKEND`] |
 //! | `crash.rs` | one dump when an allocation fails | [`proc_mem::dump_once`] |
 //! | `touch/gyro.rs` | the settings row, and three terms of `poll` | [`controller_gyro`] |
 //! | `main.rs` | the play branch's plugin list | [`wrist_screen::WristScreenPlugin`] |
+//! | `crash.rs` | a lost device's dump | [`gpu_recorder::note_lost`], [`gpu_recorder::log_dump_once`], [`gpu_recorder::report_section`] |
 //! | `vats_highlight.rs`, `particles.rs`, `effect_particles.rs`, `decals.rs`, `heat_haze.rs`, `pipboy_arm.rs` | one gate each | [`crash_tests`] |
+//! | the render features that are worth recording | one [`gpu_recorder::mark`] each | [`gpu_recorder::ring::feature`] |
 //!
 //! The Android-only parts of each module are behind `cfg(target_os = "android")`, while their
 //! parsing and their wording are plain functions, built and tested everywhere.
+
+use bevy::app::App;
 
 /// Which allocator the game's allocations go to (`crash.rs`'s `SaysWhenEmpty` wraps it).
 pub mod alloc;
@@ -31,8 +36,6 @@ pub use nvf_play::odin::controller_gyro;
 pub mod crash_tests;
 /// The Android home folder's name, which the fork keeps as earlier builds left it.
 pub mod home;
-/// The memory summary line in the Android run log (added to the Android plugin list only).
-pub mod mem_log;
 /// What this process's own memory is doing, and the dump on a failed allocation.
 pub mod proc_mem;
 /// The live glance at the Pip-Boy: the screen drawn on the arm while the game runs. It
@@ -41,6 +44,11 @@ pub mod proc_mem;
 /// all one list.
 #[path = "../wrist_screen.rs"]
 pub mod wrist_screen;
+
+/// The bounded GPU flight recorder and its parts. It keeps the name the log lines and the
+/// docs use, so it sits beside `main.rs` and is declared from here (docs/fork.md).
+#[path = "../gpu_recorder/mod.rs"]
+pub mod gpu_recorder;
 
 /// Whether `name` is set at all, whatever it holds: how a switch that stands for "do none of
 /// this" is read, since the launcher only ever writes it as `1`.
@@ -58,7 +66,31 @@ pub fn env_on(name: &str) -> bool {
 }
 
 /// Whether `name` is set to exactly `0`: how a switch that turns something *off* that is
-/// otherwise on is read. Unset is not off.
+/// otherwise on is read ([`gpu_recorder::fault`]). Unset is not off.
 pub fn env_off(name: &str) -> bool {
     std::env::var(name).is_ok_and(|v| v.trim() == "0")
+}
+
+/// What must be asked of the Vulkan instance and device before `DefaultPlugins`, which is
+/// where the renderer reads these settings (vendored `bevy_render`, `RenderPlugin::build`).
+/// The one hook of its own in `main.rs`.
+pub fn init(app: &mut App) {
+    // VK_EXT_device_fault, so a lost device can say what faulted (gpu_recorder/fault.rs).
+    // Nothing is enabled on a driver without it.
+    let mut settings = app.world_mut().get_resource_or_init::<bevy::render::renderer::raw_vulkan_init::RawVulkanInitSettings>();
+    gpu_recorder::fault::ask_for_extension(&mut settings);
+}
+
+/// The fork's own plugins on the configured game just before it runs. Every one of them
+/// orders its systems against named sets and systems, so being added last changes nothing
+/// about when they run. The other hook of its own in `main.rs`.
+pub fn before_run(app: &mut App) {
+    // The bounded GPU flight recorder: one summary line every ten seconds, and the whole
+    // window only when the device is lost (gpu_recorder/, the Odin 3's DeviceLost). Its
+    // `finish` wants the render world, which exists by now.
+    app.add_plugins(gpu_recorder::GpuRecorderPlugin);
+    // The transparent pass cut into chunks with a breadcrumb marker between them: a crash
+    // test, and nothing at all unless both its switches are on
+    // (gpu_recorder/transparent_chunks.rs).
+    app.add_plugins(gpu_recorder::transparent_chunks::TransparentChunksPlugin);
 }

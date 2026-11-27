@@ -303,6 +303,13 @@ struct RenderContextStateInner {
     command_encoder: Option<CommandEncoder>,
     // NVForever encoder spans: a GPU time span is open on `command_encoder`.
     span_open: bool,
+    // NVForever GPU breadcrumbs: a begin marker has been recorded on `command_encoder` and
+    // its end marker has not.
+    breadcrumb_open: bool,
+    // NVForever GPU breadcrumbs: this system's interned node index, kept for the run (this
+    // state belongs to the system, not to the frame), so only its first marker ever looks a
+    // name up.
+    breadcrumb_node: Option<u16>,
     commands: Vec<PendingCommandBuffer>,
     render_device: Option<RenderDevice>,
 }
@@ -400,6 +407,7 @@ impl SystemBuffer for RenderContextState {
 
         inner.render_device = None;
         inner.span_open = false;
+        inner.breadcrumb_open = false;
     }
 }
 
@@ -415,6 +423,7 @@ fn encoder_spans_on() -> bool {
 impl Drop for RenderContext<'_, '_> {
     fn drop(&mut self) {
         self.end_encoder_span();
+        self.end_breadcrumb();
     }
 }
 
@@ -449,8 +458,85 @@ impl<'w, 's> RenderContext<'w, 's> {
     /// Returns the current command encoder, creating one if it does not already exist.
     pub fn command_encoder(&mut self) -> &mut CommandEncoder {
         self.ensure_device();
+        self.begin_breadcrumb();
         self.begin_encoder_span();
         self.state.command_encoder(self.system_name.as_str())
+    }
+
+    /// NVForever GPU breadcrumbs (`crate::gpu_breadcrumbs`): the marker the GPU writes before
+    /// it runs anything this render-graph node records, so a lost device can say which node
+    /// the GPU had begun. A command buffer of its own, pushed in front of the encoder this
+    /// call is about to open (wgpu-core forbids raw and wgpu commands on one encoder, module
+    /// notes there), so the queue is given marker, node, marker in that order.
+    ///
+    /// Does nothing with `NVF_GPU_BREADCRUMBS` unset, which is every ordinary run.
+    fn begin_breadcrumb(&mut self) {
+        if self.state.0.breadcrumb_open || !crate::gpu_breadcrumbs::on() {
+            return;
+        }
+        let name = self.system_name.as_str();
+        let node = *self
+            .state
+            .0
+            .breadcrumb_node
+            .get_or_insert_with(|| crate::gpu_breadcrumbs::node(name));
+        self.state.0.breadcrumb_open = true;
+        // Anything already recorded belongs before the marker, and the encoder the caller is
+        // about to open belongs after it.
+        self.state.flush_encoder();
+        if let Some(buffer) = crate::gpu_breadcrumbs::mark(self.render_device.wgpu_device(), node, false) {
+            self.state
+                .0
+                .commands
+                .push(PendingCommandBuffer::Buffer(buffer));
+        }
+    }
+
+    /// NVForever GPU breadcrumbs: a marker of the caller's own, between what this node has
+    /// recorded so far and what it records next. The node's own begin and end markers still
+    /// surround all of it.
+    ///
+    /// For a node that wants finer grain than itself: the transparent pass records one
+    /// marker between each chunk of draws it splits the phase into, because a
+    /// `vkCmdFillBuffer` is not allowed inside a render pass and so cannot sit between two
+    /// draws of one pass (nvforever `gpu_recorder::transparent_chunks`). `name` must come
+    /// from a small fixed set ([`gpu_breadcrumbs::node`](crate::gpu_breadcrumbs::node)).
+    ///
+    /// Does nothing with `NVF_GPU_BREADCRUMBS` unset, which is every ordinary run.
+    pub fn gpu_breadcrumb(&mut self, name: &str, end: bool) {
+        if !crate::gpu_breadcrumbs::on() {
+            return;
+        }
+        self.ensure_device();
+        let node = crate::gpu_breadcrumbs::node(name);
+        // Whatever is open belongs before the marker, and the pass the caller opens next
+        // after it.
+        self.state.flush_encoder();
+        if let Some(buffer) = crate::gpu_breadcrumbs::mark(self.render_device.wgpu_device(), node, end) {
+            self.state
+                .0
+                .commands
+                .push(PendingCommandBuffer::Buffer(buffer));
+        }
+    }
+
+    /// The matching end marker, after everything the node recorded. A begin whose end never
+    /// ran on the GPU is the node that hung.
+    fn end_breadcrumb(&mut self) {
+        if !self.state.0.breadcrumb_open {
+            return;
+        }
+        self.state.0.breadcrumb_open = false;
+        let Some(node) = self.state.0.breadcrumb_node else {
+            return;
+        };
+        self.state.flush_encoder();
+        if let Some(buffer) = crate::gpu_breadcrumbs::mark(self.render_device.wgpu_device(), node, true) {
+            self.state
+                .0
+                .commands
+                .push(PendingCommandBuffer::Buffer(buffer));
+        }
     }
 
     // NVForever encoder spans: see `encoder_spans_on`.
@@ -489,6 +575,7 @@ impl<'w, 's> RenderContext<'w, 's> {
         descriptor: RenderPassDescriptor<'_>,
     ) -> TrackedRenderPass<'a> {
         self.ensure_device();
+        self.begin_breadcrumb();
         self.begin_encoder_span();
 
         let command_encoder = self.state.0.command_encoder.get_or_insert_with(|| {
@@ -515,6 +602,7 @@ impl<'w, 's> RenderContext<'w, 's> {
     /// Adds a finished command buffer to be submitted later.
     pub fn add_command_buffer(&mut self, command_buffer: CommandBuffer) {
         self.end_encoder_span();
+        self.end_breadcrumb();
         self.state.flush_encoder();
         self.state
             .0

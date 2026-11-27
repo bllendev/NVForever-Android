@@ -400,6 +400,9 @@ fn place(
         let entity = commands
             .spawn((ForwardDecal, MeshMaterial3d(material.clone()), place, Visibility::default(), RenderLayers::layer(DECAL_LAYER), Decal { age: 0.0, material }, ChildOf(parent)))
             .id();
+        // The fork's crash test (gpu_recorder/transparent_chunks.rs): what the chunk report
+        // calls it. The name is built only while that switch is on.
+        crate::odin::gpu_recorder::transparent_chunks::tag(&mut commands, entity, || format!("decal {}", impact.edid.as_deref().unwrap_or("?")));
         if hit.splatter && st.splatters_placed == 0 {
             info!(
                 "decals: {} splatters blood ({}) on the world behind a shot actor at ({:.0}, {:.0}, {:.0}), facing ({:.2}, {:.2}, {:.2}): side {side:.0}",

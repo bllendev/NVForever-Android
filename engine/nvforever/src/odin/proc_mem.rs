@@ -22,8 +22,8 @@
 //!   `RssFile`: anonymous memory is the heap's and the driver's, file-backed is the mapped
 //!   libraries and archives [documented: proc(5), "/proc/pid/status"].
 //!
-//! **What is printed.** Every [`super::mem_log::SUMMARY_SECS`] the figures are one line of the
-//! run log ([`ProcMem::text`], written by [`super::mem_log`]). The first time an allocation fails
+//! **What is printed.** Every [`super::gpu_recorder::SUMMARY_SECS`] the figures are one line of the
+//! run log ([`ProcMem::text`], a clause of the recorder's summary line, `super::gpu_recorder`). The first time an allocation fails
 //! ([`dump_once`], called from the fork's one line in `crash.rs`) they are written again with
 //! `/proc/self/maps` grouped by name, the [`TOP_GROUPS`] names with the most mappings first,
 //! so the line that answers the question is in the run log the player exports.
@@ -326,7 +326,7 @@ fn kb_mb(kb: Option<u64>) -> String {
 
 /// The buffer `/proc` is read through and the group table the dump fills: in place before the
 /// failure, because the failure path has no memory to make them with. About 70 kB of this
-/// program's own data, touched once every [`super::mem_log::SUMMARY_SECS`] and once more
+/// program's own data, touched once every [`super::gpu_recorder::SUMMARY_SECS`] and once more
 /// if an allocation ever fails.
 #[cfg(target_os = "android")]
 static SCRATCH: std::sync::Mutex<Scratch> = std::sync::Mutex::new(Scratch { buf: [0; BUF_BYTES], groups: Groups::new() });
@@ -452,7 +452,7 @@ fn read_status_and_limits(buf: &mut [u8]) -> ProcMem {
 
 /// This process's own memory now: one `/proc/self/status` read, one pass over
 /// `/proc/self/maps` to count its lines, `/proc/sys/vm/max_map_count` and `mallinfo`. Called
-/// once every [`super::mem_log::SUMMARY_SECS`], never per frame. `None` off Android and
+/// once every [`super::gpu_recorder::SUMMARY_SECS`], never per frame. `None` off Android and
 /// while the dump holds the buffer.
 pub fn sample() -> Option<ProcMem> {
     #[cfg(target_os = "android")]
