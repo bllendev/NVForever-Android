@@ -62,7 +62,9 @@
 
 pub mod marker;
 pub mod touch_map;
+// `WorldMap` and its projection are read by the live wrist map too (`crate::wrist_arm`).
 pub(crate) mod model;
+// The Local Map's outline producer is the live wrist map's base too (`crate::wrist_local`).
 pub(crate) mod outline;
 pub(crate) mod read;
 pub mod travel;
@@ -129,8 +131,9 @@ const DOT: f32 = 8.0;
 /// (255 under it).
 const MARKER_GROW: f32 = 1.75;
 const MARKER_BRIGHTNESS: (f32, f32) = (220.0, 255.0);
-/// The map picture: alpha 128 at brightness 255.
-pub(crate) const MAP_ALPHA: f32 = 128.0;
+/// The map picture: alpha 128 at brightness 255. (Public: the live wrist map lays the
+/// same picture on the arm's own screen, nvforever `wrist_screen`.)
+pub const MAP_ALPHA: f32 = 128.0;
 /// The player's arrow: `glow_cursor.dds`, 1.28 times as high as wide.
 const CURSOR_FILE: &str = "Interface\\Icons\\Misc\\glow_cursor.dds";
 const CURSOR_ASPECT: f32 = 1.28;
@@ -504,7 +507,7 @@ pub struct DataState {
     /// The landscape surfaces of the cells the outline read (by grid square; `None` for a
     /// square without land), smoothed or stored as the run draws and collides them
     /// (`crate::smooth_terrain`, #2149), kept while one outline is made.
-    outline_land: HashMap<(i32, i32), Option<fnv_world::land_surface::Surface>>,
+    outline_land: outline::LandCache,
     /// How many markers the world map showed when last logged.
     world_logged: Option<(u32, usize, usize, usize, usize)>,
     /// The World Map's companion count at the last log.
@@ -3263,30 +3266,9 @@ fn advance_outline(st: &mut DataState, game: &mut Game, images: &mut Assets<Imag
         st.outline_land.clear();
     }
     let Some(o) = st.outline.as_mut().filter(|o| !o.done()) else { return };
-    let lands = &mut st.outline_land;
-    let data = game.world.as_ref().filter(|_| interior.is_none()).map(|w| (w.lo, w.schema, w.index));
-    let grid = data.and_then(|(_, _, index)| index.worldspaces.get(&world)).map(|ws| &ws.grid);
-    let mut ground = |x: f32, y: f32| -> Option<f32> {
-        let ((lo, schema, index), grid) = (data?, grid?);
-        let g = ((x / model::CELL).floor() as i32, (y / model::CELL).floor() as i32);
-        // The surface the loaded collision has too, so the outline does not change where
-        // the rays leave the loaded cells.
-        let surface = lands.entry(g).or_insert_with(|| {
-            let ids = fnv_world::land_surface::land_ids(g, |n| grid.get(&n).and_then(|c| index.cells.get(c)).and_then(|c| c.land));
-            fnv_world::land_surface::load_surface(lo, schema, &ids, crate::smooth_terrain::spec())
-        });
-        surface.as_ref()?.height_at(x - g.0 as f32 * model::CELL, y - g.1 as f32 * model::CELL)
-    };
+    let data = game.world.as_ref().filter(|_| interior.is_none()).map(|w| (w.0, world));
     let Some(phys) = game.phys.as_mut() else { return };
-    let player_key = phys.player.as_ref().map(|c| c.key());
-    phys.world.update_queries();
-    let q = phys.world.queries();
-    let mut filter = fnv_phys::Filter { exclude_layers: fnv_phys::layers::character_ignores().union(fnv_phys::layers::actor_volumes()), no_dynamic: true, ..Default::default() };
-    filter.exclude.extend(player_key);
-    let started = std::time::Instant::now();
-    while !o.done() && started.elapsed() < OUTLINE_BUDGET {
-        o.advance(OUTLINE_BATCH, |p, reach| q.ray(p, [0.0, 0.0, -1.0], reach, &filter).map(|h| h.point[2]).or_else(|| ground(p[0], p[1])));
-    }
+    outline::cast(o, phys, &mut st.outline_land, data, OUTLINE_BUDGET, OUTLINE_BATCH);
     if o.done() {
         o.image = Some(images.add(o.picture()));
         st.outline_last = None;

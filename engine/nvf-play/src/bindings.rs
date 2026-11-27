@@ -149,6 +149,11 @@ pub enum Control {
     HideHud,
     /// End the Pip-Boy radio's song or talk now (iSkipRadioSongKey).
     SkipRadioSong,
+    /// Raise the arm with the live map on the Pip-Boy's screen, without opening the
+    /// menus (`crate::wrist_arm`). Unbound by default: with no binding of its own the
+    /// glance follows a *hold* of Menu Mode, and a tap of that key still opens the
+    /// Pip-Boy as it always did.
+    GlancePipBoy,
     /// Open and close the console (the original's ` key; Stewie's Tweaks iConsoleKey), a
     /// binding like any other [design: owner 2026-11-16: "make the console hotkey and
     /// screenshot hotkey a normal rebindable key"].
@@ -165,7 +170,7 @@ pub enum Control {
 /// maintainer's decision on #3002]; Photo Mode unbound, no key and no controller button,
 /// until the player binds it under Controls, Actions (the pause menu's Photo Mode entry
 /// opens it meanwhile) [design, #3634: the maintainer's decision].
-pub const GAME_CONTROLS: [(Control, &str, u32); 59] = [
+pub const GAME_CONTROLS: [(Control, &str, u32); 60] = [
     (Control::Forward, "Forward", 0x0011FF13),
     (Control::Back, "Back", 0x001FFF14),
     (Control::SlideLeft, "Slide Left", 0x001EFF17),
@@ -223,6 +228,7 @@ pub const GAME_CONTROLS: [(Control, &str, u32); 59] = [
     (Control::PlaceMarkerHere, "Place Marker Here", 0xFFFFFFFF),
     (Control::HideHud, "Hide HUD", 0xFFFFFFFF),
     (Control::SkipRadioSong, "Skip Radio Song", 0xFFFFFFFF),
+    (Control::GlancePipBoy, "Glance at Pip-Boy", 0xFFFFFFFF),
     // Bound by default, as before they were bindings (the keys as the INI codes them).
     (Control::Console, "Console", 0x0029FFFF),
     (Control::Screenshot, "Screenshot", 0x0058FFFF),
@@ -627,6 +633,7 @@ pub fn label(c: Control) -> &'static str {
         Jump => "Jump",
         TogglePov => "Toggle View",
         MenuMode => "Pip-Boy",
+        GlancePipBoy => "Glance at Pip-Boy",
         Rest => "Wait",
         Vats => "V.A.T.S.",
         Hotkey1 => "Hotkey 1",
@@ -1400,10 +1407,32 @@ impl ControlInput<'_, '_> {
     /// A playing kill camera holds `c`: every control but those that open a menu or
     /// save, so the game can still be paused or left (`crate::kill_cam`, module notes).
     pub fn held(&self, c: Control) -> bool {
+        // The live wrist map holds the hands' own controls while the arm is up, so an
+        // attack cannot fire or draw through it and the sights cannot zoom, and with them
+        // whatever the player bound to the two D-Pad buttons that turn its pages. Set from
+        // the glance's open intent every frame, never latched and forgotten at the top of
+        // each frame: the frame the arm goes down they are all back
+        // (`crate::wrist_arm::holds`, `wrist_arm::flips_page`, `wrist_arm::glance_holds`).
+        // The D-Pad's two only where a controller works the controls: on a keyboard the
+        // flip is the arrow keys, which are no control's binding, so nothing is taken.
+        if crate::wrist_arm::glance_holds() && (crate::wrist_arm::holds(c) || (self.controller() && crate::wrist_arm::flips_page(self.bindings.pad(c)))) {
+            return true;
+        }
         self.kill_cam.as_ref().is_some_and(|k| k.active())
             && !matches!(c, Control::MenuMode | Control::Rest | Control::QuickSave | Control::QuickLoad)
             // The player's tweak leaves walking and running (docs/design/tweaks.md).
             && !(crate::kill_cam::move_during() && matches!(c, Control::Forward | Control::Back | Control::SlideLeft | Control::SlideRight | Control::Run | Control::AlwaysRun | Control::AutoMove))
+    }
+
+    /// Whether this control has an input of its own on the device in use: a control with
+    /// none is not pressed by anything, and its owner may fall back to another key
+    /// (`crate::wrist_arm` follows a hold of Menu Mode while its own is unbound).
+    pub fn bound(&self, c: Control) -> bool {
+        if self.controller() {
+            return self.bindings.pad(c).is_some();
+        }
+        let b = self.bindings.get(c);
+        b.key.is_some() || b.mouse.is_some()
     }
 
     /// A controller works the controls.

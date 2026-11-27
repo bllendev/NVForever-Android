@@ -652,9 +652,14 @@ fn draw(
         logged.2 = sights;
         info!("crosshair: {}", if !sights { "shown again" } else if scoped { "hidden by the scope" } else if reloading { "hidden while reloading" } else { "hidden down the true iron sights" });
     }
+    // The glance at the Pip-Boy hides it while the arm is up: the device is what the
+    // player is looking at, and the hands' controls are held anyway (`crate::wrist_arm`)
+    // [design: the owner, 2026-11-21]. Read from the glance's own open intent, never
+    // latched, so the crosshair is back the frame the arm goes down.
+    let glancing = crate::wrist_arm::glance_holds();
     for mut v in &mut root {
         // The Tweaks tab's crosshair key hides it [design: docs/design/tweaks.md].
-        v.set_if_neq(show(playing && !sights && !tweaks.as_ref().is_some_and(|t| t.crosshair_hidden)));
+        v.set_if_neq(show(playing && !sights && !glancing && !tweaks.as_ref().is_some_and(|t| t.crosshair_hidden)));
     }
     if !playing || sights {
         return;

@@ -288,6 +288,60 @@ Android-specific rows and HUD compatibility are documented in [the Android setti
 - Command-line switches: `--no-lip`
 - Registered in `engine/nvforever/src/settings.rs`
 
+## Gameplay › Pip-Boy
+
+### `wrist-map`: Glance at the Pip-Boy
+
+- On the page: On: holding the Pip-Boy key or button raises the arm with the world map
+  live on its screen, without opening the menus; a short tap opens the Pip-Boy as usual.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
+### `wrist-map-raise`: Glance key
+
+- On the page: Hold: the arm is up while the key is held. Toggle: a hold raises it and the
+  next hold puts it down.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
+### `wrist-map-style`: Glance map
+
+- On the page: Local: the place round you, drawn from what is there: the roads, the
+  buildings and the walls about them. World: the worldspace's own map picture, as the
+  World Map page shows it.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
+### `wrist-map-position`: Glance position
+
+- On the page: Lower left: the arm comes up low on the left, leaving the middle of the
+  picture clear to walk through. Centre: under the middle of the view, where the menus
+  hold it.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
+### `wrist-map-zoom`: Glance zoom
+
+- On the page: Near: the place about you, a couple of hundred metres across the glass.
+  Far: twice as much of the map either way.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
+### `wrist-map-rotate`: Glance map turns
+
+- On the page: With me: the map turns as you do, your mark points up the glass and N, E, S
+  and W ride round its edge. North up: north stays at the top and your mark turns.
+- Registered in `engine/nvf-play/src/wrist_arm.rs`
+
+### `wrist-hud`: HUD on the Pip-Boy
+
+- On the page: On: the health, action points, condition and ammo meters leave the screen
+  and are read on the Pip-Boy's own page instead. The compass, crosshair and messages
+  stay.
+- Registered in `engine/nvf-play/src/wrist_hud.rs`
+
+### `wrist-hud-flash`: Flash a hidden meter
+
+- On the page: On: a meter the row above hides comes back for a few seconds when it drops
+  (damage taken, action points spent, a round fired, the weapon wearing). Off: it never
+  comes back.
+- Registered in `engine/nvf-play/src/wrist_hud.rs`
+
 ## Gameplay › Saving
 
 ### `autosave-travel`: Autosave after travel

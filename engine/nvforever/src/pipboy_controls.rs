@@ -388,9 +388,19 @@ pub(crate) fn turn_controls(
     script: Option<ResMut<ScriptState>>,
     mut angles: ResMut<ControlAngles>,
     mut shapes: ControlShapes,
+    wrist: Option<Res<nvf_play::wrist_arm::WristLive>>,
 ) {
-    let readings = if pip.on_arm() {
-        Readings { rads: rads(script.map(Into::into)), tab: Some(pip.tab()), row: list_row(&pip, stats.as_deref(), data.as_deref(), &active, inventory.as_deref(), map.as_deref(), items.as_deref()) }
+    // The glance at the Pip-Boy holds the very same device: its knob stands at the page
+    // the player turned to and its needle follows their rads, as the menus' own do
+    // [design: the owner, 2026-11-21, "the Pip-Boy's own tab-knob turns on the model"].
+    let glance = wrist.as_deref().filter(|w| w.screen_key().is_some());
+    let tab = match (pip.on_arm(), glance) {
+        (true, _) => Some(pip.tab()),
+        (false, Some(w)) => Some(w.page.at()),
+        (false, None) => None,
+    };
+    let readings = if tab.is_some() {
+        Readings { rads: rads(script.map(Into::into)), tab, row: pip.on_arm().then(|| list_row(&pip, stats.as_deref(), data.as_deref(), &active, inventory.as_deref(), map.as_deref(), items.as_deref())).flatten() }
     } else {
         Readings::default()
     };

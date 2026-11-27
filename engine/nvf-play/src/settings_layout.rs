@@ -336,7 +336,8 @@ mod shared_table_tests {
     /// #2991's volumetric clouds row; #3348's HDR output row; #3783's occlusion culling row;
     /// #3032's volumetric light row and its strength; #3843's localized armor DT/DR row; the
     /// casino screens' Caravan tips row; the
-    /// physical lighting row; #4690's tonemapping preset row), by the group it registers with.
+    /// physical lighting row; #4690's tonemapping preset row; the glance's own rows), by the
+    /// group it registers with.
     pub(super) const KNOWN: &[(&str, &str)] = &[
         ("detached-camera", "Gameplay"),
         ("gore-shake", "Gameplay"),
@@ -387,6 +388,14 @@ mod shared_table_tests {
         ("aim-assist", "Controller"),
         ("aim-slowdown", "Controller"),
         ("aim-lock", "Controller"),
+        ("wrist-map", "Gameplay"),
+        ("wrist-map-raise", "Gameplay"),
+        ("wrist-map-style", "Gameplay"),
+        ("wrist-map-position", "Gameplay"),
+        ("wrist-map-zoom", "Gameplay"),
+        ("wrist-map-rotate", "Gameplay"),
+        ("wrist-hud", "Gameplay"),
+        ("wrist-hud-flash", "Gameplay"),
         ("autosave-travel", "Saving"),
         ("autosave-fast-travel", "Saving"),
         ("autosave-wait", "Saving"),
