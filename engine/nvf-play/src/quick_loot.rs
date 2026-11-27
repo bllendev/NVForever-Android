@@ -14,6 +14,10 @@
 //!   full container or pickpocket menu as Activate would without Quick Loot, and the mouse
 //!   wheel moves the selection [design, #2933: fifth look, R and T swapped]. While the list shows, those keys do nothing else:
 //!   no reload, no Wait menu, no camera zoom ([`holds_input`]).
+//! - **On a controller** the D-pad's Up and Down move the selection as the wheel does, one
+//!   row per press, while a list with rows shows ([`QuickLoot::owns_vertical_dpad`]): their
+//!   own controls (the hotkeys on the D-pad by default) are not pressed by them then. The
+//!   body is the fork's own (`crate::quick_loot_dpad`).
 //! - **The rules are the container menu's** (`crate::menu::model::MenuModel`, opened on the
 //!   target as the menu opens it, its pickpocket rolls included): a take from someone
 //!   else's container is theft (`crate::crime::ItemsTaken`), a pocket's take rolls its
@@ -186,6 +190,11 @@ impl Shown {
 #[derive(Resource, Default)]
 pub struct QuickLoot {
     pub shown: Option<Shown>,
+    /// A list with rows shows on a controller: the D-pad's Up and Down move its selection
+    /// and are no control's (`crate::quick_loot_dpad`). Set in `PlaySet::Activation`, so
+    /// the input systems before it (the weapon wheel's hotkeys) see the last frame's, as
+    /// they see the last frame's [`holds_input`].
+    pub(crate) owns_vertical_dpad: bool,
     /// The target a caught pickpocketing closed the list on: not shown on it again until
     /// the crosshair leaves it.
     closed_on: Option<u32>,
@@ -776,6 +785,9 @@ pub(crate) fn follow(
     mut corner: Option<ResMut<crate::corner_messages::CornerMessages>>,
 ) {
     let mut script = script;
+    // What the hotkeys were told this frame (the field's notes): the D-pad's Up and Down
+    // are the list's here only where no control has had them already.
+    let owns_dpad = ql.owns_vertical_dpad;
     let busy = wheel.is_some_and(|w| w.holds_input())
         || vats.is_some_and(|v| v.holds_input() || v.selected().is_some() || v.playing_back())
         || creator.is_some_and(|c| c.is_open())
@@ -808,6 +820,8 @@ pub(crate) fn follow(
     }
     let shown_now = ql.shown.is_some();
     HOLDS.store(shown_now, Ordering::Relaxed);
+    // What the next frame's hotkeys are told (the field's notes).
+    ql.owns_vertical_dpad = crate::quick_loot_dpad::owns(&input, ql.shown.as_ref().is_some_and(|s| !s.rows().is_empty()));
     let Some(s) = ql.shown.as_mut() else { return };
     // The frame a list opens, its keys are not read: the systems that read them before
     // `PlaySet::Activation` (Ready Item, the wheel) saw no list and may have used them.
@@ -821,18 +835,21 @@ pub(crate) fn follow(
             warn!("quick loot: 0x{:08X} cannot be listed again: {e}", s.target);
         }
     }
-    // The wheel moves the selection, up moving it up.
-    let notches = scroll.delta.y;
-    if notches != 0.0 && !input.suppressed() {
-        let steps = if notches > 0.0 { -1 } else { 1 };
+    // The wheel moves the selection, up moving it up; so do the D-pad's Up and Down where
+    // the list has them, one row per press (`crate::quick_loot_dpad`).
+    let (up, down) = crate::quick_loot_dpad::pressed(&input, owns_dpad);
+    let steps = crate::quick_loot_dpad::steps(scroll.delta.y, up, down);
+    if steps != 0 && !input.suppressed() {
         s.model.apply(&mut sim.world, Command::Scroll(steps));
     }
-    let cmd = if input.just_pressed(Control::Activate) {
+    // A control the list has the D-pad of does not act as well (`quick_loot_dpad::binds`).
+    let pressed = |c| input.just_pressed_with_pad(c, !(owns_dpad && crate::quick_loot_dpad::binds(&input, c)));
+    let cmd = if pressed(Control::Activate) {
         Some(Command::Stack)
-    } else if input.just_pressed(Control::ReadyItem) && s.kind != Kind::Pocket {
+    } else if pressed(Control::ReadyItem) && s.kind != Kind::Pocket {
         Some(Command::TakeAll)
     } else {
-        if input.just_pressed(Control::Rest) {
+        if pressed(Control::Rest) {
             info!("quick loot: the full menu on 0x{:08X} \"{}\"", s.target, s.title);
             FULL.store(true, Ordering::Relaxed);
         }
@@ -896,6 +913,7 @@ pub(crate) fn follow(
 /// the target when play comes back, so what the full menu changed is read.
 fn leave_play(mut ql: ResMut<QuickLoot>) {
     ql.shown = None;
+    ql.owns_vertical_dpad = false;
     HOLDS.store(false, Ordering::Relaxed);
 }
 
@@ -1198,6 +1216,134 @@ mod tests {
 
     fn find<'a>(l: &'a Laid, text: &str) -> &'a Piece {
         l.pieces.iter().find(|p| p.text == text).unwrap_or_else(|| panic!("no \"{text}\""))
+    }
+
+    /// A container of three items in a world built in memory, as menu/model/tests.rs builds
+    /// one (no game data), and the list shown on it.
+    fn shown_on_a_box() -> (SimState, Shown) {
+        use crate::script_draw::tests::{record, sub, top};
+        use fnv_esm::{LoadOrder, Plugin, Schema};
+        const CAN: u32 = 0x100;
+        const CAPS: u32 = 0x101;
+        const ANVIL: u32 = 0x102;
+        const BOX: u32 = 0x120;
+        const CELL: u32 = 0x200;
+        const BOX_REF: u32 = 0x300;
+        let z = |s: &str| [s.as_bytes(), &[0]].concat();
+        let group = |label: [u8; 4], kind: i32, body: &[u8]| [&b"GRUP"[..], &((24 + body.len()) as u32).to_le_bytes(), &label, &kind.to_le_bytes(), &[0; 8], body].concat();
+        let misc = |fid: u32, edid: &str, full: &str, value: i32, weight: f32| {
+            record(b"MISC", 0, fid, &[sub(b"EDID", z(edid)), sub(b"FULL", z(full)), sub(b"DATA", [value.to_le_bytes(), weight.to_le_bytes()].concat())])
+        };
+        let cnto = |item: u32, count: i32| sub(b"CNTO", [item.to_le_bytes(), count.to_le_bytes()].concat());
+        let cont = record(
+            b"CONT",
+            0,
+            BOX,
+            &[sub(b"EDID", z("TestBox")), sub(b"FULL", z("Cash Box")), cnto(CAPS, 200), cnto(CAN, 2), cnto(ANVIL, 1), sub(b"DATA", [&[0u8][..], &10f32.to_le_bytes()].concat())],
+        );
+        // The player, so the list's other column can be read (`MenuModel::refresh`).
+        let npc = record(b"NPC_", 0, 0x7, &[sub(b"EDID", z("Player")), sub(b"DATA", [&100i32.to_le_bytes()[..], &[5u8, 6, 7, 4, 3, 2, 1]].concat())]);
+        let cell = record(b"CELL", 0, CELL, &[sub(b"EDID", z("TestCell"))]);
+        let refr = record(b"REFR", 0, BOX_REF, &[sub(b"NAME", BOX.to_le_bytes().to_vec()), sub(b"DATA", vec![0; 24])]);
+        let children = group(CELL.to_le_bytes(), 6, &group(CELL.to_le_bytes(), 9, &refr));
+        let cells = top(b"CELL", &group(0i32.to_le_bytes(), 2, &group(0i32.to_le_bytes(), 3, &[cell, children].concat())));
+        let hedr = [&1.34f32.to_le_bytes()[..], &0i32.to_le_bytes(), &0x800u32.to_le_bytes()].concat();
+        let miscs = [misc(CAN, "TestCan", "tin can", 2, 1.0), misc(CAPS, "TestCaps", "Bottle Cap", 1, 0.0), misc(ANVIL, "TestAnvil", "anvil", 1, 250.0)].concat();
+        let bytes = [record(b"TES4", 1, 0, &[sub(b"HEDR", hedr)]), top(b"MISC", &miscs), top(b"CONT", &cont), top(b"NPC_", &npc), cells].concat();
+        let plugins = vec![Plugin::parse(&bytes, "Test.esm".into()).unwrap()];
+        let lo = LoadOrder::new(&plugins).unwrap();
+        let schema = Schema::load_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../schemas/fnv")).unwrap();
+        let forms: &'static fnv_sim::FormStore = Box::leak(Box::new(fnv_sim::FormStore::build(&lo, &schema)));
+        let refs: &'static fnv_sim::RefTable = Box::leak(Box::new(fnv_sim::RefTable::build(&lo, &schema)));
+        let mut sim = SimState { forms, refs, world: fnv_sim::World::new(forms, refs, fnv_sim::SimConfig::default()) };
+        let model = MenuModel::open_container(&mut sim.world, FormId(BOX_REF)).expect("the box opens");
+        assert_eq!(model.list(Side::Container).rows.len(), 3, "three rows to move through");
+        let shown = Shown { target: BOX_REF, holder: FormId(BOX_REF), kind: Kind::Container, crime: false, title: "Cash Box".into(), model, since_read: 0.0 };
+        (sim, shown)
+    }
+
+    /// The mouse wheel moves the selection and, on a controller, so do the D-pad's Up and
+    /// Down while the list has them, one row per press ([`QuickLoot::owns_vertical_dpad`]:
+    /// the hotkeys bound to them were told the same, so they did not act).
+    #[test]
+    fn the_wheel_and_the_dpad_move_the_selection_one_row_at_a_time() {
+        use crate::bindings::Bindings;
+        use bevy::input::gamepad::{RawGamepadButtonChangedEvent, RawGamepadEvent};
+        use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+        use crate::bindings::InputDevice;
+        use GamepadButton::{DPadDown, DPadUp};
+        let (sim, shown) = shown_on_a_box();
+        let target = crate::activate::Targeted {
+            form_id: shown.target,
+            name: shown.title.clone(),
+            action: Action::Open,
+            distance: 50.0,
+            source: crate::activate::pick::Source::Collision,
+            crime: false,
+            empty: false,
+            through: None,
+        };
+        let mut bindings = Bindings::default();
+        bindings.device = InputDevice::Controller;
+        // The owner's remapping: the hotkeys that sit on the vertical D-pad.
+        use crate::pad::PadInput;
+        bindings.set_pad(Control::AmmoSwap, Some(PadInput::Button(GamepadButton::DPadUp)));
+        bindings.set_pad(Control::Hotkey4, Some(PadInput::Button(GamepadButton::DPadDown)));
+        // The NVF Features row is on: without it the list follows no target.
+        ON.store(true, Ordering::Relaxed);
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::input::InputPlugin))
+            .insert_resource(bindings)
+            .insert_resource(sim)
+            .insert_resource(Target(Some(target)))
+            .insert_resource(QuickLoot { shown: Some(shown), ..default() })
+            .add_message::<crate::crime::ItemsTaken>()
+            .add_message::<crate::pickpocket::Pickpocketed>()
+            .add_message::<RefChanged>()
+            .add_message::<crate::ui_sounds::UiSound>()
+            .add_systems(Update, follow);
+        let pad = app.world_mut().spawn(Gamepad::default()).id();
+        let row = |app: &App| app.world().resource::<QuickLoot>().shown.as_ref().expect("the list stays").selected();
+        // The list is the one the hotkeys were told about a frame ago.
+        let owns = |app: &mut App, on| app.world_mut().resource_mut::<QuickLoot>().owns_vertical_dpad = on;
+        let button = |app: &mut App, b, down| {
+            app.world_mut().write_message(RawGamepadEvent::Button(RawGamepadButtonChangedEvent::new(pad, b, if down { 1.0 } else { 0.0 })));
+            app.update();
+        };
+        // The first frame follows the target it was shown on, and says it has the D-pad.
+        app.update();
+        assert_eq!(row(&app), 0);
+        assert!(app.world().resource::<QuickLoot>().owns_vertical_dpad, "a list of rows on a controller has the vertical D-pad");
+        // One row per press, down and up; a button held moves nothing more.
+        button(&mut app, DPadDown, true);
+        assert_eq!(row(&app), 1, "D-pad Down moves the selection down a row");
+        app.update();
+        assert_eq!(row(&app), 1, "held, it stays where it is");
+        button(&mut app, DPadDown, false);
+        button(&mut app, DPadDown, true);
+        assert_eq!(row(&app), 2);
+        button(&mut app, DPadDown, false);
+        button(&mut app, DPadUp, true);
+        assert_eq!(row(&app), 1, "D-pad Up moves it up");
+        button(&mut app, DPadUp, false);
+        // Not the list's (the hotkeys were told the same, so Ammo Swap had the press).
+        owns(&mut app, false);
+        button(&mut app, DPadUp, true);
+        assert_eq!(row(&app), 1, "with the hotkeys owning the D-pad the list does not move");
+        button(&mut app, DPadUp, false);
+        // The mouse wheel moves it whatever the D-pad does: up the list rolling up.
+        let wheel = |app: &mut App, y| {
+            app.world_mut().write_message(MouseWheel { unit: MouseScrollUnit::Line, x: 0.0, y, window: Entity::PLACEHOLDER, phase: bevy::input::touch::TouchPhase::Moved });
+            app.update();
+        };
+        wheel(&mut app, -1.0);
+        assert_eq!(row(&app), 2, "the wheel rolled down moves the selection down");
+        wheel(&mut app, 1.0);
+        assert_eq!(row(&app), 1, "and rolled up, up");
+        owns(&mut app, false);
+        wheel(&mut app, 1.0);
+        assert_eq!(row(&app), 0, "the wheel is the list's whatever the D-pad is");
+        ON.store(false, Ordering::Relaxed);
     }
 
     /// A sneaking target whose script has an OnActivate block is not pickpocketed by hand on
