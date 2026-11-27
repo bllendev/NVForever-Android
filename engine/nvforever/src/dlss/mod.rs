@@ -1066,7 +1066,9 @@ pub fn render_plugin() -> bevy::render::RenderPlugin {
     let adapter_name = adapter_pin();
     let memory_hints = crate::memory_budget::hints_at_start();
     bevy::render::RenderPlugin {
-        render_creation: bevy::render::settings::WgpuSettings { adapter_name, memory_hints, ..default() }.into(),
+        // The Android fork's validation crash test adds VALIDATION and DEBUG here, and
+        // nothing at all with the switch off (odin/vulkan_validation.rs).
+        render_creation: bevy::render::settings::WgpuSettings { adapter_name, memory_hints, instance_flags: crate::odin::vulkan_validation::instance_flags(default()), ..default() }.into(),
         ..default()
     }
 }

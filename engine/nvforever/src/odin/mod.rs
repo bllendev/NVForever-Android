@@ -11,6 +11,8 @@
 //! | --- | --- | --- |
 //! | `main.rs` | `pub mod odin;` | this module |
 //! | `main.rs` | before `DefaultPlugins` | [`init`] |
+//! | `dlss/mod.rs` | the renderer's instance flags | [`vulkan_validation::instance_flags`] |
+//! | `reports/mod.rs` | the run log's filter | [`vulkan_validation::log_directives`] |
 //! | `main.rs` | just before `App::run` | [`before_run`] |
 //! | `android.rs` | the home folder's name | [`home::DIR`] |
 //! | `android.rs` | the launcher's crash-test switches | [`crash_tests::apply`] |
@@ -44,6 +46,8 @@ pub mod proc_mem;
 /// all one list.
 #[path = "../wrist_screen.rs"]
 pub mod wrist_screen;
+/// The Khronos Vulkan validation layer, the slowest of the crash tests.
+pub mod vulkan_validation;
 
 /// The bounded GPU flight recorder and its parts. It keeps the name the log lines and the
 /// docs use, so it sits beside `main.rs` and is declared from here (docs/fork.md).
@@ -79,6 +83,13 @@ pub fn init(app: &mut App) {
     // Nothing is enabled on a driver without it.
     let mut settings = app.world_mut().get_resource_or_init::<bevy::render::renderer::raw_vulkan_init::RawVulkanInitSettings>();
     gpu_recorder::fault::ask_for_extension(&mut settings);
+    // The validation layer's deeper checks (synchronization, GPU-assisted), asked for on the
+    // instance through VK_EXT_layer_settings. Nothing without both crash-test switches.
+    vulkan_validation::ask_for_layer_settings(&mut settings);
+    drop(settings);
+    // The layer's own library, loaded before the renderer makes its instance
+    // (vulkan_validation.rs). Nothing with the switch off.
+    vulkan_validation::prepare();
 }
 
 /// The fork's own plugins on the configured game just before it runs. Every one of them
@@ -93,4 +104,7 @@ pub fn before_run(app: &mut App) {
     // test, and nothing at all unless both its switches are on
     // (gpu_recorder/transparent_chunks.rs).
     app.add_plugins(gpu_recorder::transparent_chunks::TransparentChunksPlugin);
+    // The Vulkan validation layer's crash-test switch: one startup line when it is on,
+    // nothing at all when it is off (vulkan_validation.rs).
+    app.add_plugins(vulkan_validation::VulkanValidationPlugin);
 }

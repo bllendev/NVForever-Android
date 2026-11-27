@@ -188,6 +188,32 @@ jobs:
           unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
           echo "$RUNNER_TEMP/gradle-8.11.1/bin" >> "$GITHUB_PATH"
 
+      - name: The Khronos validation layer this APK carries
+        shell: bash
+        env:
+          # Vulkan-ValidationLayers release vulkan-sdk-1.4.363.1, asset
+          # android-binaries-1.4.363.1.zip, and the arm64-v8a library inside it. Apache-2.0 by
+          # the Khronos Group and its contributors; no part of NVForever, never committed, and
+          # downloaded here so both hashes are checked before Gradle packages it
+          # (docs/odin-debug.md, the crash test "Vulkan validation (slow)").
+          LAYER_TAG: vulkan-sdk-1.4.363.1
+          LAYER_ZIP_SHA256: 2c17b00a95b18fd63244b27332ef86f45c9269769f798a6261ce80b869c41af4
+          LAYER_LIB_SHA256: 7d36b66e72fd11270fba96de10002256ba95c8408047a8167e636673c16760ae
+        run: |
+          set -euo pipefail
+          zip="$RUNNER_TEMP/validation-layer.zip"
+          curl --fail --location --retry 3 \
+            "https://github.com/KhronosGroup/Vulkan-ValidationLayers/releases/download/$LAYER_TAG/android-binaries-${LAYER_TAG#vulkan-sdk-}.zip" \
+            --output "$zip"
+          echo "$LAYER_ZIP_SHA256  $zip" | sha256sum --check
+          # Gradle packages native-libs/ (android/app/build.gradle sourceSets), which
+          # tools/android/build.py fills with the engine library and the NDK runtime; it adds
+          # to the folder rather than emptying it, so the layer put here survives the build.
+          out=native-libs/arm64-v8a
+          mkdir -p "$out"
+          unzip -o -j "$zip" 'arm64-v8a/libVkLayer_khronos_validation.so' -d "$out"
+          echo "$LAYER_LIB_SHA256  $out/libVkLayer_khronos_validation.so" | sha256sum --check
+
       - name: Build both variants with an optimised native library
         shell: bash
         run: python3 tools/android/build.py --profile '${{ steps.version.outputs.profile }}' --variant both --jobs 2
@@ -282,6 +308,10 @@ jobs:
               unzip -o -j "$apk" "$so" -d "$libs" > /dev/null
               align16 "$libs/$(basename "$so")"
             done
+            # The Khronos validation layer reached the APK: the crash test can only find it
+            # as a file in the app's library folder, which is also why extractNativeLibs is
+            # checked above (docs/odin-debug.md).
+            test -f "$libs/libVkLayer_khronos_validation.so"
           done
 
       - name: Stage the licence notices this APK carries
