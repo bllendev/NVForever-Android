@@ -51,20 +51,21 @@ final class MobileLauncher {
     static { System.loadLibrary("nvf_android"); }
     private static native String request(String home, String payload) throws IOException;
 
-    private enum Page {
-        HOME("Home"), SETTINGS("Settings"), MODS("Mods"), GAME("Game folder");
+    // Load save is the fork's page (OdinLauncher); the rest are upstream's.
+    enum Page {
+        HOME("Home"), SAVES("Load save"), SETTINGS("Settings"), MODS("Mods"), GAME("Game folder");
         final String label;
         Page(String label) { this.label = label; }
     }
 
     private final LauncherActivity activity;
     private final String home;
-    private final LinearLayout root, navigation, content, actions, countdownBadge, countdownDaysBox;
-    private final ScrollView scroll;
+    final LinearLayout root, navigation, content, actions, countdownBadge, countdownDaysBox;
+    final ScrollView scroll;
     private final TextView status, countdownHeader, countdownDays, countdownHours, countdownMinutes, countdownSeconds, countdownDaysSep;
     private final JSONObject edits = new JSONObject();
-    private JSONObject state, news, updateInfo;
-    private Page page;
+    JSONObject state, news, updateInfo;
+    Page page;
     private String tab = "Gameplay";
     private String message = "";
     private String updateProgress = "";
@@ -73,12 +74,16 @@ final class MobileLauncher {
     private final AtomicBoolean updateCancel = new AtomicBoolean(false);
     private volatile HttpsURLConnection activeDownload;
     private int newsEpoch;
-    private final int bg, panel, card, button, gold, onGold, text, weak;
+    final int bg, panel, card, button, gold, onGold, text, weak;
     private final Runnable tick = this::updateCountdown;
     private final Runnable checkGameExit = this::watchGameExit;
 
+    /** The rows the Android fork adds, and the gamepad that works them (docs/fork.md). */
+    final OdinLauncher odin;
+
     MobileLauncher(LauncherActivity activity) throws IOException, JSONException {
         this.activity = activity;
+        odin = new OdinLauncher(activity, this);
         home = OdinFork.home(activity.getFilesDir()).getAbsolutePath();
         state = object("state");
         JSONObject palette = state.getJSONObject("theme");
@@ -156,11 +161,11 @@ final class MobileLauncher {
     }
 
     private static int color(JSONObject colors, String key) throws JSONException { return (int) colors.getLong(key); }
-    private int dp(float dp) { return Math.round(dp * activity.getResources().getDisplayMetrics().density); }
+    int dp(float dp) { return Math.round(dp * activity.getResources().getDisplayMetrics().density); }
     private void space(View view, int x, int y) { view.setPadding(dp(x), dp(y), dp(x), dp(y)); }
-    private LinearLayout column() { LinearLayout v = new LinearLayout(activity); v.setOrientation(LinearLayout.VERTICAL); return v; }
+    LinearLayout column() { LinearLayout v = new LinearLayout(activity); v.setOrientation(LinearLayout.VERTICAL); return v; }
     private LinearLayout row() { return new LinearLayout(activity); }
-    private TextView label(String value, int size, int color) {
+    TextView label(String value, int size, int color) {
         TextView v = new TextView(activity);
         v.setText(value); v.setTextSize(size); v.setTextColor(color); v.setLineSpacing(dp(2), 1f);
         return v;
@@ -170,7 +175,7 @@ final class MobileLauncher {
         view.setHorizontalScrollBarEnabled(false); view.setBackgroundColor(panel); view.addView(bar);
         return view;
     }
-    private Button tap(String value, boolean primary, boolean enabled, Runnable click) {
+    Button tap(String value, boolean primary, boolean enabled, Runnable click) {
         Button view = new Button(activity);
         view.setAllCaps(false); view.setText(value); view.setTextSize(15);
         view.setMinimumHeight(dp(48)); view.setMinHeight(dp(48)); view.setMinimumWidth(dp(48)); space(view, 12, 4);
@@ -180,7 +185,7 @@ final class MobileLauncher {
         view.setEnabled(enabled); view.setOnClickListener(v -> click.run());
         return view;
     }
-    private void add(LinearLayout parent, View view) {
+    void add(LinearLayout parent, View view) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
         lp.bottomMargin = dp(8); parent.addView(view, lp);
     }
@@ -188,7 +193,7 @@ final class MobileLauncher {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(evenly ? 0 : -2, -2, evenly ? 1 : 0);
         lp.setMargins(dp(4), dp(2), dp(4), dp(2)); bar.addView(view, lp);
     }
-    private LinearLayout card(String title) {
+    LinearLayout card(String title) {
         LinearLayout box = column(); space(box, 12, 10);
         GradientDrawable fill = new GradientDrawable(); fill.setColor(card); fill.setCornerRadius(dp(10));
         box.setBackground(fill); add(content, box);
@@ -196,17 +201,17 @@ final class MobileLauncher {
         return box;
     }
 
-    private Object send(String action, Object... arguments) throws IOException, JSONException {
+    Object send(String action, Object... arguments) throws IOException, JSONException {
         JSONObject payload = new JSONObject(); payload.put("action", action);
         for (int i = 0; i < arguments.length; i += 2) payload.put((String) arguments[i], arguments[i + 1]);
         JSONObject reply = new JSONObject(request(home, payload.toString()));
         if (reply.has("error")) throw new IOException(reply.getString("error"));
         return reply.get("data");
     }
-    private JSONObject object(String action, Object... arguments) throws IOException, JSONException {
+    JSONObject object(String action, Object... arguments) throws IOException, JSONException {
         return (JSONObject) send(action, arguments);
     }
-    private boolean editable() { return !busy && !running; }
+    boolean editable() { return !busy && !running; }
     void message(String value) { message = value; status.setText(value); status.setVisibility(value.isEmpty() ? View.GONE : View.VISIBLE); }
     void refresh(boolean busy, boolean running, String message) {
         this.busy = busy; this.running = running;
@@ -216,6 +221,7 @@ final class MobileLauncher {
         render();
         if (news == null && !newsFetching) fetchNews();
         if (!updateChecked && !updateChecking && state.optBoolean("newsEnabled", true)) checkForUpdates(false);
+        odin.afterRefresh();
     }
     void pause() { resumed = false; root.removeCallbacks(tick); root.removeCallbacks(checkGameExit); }
     void resume() { resumed = true; updateCountdown(); watchGameExit(); }
@@ -226,8 +232,12 @@ final class MobileLauncher {
         else refresh(busy, false, null);
     }
     void validateImport(String path) throws IOException, JSONException { send("validate_import", "path", path); }
-    String startArgs(boolean resume) throws IOException, JSONException {
-        JSONArray args = (JSONArray) send("start", "resume", resume);
+    String startArgs(boolean resume) throws IOException, JSONException { return startArgs(resume, null); }
+    /** `save`: the fork's Load save list picked one (OdinLauncher, crate::odin). */
+    String startArgs(boolean resume, String save) throws IOException, JSONException {
+        JSONArray args = save == null
+            ? (JSONArray) send("start", "resume", resume)
+            : (JSONArray) send("start", "resume", resume, "save", save);
         saveSettings();
         return args.toString();
     }
@@ -243,7 +253,7 @@ final class MobileLauncher {
     }
     void showGameFolder(String error) { page = Page.GAME; message = error; render(); }
 
-    private void render() {
+    void render() {
         navigation.removeAllViews(); actions.removeAllViews(); content.removeAllViews();
         for (Page p : Page.values()) addBar(navigation, tap(p.label, p == page, true, () -> {
             if (page != p) { page = p; scroll.scrollTo(0, 0); render(); }
@@ -274,6 +284,7 @@ final class MobileLauncher {
         try {
             switch (page) {
                 case HOME -> homePage();
+                case SAVES -> odin.savesPage();
                 case SETTINGS -> settingsPage();
                 case MODS -> modsPage();
                 case GAME -> gamePage();
@@ -341,14 +352,16 @@ final class MobileLauncher {
             add(box, label("Ready · reading your game files in place", 16, text));
             add(box, label(folder, 15, weak));
             add(box, label("Nothing is copied: NVForever reads this folder directly and never changes it. Importing a copy is still possible, but it needs free space for the whole game.", 15, weak));
+            odin.inPlaceRows(box);
             add(box, tap("Import a copy instead", false, editable(), activity::pickGame));
             return;
         }
-        add(box, label(state.isNull("folder") ? "No complete game folder is ready." : "Ready · imported game files", 16, text));
+        add(box, label(state.isNull("folder") ? odin.noFolderLine() : "Ready · imported game files", 16, text));
         String note = state.optString("inPlaceNote", "");
         if (folder == null && !note.isEmpty()) add(box, label(note, 15, weak));
         add(box, label("Choose your Fallout: New Vegas folder or its Data folder. This makes a full copy in app storage and never changes your originals. Saves and settings are separate; uninstalling removes app files.", 15, weak));
-        add(box, tap(state.isNull("folder") ? "Import game folder" : "Replace imported game folder", true, editable(), activity::pickGame));
+        odin.chooseFolderRow(box);
+        add(box, tap(state.isNull("folder") ? "Import game folder" : "Replace imported game folder", false, editable(), activity::pickGame));
     }
 
     private void homePage() throws JSONException {
@@ -356,6 +369,7 @@ final class MobileLauncher {
         add(about, label("Experimental build (" + activity.installedVersion() + ") · play with touch, a controller, or a keyboard and mouse.", 15, weak));
         if (state.isNull("folder")) add(about, tap("Set up a game folder", true, true, () -> showGameFolder("Import a complete game folder to enable Play.")));
         add(about, tap(updateChecking ? "Checking for updates…" : "Check for updates", false, !updateChecking && !updateDownloading, () -> checkForUpdates(true)));
+        odin.homeRows(about);
         if (updateInfo != null && updateInfo.optBoolean("available", false)) {
             String nextVersion = updateInfo.optString("version", "");
             LinearLayout updateCard = card("Update available: v" + nextVersion);
@@ -889,7 +903,7 @@ final class MobileLauncher {
         return label;
     }
     private void edit(String key, String value) { act(() -> { edits.put(key, value); renderHere(); }); }
-    private void renderHere() { int y = scroll.getScrollY(); render(); scroll.post(() -> scroll.scrollTo(0, y)); }
+    void renderHere() { int y = scroll.getScrollY(); render(); scroll.post(() -> scroll.scrollTo(0, y)); }
     private EditText field(String value, String hint) {
         EditText v = new EditText(activity); v.setSingleLine(true); v.setText(value); v.setHint(hint); v.setMinimumHeight(dp(48)); return v;
     }
