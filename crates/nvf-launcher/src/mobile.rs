@@ -71,6 +71,7 @@ fn handle(home: &EngineHome, req: Request, get: &mut impl FnMut(&str) -> Result<
                 "continue": cont,
                 "savePreview": preview,
                 "newsEnabled": news_enabled(),
+                "inPlaceNote": crate::odin::last_note(),
             }))
         }
         Request::ValidateImport { path } => {

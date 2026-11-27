@@ -126,12 +126,64 @@ pub fn apk_for_this_app(name: &str) -> bool {
 /// `data-path.txt`, then [`SHARED_DATA`]. A folder answers only when it opens as a complete
 /// install, so a card that is not mounted yet, or a permission that was never granted, leaves
 /// the launcher as it was rather than writing a path that does not work.
-fn in_place_game(files: &Path) -> Option<fnv_install::GameInstall> {
-    let chosen = configured_data_dir(files);
-    let candidates = chosen.into_iter().chain(std::iter::once(PathBuf::from(SHARED_DATA)));
-    candidates
-        .filter_map(|path| fnv_install::GameInstall::open(path).ok())
-        .find(|game| game.missing_files().is_empty())
+/// The folders under one storage volume a player is likely to have copied the game to.
+const VOLUME_FOLDERS: [&str; 5] = ["NVForever/Data", "Download/Data", "Data", "FalloutNV/Data", "Fallout New Vegas/Data"];
+
+/// Every place an in-place game is looked for, in order: the folder `data-path.txt` names,
+/// then the likely folders on the internal storage and on each card under `storage`.
+fn candidates(files: &Path, storage: &Path) -> Vec<PathBuf> {
+    let mut volumes = vec![storage.join("emulated/0")];
+    if let Ok(entries) = std::fs::read_dir(storage) {
+        let mut cards: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| !matches!(p.file_name().and_then(|n| n.to_str()), Some("emulated" | "self")))
+            .collect();
+        cards.sort();
+        volumes.extend(cards);
+    }
+    let mut out: Vec<PathBuf> = configured_data_dir(files).into_iter().collect();
+    for volume in &volumes {
+        for folder in VOLUME_FOLDERS {
+            let path = volume.join(folder);
+            if !out.contains(&path) {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+/// Why the last look for an in-place game found none, for the Game folder page.
+static LAST_NOTE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+pub fn last_note() -> String {
+    LAST_NOTE.lock().map(|n| n.clone()).unwrap_or_default()
+}
+
+fn in_place_game(files: &Path, storage: &Path) -> Result<fnv_install::GameInstall, String> {
+    let mut seen = Vec::new();
+    for path in candidates(files, storage) {
+        match fnv_install::GameInstall::open(&path) {
+            Ok(game) => {
+                let missing = game.missing_files();
+                if missing.is_empty() {
+                    return Ok(game);
+                }
+                seen.push(format!("{}: missing {}", path.display(), missing.join(", ")));
+            }
+            Err(_) if path.exists() => seen.push(format!("{}: no FalloutNV.esm there", path.display())),
+            Err(_) => {}
+        }
+    }
+    if seen.is_empty() {
+        Err(format!(
+            "No game folder found. Looked in the folder data-path.txt names and in {} on each storage volume. If your Data folder is elsewhere, or All files access is off, it cannot be seen.",
+            VOLUME_FOLDERS.join(", ")
+        ))
+    } else {
+        Err(format!("Found game folders, none complete: {}", seen.join("; ")))
+    }
 }
 
 /// Whether `[Game] Path` already names a complete install, in which case nothing is adopted.
@@ -166,7 +218,16 @@ pub fn adopt(home: &Path) -> Adopted {
     if already_ready(&ini) {
         return Adopted::Nothing;
     }
-    let Some(game) = in_place_game(files) else { return Adopted::Nothing };
+    let storage = Path::new(if cfg!(target_os = "android") { "/storage" } else { "/nonexistent-storage" });
+    let game = match in_place_game(files, storage) {
+        Ok(game) => game,
+        Err(note) => {
+            if let Ok(mut last) = LAST_NOTE.lock() {
+                *last = note;
+            }
+            return Adopted::Nothing;
+        }
+    };
     let root = game.root.display().to_string();
     match crate::launch::write_ini(&config, |text| fnv_install::ini_set(&text, "Game", "Path", &root)) {
         Ok(()) => Adopted::Game(game.root),
@@ -247,6 +308,26 @@ mod tests {
         }
         std::fs::write(&path, "/storage/emulated/0/NVForever/Data\n".repeat(200)).unwrap();
         assert_eq!(configured_data_dir(&files), None, "refuses a file longer than one path");
+        let _ = std::fs::remove_dir_all(&files);
+    }
+
+    /// A card's folder is found with no data-path.txt at all, and an incomplete one is named
+    /// with what it lacks.
+    #[test]
+    fn a_folder_on_a_card_is_found_and_an_incomplete_one_is_explained() {
+        let files = temp("cards");
+        let storage = files.join("storage");
+        std::fs::create_dir_all(storage.join("emulated/0")).unwrap();
+        let root = game(&storage.join("75D7-DC5F/Download"));
+        let found = in_place_game(&files, &storage).unwrap();
+        assert_eq!(found.root, fnv_install::GameInstall::open(&root).unwrap().root);
+
+        std::fs::remove_file(root.join("Data/Update.bsa")).unwrap();
+        let note = in_place_game(&files, &storage).unwrap_err();
+        assert!(note.contains("missing Update.bsa"), "{note}");
+        std::fs::remove_dir_all(&root).unwrap();
+        let note = in_place_game(&files, &storage).unwrap_err();
+        assert!(note.starts_with("No game folder found"), "{note}");
         let _ = std::fs::remove_dir_all(&files);
     }
 
