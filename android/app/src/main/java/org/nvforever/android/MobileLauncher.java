@@ -345,6 +345,8 @@ final class MobileLauncher {
             return;
         }
         add(box, label(state.isNull("folder") ? "No complete game folder is ready." : "Ready · imported game files", 16, text));
+        String note = state.optString("inPlaceNote", "");
+        if (folder == null && !note.isEmpty()) add(box, label(note, 15, weak));
         add(box, label("Choose your Fallout: New Vegas folder or its Data folder. This makes a full copy in app storage and never changes your originals. Saves and settings are separate; uninstalling removes app files.", 15, weak));
         add(box, tap(state.isNull("folder") ? "Import game folder" : "Replace imported game folder", true, editable(), activity::pickGame));
     }
