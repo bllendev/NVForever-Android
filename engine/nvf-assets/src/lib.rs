@@ -32,7 +32,7 @@ pub mod texture;
 pub use data::{ArchivePlugin, GameData};
 pub use particles::{ParticleSystemDef, PreparedParticles};
 pub use model::{ModelCache, PreparedModel, PreparedShape};
-pub use nif_material::{ambient_occlusion_opt_in, ambient_occlusion_opt_out, depth_equal, fade_prepass, grass_edges, nif_material, soft_edges, NifMaterial, NifMaterialPlugin, AMBIENT_OCCLUSION_DEF};
+pub use nif_material::{ambient_occlusion_opt_in, ambient_occlusion_opt_out, depth_equal, fade_prepass, grass_edges, nif_material, no_soft_particles, soft_edges, NifMaterial, NifMaterialPlugin, AMBIENT_OCCLUSION_DEF, NO_SOFT_PARTICLES_ENV};
 pub use nif_spawn::{NifHidden, NifRoot, SpawnCtx, SpawnReport};
 pub use release::{AssetReleasePlugin, KeepLimits};
 /// The reflections' mount-pack test aid (pbr_field/reflect.rs).

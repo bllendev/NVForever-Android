@@ -46,7 +46,11 @@ pub fn prepare() -> Result<Vec<String>, String> {
     // Before the engine starts any threads. Saves/logs and the imported game are separate.
     // The folder's name is the Android fork's (`odin::home`): every install of the fork
     // already keeps its saves there.
-    std::env::set_var("NVFOREVER_HOME", files.join(crate::odin::home::DIR));
+    let home = files.join(crate::odin::home::DIR);
+    std::env::set_var("NVFOREVER_HOME", &home);
+    // The crash-test switches the launcher's Advanced page wrote, as the variables the
+    // engine's gates read (`odin::crash_tests`). Nothing when the file names none of them.
+    crate::odin::crash_tests::apply(&home);
     std::env::set_var("NVF_REPORTS", "0");
     std::env::set_var("WGPU_BACKEND", "vulkan");
     std::env::set_var(

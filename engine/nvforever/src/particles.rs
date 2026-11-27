@@ -1276,10 +1276,14 @@ fn draw(
     // camera-local overlay systems use the camera's local game-space basis directly.
     let world_basis = p.basis.take();
     let frame = views.frame();
+    // The fork's crash test (`odin::crash_tests`, "No particles"): every system stays hidden
+    // and no geometry is built. The systems are simulated as before, so nothing else in the
+    // game changes.
+    let off = crate::odin::crash_tests::no_particles();
     for live in p.systems.values_mut().flatten().flatten() {
         let Some([right, up, back]) = (if live.camera_local { Some([Vec3::X, Vec3::Z, -Vec3::Y]) } else { world_basis }) else { continue };
         let alive = !live.particles.is_empty();
-        let seen = alive && frame.may_see(particle_bounds(&live.def, &live.particles), live.entity, &views);
+        let seen = !off && alive && frame.may_see(particle_bounds(&live.def, &live.particles), live.entity, &views);
         if let Ok(mut v) = visibility.get_mut(live.entity) {
             let want = if seen { Visibility::Inherited } else { Visibility::Hidden };
             if *v != want {

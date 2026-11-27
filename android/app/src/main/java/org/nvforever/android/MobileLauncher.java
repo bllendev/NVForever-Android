@@ -369,7 +369,11 @@ final class MobileLauncher {
 
     private void homePage() throws JSONException {
         LinearLayout about = card("NVForever for Android");
-        add(about, label("Experimental build (" + activity.installedVersion() + ") · play with touch, a controller, or a keyboard and mouse.", 15, weak));
+        TextView build = label("Experimental build (" + activity.installedVersion() + ") · play with touch, a controller, or a keyboard and mouse.", 15, weak);
+        add(about, build);
+        // The fork's hidden Advanced section: a long press on the build line opens the
+        // crash-test switches, and it says here how many are on (OdinAdvanced).
+        OdinAdvanced.attach(activity, build, OdinFork.home(activity.getFilesDir()));
         if (state.isNull("folder")) add(about, tap("Set up a game folder", true, true, () -> showGameFolder("Import a complete game folder to enable Play.")));
         add(about, tap(updateChecking ? "Checking for updates…" : "Check for updates", false, !updateChecking && !updateDownloading, () -> checkForUpdates(true)));
         odin.homeRows(about);

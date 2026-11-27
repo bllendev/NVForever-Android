@@ -533,6 +533,10 @@ pub(crate) fn heat_pass(
     device: Res<RenderDevice>,
     mut ctx: RenderContext,
 ) {
+    // The fork's crash test (`odin::crash_tests`, "No heat haze"): the pass records nothing.
+    if crate::odin::crash_tests::no_heat_haze() {
+        return;
+    }
     let (target, index, haze, hv, prepass, extracted) = view.into_inner();
     // Nothing that would show (night, indoors, rain, haze, a tiny strength), unless the mask
     // is drawn.

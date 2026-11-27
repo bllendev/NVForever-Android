@@ -119,7 +119,12 @@ impl Plugin for PipBoyArmPlugin {
             .add_systems(Update, (follow_pointer.in_set(nvf_play::pipboy::PointerSet).before(nvf_play::pipboy::flat_pointer), (show_screen, crate::pipboy_controls::turn_controls.run_if(|pip: Res<PipBoy>| pip.warming.is_none())).chain().after(follow_pointer).after(nvf_play::player::BodySet).before(nvf_play::PlaySet::Ui)))
             .add_systems(Update, measure_raise.in_set(nvf_play::pipboy::WarmSet))
             .add_systems(Update, requeue_raise.after(show_screen).before(nvf_play::PlaySet::Ui));
-        if std::env::var_os("NVF_PLAY_TEST_NO_PIPBOY_WARM").is_none() {
+        if crate::odin::crash_tests::no_pipboy_warm() {
+            // The fork's crash test (`odin::crash_tests`), not a test aid: the run stays an
+            // ordinary attended one (`nvf_play::test_aid::drives_run` does not see this
+            // name). The branch below is upstream's test aid, untouched.
+            info!("pipboy: hidden warm-up disabled (crash test no-pipboy-warm)");
+        } else if std::env::var_os("NVF_PLAY_TEST_NO_PIPBOY_WARM").is_none() {
             app.add_systems(Update, warm_up.in_set(nvf_play::pipboy::WarmSet).before(measure_raise));
         } else {
             info!("test aid NVF_PLAY_TEST_NO_PIPBOY_WARM: hidden warm-up disabled");

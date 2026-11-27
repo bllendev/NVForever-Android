@@ -37,8 +37,11 @@ class ForkConstantTests(unittest.TestCase):
         self.assertNotEqual(rust, "home")
 
     def test_the_engine_joins_that_name_onto_the_files_directory(self):
-        self.assertIn('set_var("NVFOREVER_HOME", files.join(crate::odin::home::DIR))',
-                      text("engine/nvforever/src/android.rs"))
+        android = text("engine/nvforever/src/android.rs")
+        self.assertIn("let home = files.join(crate::odin::home::DIR);", android)
+        self.assertIn('set_var("NVFOREVER_HOME", &home)', android)
+        # The crash-test switches are read out of that same home, before any thread starts.
+        self.assertIn("crate::odin::crash_tests::apply(&home)", android)
 
     def test_the_data_path_file_and_default_folder_are_the_same_on_both_sides(self):
         launcher = text("crates/nvf-launcher/src/odin.rs")
@@ -57,6 +60,43 @@ class ForkConstantTests(unittest.TestCase):
 
     def test_the_debug_variant_installs_beside_the_release_one(self):
         self.assertIn("applicationIdSuffix '.debug'", text("android/app/build.gradle"))
+
+
+class CrashTestSwitchTests(unittest.TestCase):
+    """The launcher's Advanced page and the engine's gates are one table in two languages.
+
+    They cannot be shared at build time, and a key that disagrees is the worst kind of
+    failure here: the switch looks on in the launcher and the run silently draws everything,
+    so a night of testing says the feature is innocent when it was never turned off.
+    """
+
+    def setUp(self):
+        self.java = text("android/app/src/main/java/org/nvforever/android/OdinCrashTests.java")
+        self.rust = text("engine/nvforever/src/odin/crash_tests.rs")
+
+    def test_both_sides_have_the_same_switches_in_the_same_order(self):
+        java = re.findall(r'new Switch\("([a-z0-9-]+)"', self.java)
+        rust = re.findall(r'key: "([a-z0-9-]+)"', self.rust)
+        self.assertEqual(java, rust)
+        # The one the owner needs first.
+        self.assertEqual(java[0], "no-vats-outline")
+
+    def test_both_sides_agree_on_which_switch_needs_which(self):
+        java = dict(zip(re.findall(r'new Switch\("([a-z0-9-]+)"', self.java),
+                        re.findall(r'", (null|"[a-z0-9-]+")\),\n', self.java)))
+        rust = dict(zip(re.findall(r'key: "([a-z0-9-]+)"', self.rust),
+                        re.findall(r"needs: (None|Some\(\"[a-z0-9-]+\"\))", self.rust)))
+        self.assertEqual(set(java), set(rust))
+        for key, needs in rust.items():
+            found = re.search(r'Some\("([a-z0-9-]+)"\)', needs)
+            want = f'"{found.group(1)}"' if found else "null"
+            self.assertEqual(java[key], want, key)
+
+    def test_both_sides_read_and_write_the_same_file(self):
+        name = re.search(r'pub const FILE: &str = "([^"]*)"', self.rust).group(1)
+        self.assertEqual(java_constant(self.java, "FILE"), name)
+        # It lives in the engine home, which is where the engine looks for it.
+        self.assertIn("home.join(FILE)", self.rust)
 
 
 if __name__ == "__main__":

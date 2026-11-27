@@ -333,9 +333,12 @@ pub fn build(
     // Taken: a frame whose `draw` did not get this far draws nothing, as before.
     let Some(basis) = st.basis.take() else { return };
     let frame = views.frame();
+    // The fork's crash test (`odin::crash_tests`, "No particles"): every burst stays hidden
+    // and no squares are built, as in `particles::draw`.
+    let off = crate::odin::crash_tests::no_particles();
     for b in st.bursts.values() {
         let alive = !b.particles.is_empty();
-        let seen = alive && frame.may_see(burst_bounds(b), b.entity, &views);
+        let seen = !off && alive && frame.may_see(burst_bounds(b), b.entity, &views);
         // The burst's entity may have gone with the world root (a load); nothing to show then.
         if let Ok(mut v) = visibility.get_mut(b.entity) {
             let want = if seen { Visibility::Inherited } else { Visibility::Hidden };
