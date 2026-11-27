@@ -5,9 +5,17 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
+import android.os.SystemClock;
+import android.view.InputDevice;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.io.File;
@@ -42,11 +50,19 @@ import org.json.JSONObject;
  *       last run ended unexpectedly ({@link DebugReport}, {@code crate::odin::last_run_note}).
  *   <li><b>Load save</b>, a page of the saves newest first, which starts the game on the one
  *       the player picks through upstream's own one-start request.
+ *   <li><b>A gamepad that works the whole launcher.</b> Upstream's has no {@code KeyEvent},
+ *       {@code onKeyDown} or focus handling at all: it is touch only, which on a device with
+ *       buttons is a daily annoyance. Touch behaviour is unchanged; nothing here is focusable
+ *       in touch mode, so a tap never leaves a focus ring behind.
  * </ul>
  *
  * <p>Every string is hardcoded English, which is upstream's pattern for this launcher.
  */
 final class OdinLauncher {
+    /** How long one push of the stick waits before it moves the focus again. */
+    private static final long STICK_REPEAT_MS = 180;
+    /** Past this much of the stick, a push counts; under it, it is let go. */
+    private static final float STICK_EDGE = 0.5f;
     /** How much of a report goes on the clipboard, which is not a place for 200 KiB. */
     private static final int SUMMARY_CHARS = 8000;
     /** Where a report goes when the device has no document picker. */
@@ -58,6 +74,9 @@ final class OdinLauncher {
     private final MobileLauncher ui;
     private JSONArray saveList;
     private String savesError = "";
+    private String focusOn;
+    private int stickHeld;
+    private long stickMoved;
 
     OdinLauncher(LauncherActivity activity, MobileLauncher ui) {
         this.activity = activity;
@@ -176,6 +195,9 @@ final class OdinLauncher {
             ui.add(report, ui.label("Writes one text file: this build and device, then the newest run log, bounded. No saves, no settings and no device-wide logs, and it is sent nowhere by itself. Review it before sharing.", 15, ui.weak));
             ui.add(report, ui.tap("Export debug log", false, ui.editable(), this::exportLog));
             ui.add(report, ui.tap("Copy debug summary", false, ui.editable(), this::copySummary));
+        }
+        if (controllerPresent()) {
+            ui.add(about, ui.label("Controller: A select, B back, LB and RB change page, Start plays, D-pad or left stick moves.", 14, ui.weak));
         }
     }
 
@@ -404,6 +426,197 @@ final class OdinLauncher {
         }
         clipboard.setPrimaryClip(ClipData.newPlainText("NVForever debug summary", summary));
         ui.message("Debug summary copied. Review it before sharing: it names your folders and mods.");
+    }
+
+    // ---- the gamepad -----------------------------------------------------------------
+
+    /** Whether any gamepad or joystick is attached, which is what shows the legend row. */
+    static boolean controllerPresent() {
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice device = InputDevice.getDevice(id);
+            if (device == null || device.isVirtual()) {
+                continue;
+            }
+            int sources = device.getSources();
+            if ((sources & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
+                || (sources & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A gamepad button. The D-pad and Enter are left to Android, which already moves the
+     * focus and clicks with them; these are the ones nothing in a plain view hierarchy does.
+     */
+    boolean key(int code, KeyEvent event) {
+        if (event.getAction() != KeyEvent.ACTION_DOWN || event.getRepeatCount() > 0) {
+            return handled(code);
+        }
+        switch (code) {
+            case KeyEvent.KEYCODE_BUTTON_A:
+                return clickFocused();
+            case KeyEvent.KEYCODE_BUTTON_B:
+                return back();
+            case KeyEvent.KEYCODE_BUTTON_L1:
+                return turnPage(-1);
+            case KeyEvent.KEYCODE_BUTTON_R1:
+                return turnPage(1);
+            case KeyEvent.KEYCODE_BUTTON_START:
+                activity.prepareAndStart(false);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /** The buttons {@link #key} takes, so their release is swallowed with their press. */
+    private static boolean handled(int code) {
+        switch (code) {
+            case KeyEvent.KEYCODE_BUTTON_A:
+            case KeyEvent.KEYCODE_BUTTON_B:
+            case KeyEvent.KEYCODE_BUTTON_L1:
+            case KeyEvent.KEYCODE_BUTTON_R1:
+            case KeyEvent.KEYCODE_BUTTON_START:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private boolean clickFocused() {
+        View focused = ui.root.findFocus();
+        if (focused == null || !focused.isEnabled()) {
+            return false;
+        }
+        focused.performClick();
+        return true;
+    }
+
+    /** B goes back to the first page, and off the first page it is Android's own back. */
+    private boolean back() {
+        if (ui.page == MobileLauncher.Page.HOME) {
+            return false;
+        }
+        return turnPage(MobileLauncher.Page.HOME.ordinal() - ui.page.ordinal());
+    }
+
+    /** LB and RB walk upstream's nav bar, which is the order its pages are declared in. */
+    private boolean turnPage(int by) {
+        MobileLauncher.Page[] pages = MobileLauncher.Page.values();
+        int next = Math.max(0, Math.min(pages.length - 1, ui.page.ordinal() + by));
+        if (pages[next] != ui.page) {
+            ui.page = pages[next];
+            ui.scroll.scrollTo(0, 0);
+            ui.render();
+        }
+        return true;
+    }
+
+    /** The left stick, which moves the focus the way the D-pad does. */
+    boolean motion(MotionEvent event) {
+        if ((event.getSource() & InputDevice.SOURCE_CLASS_JOYSTICK) != InputDevice.SOURCE_CLASS_JOYSTICK
+            || event.getAction() != MotionEvent.ACTION_MOVE) {
+            return false;
+        }
+        int direction = push(event.getAxisValue(MotionEvent.AXIS_X), event.getAxisValue(MotionEvent.AXIS_Y));
+        if (direction == 0) {
+            stickHeld = 0;
+            return true;
+        }
+        long now = SystemClock.uptimeMillis();
+        if (direction == stickHeld && now - stickMoved < STICK_REPEAT_MS) {
+            return true;
+        }
+        stickHeld = direction;
+        stickMoved = now;
+        View focused = ui.root.findFocus();
+        View next = focused == null ? null : focused.focusSearch(direction);
+        if (next != null) {
+            next.requestFocus();
+        } else if (focused == null) {
+            ui.root.requestFocus();
+        }
+        return true;
+    }
+
+    /** Which way a stick at {@code x, y} is pushed, as a {@link View} focus direction. */
+    static int push(float x, float y) {
+        if (!Float.isFinite(x) || !Float.isFinite(y)) {
+            return 0;
+        }
+        if (Math.abs(y) >= Math.abs(x)) {
+            if (y <= -STICK_EDGE) {
+                return View.FOCUS_UP;
+            }
+            if (y >= STICK_EDGE) {
+                return View.FOCUS_DOWN;
+            }
+            return 0;
+        }
+        if (x <= -STICK_EDGE) {
+            return View.FOCUS_LEFT;
+        }
+        return x >= STICK_EDGE ? View.FOCUS_RIGHT : 0;
+    }
+
+    /** Remember what has the focus, because a redraw builds every view again. */
+    void beforeRender() {
+        View focused = ui.root == null ? null : ui.root.findFocus();
+        focusOn = focused instanceof TextView ? ((TextView) focused).getText().toString() : null;
+    }
+
+    /** Put the focus back on the row it was on, or on the first row of a new page. */
+    void afterRender() {
+        if (ui.root == null) {
+            return;
+        }
+        ui.root.post(() -> {
+            if (ui.root.isInTouchMode()) {
+                return;
+            }
+            if (focusOn != null && refocus(ui.root, focusOn)) {
+                return;
+            }
+            if (ui.root.findFocus() == null) {
+                ui.root.requestFocus();
+            }
+        });
+    }
+
+    private static boolean refocus(View view, String label) {
+        if (view instanceof TextView && view.isFocusable() && view.isEnabled()
+            && label.contentEquals(((TextView) view).getText())) {
+            return view.requestFocus();
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                if (refocus(group.getChildAt(i), label)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The focus highlight, in upstream's own theme: the gold the launcher accents everything
+     * else with, as a ring round the row that has the focus. Not focusable in touch mode, so a
+     * tap leaves nothing behind.
+     */
+    static void focusHighlight(View view, GradientDrawable fill, int gold, int ring) {
+        view.setFocusableInTouchMode(false);
+        if (Build.VERSION.SDK_INT >= 26) {
+            view.setDefaultFocusHighlightEnabled(false);
+        }
+        view.setOnFocusChangeListener((v, focused) -> {
+            fill.setStroke(focused ? ring : 0, gold);
+            if (v instanceof TextView) {
+                ((TextView) v).setTypeface(Typeface.DEFAULT, focused ? Typeface.BOLD : Typeface.NORMAL);
+            }
+        });
     }
 
     // ---- small shared things ---------------------------------------------------------

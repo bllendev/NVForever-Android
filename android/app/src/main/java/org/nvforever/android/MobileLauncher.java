@@ -183,6 +183,7 @@ final class MobileLauncher {
         GradientDrawable fill = new GradientDrawable(); fill.setColor(primary && enabled ? gold : button); fill.setCornerRadius(dp(8));
         view.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40ffffff), fill, null));
         view.setEnabled(enabled); view.setOnClickListener(v -> click.run());
+        OdinLauncher.focusHighlight(view, fill, gold, Math.max(1, dp(2)));
         return view;
     }
     void add(LinearLayout parent, View view) {
@@ -254,6 +255,7 @@ final class MobileLauncher {
     void showGameFolder(String error) { page = Page.GAME; message = error; render(); }
 
     void render() {
+        odin.beforeRender();
         navigation.removeAllViews(); actions.removeAllViews(); content.removeAllViews();
         for (Page p : Page.values()) addBar(navigation, tap(p.label, p == page, true, () -> {
             if (page != p) { page = p; scroll.scrollTo(0, 0); render(); }
@@ -290,6 +292,7 @@ final class MobileLauncher {
                 case GAME -> gamePage();
             }
         } catch (IOException | JSONException e) { message(e.getMessage() == null ? "Could not load this page." : e.getMessage()); }
+        odin.afterRender();
     }
 
     private void addSavePreview(LinearLayout parent, JSONObject preview, boolean canPlay, boolean sideBySide) {
