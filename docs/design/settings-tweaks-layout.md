@@ -11,7 +11,8 @@ registered).
 [documented: `engine/nvf-play/src/tweaks.rs`, `TweaksPlugin::build`, its `switch!`,
 `weightless!`, `part!`, `amount!`, `sound_list!` and plain `Setting` rows]; the labels are
 the PR's. The branch's later head a6c8c7ec2 only merges main: `tweaks.rs` and
-`docs/design/tweaks.md` are the same.
+`docs/design/tweaks.md` are the same. Rows added since are listed here too: Hide HUD Key:
+Keep Quick Loot (2026-11-22, the owner).
 
 **The rule** [design: owner 2026-11-15]:
 
@@ -119,9 +120,9 @@ Group (rows) › category (rows): row labels in the page's order.
 - **Main and Pause Menus** (4): Continue Shows Its Save; No Loading Tips; Quick Load From the Menus; Tab Goes Back in the Pause Menu
 - **Keys and Mouse** (7): Key Repeat Acceleration; ↳ Key Repeat Acceleration: First Delay; ↳ Key Repeat Acceleration: First Speed; ↳ Key Repeat Acceleration: Second Delay; ↳ Key Repeat Acceleration: Second Speed; WASD as Arrow Keys in Menus; Horizontal Look Speed
 
-### Hotkeys (9)
+### Hotkeys (10)
 
-- **Hide HUD Key** (5): Hide HUD Key: Action Points and Ammo; Hide HUD Key: Hardcore Needs; Hide HUD Key: Health and Compass; Hide HUD Key: Hidden After Loading; Hide HUD Key: Sneak
+- **Hide HUD Key** (6): Hide HUD Key: Action Points and Ammo; Hide HUD Key: Hardcore Needs; Hide HUD Key: Health and Compass; Hide HUD Key: Hidden After Loading; Hide HUD Key: Keep Quick Loot; Hide HUD Key: Sneak
 - **Other Keys** (4): Place Marker Here Says So; Repeat Activate Takes Only; Console Key; Screenshot Key
 
 ### Cheats (16)
