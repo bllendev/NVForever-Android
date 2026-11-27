@@ -52,6 +52,15 @@ public final class LauncherActivity extends Activity {
         super.onPause();
     }
     @Override protected void onNewIntent(Intent intent) { super.onNewIntent(intent); setIntent(intent); }
+    @Override public boolean onKeyDown(int code, android.view.KeyEvent event) {
+        return launcher != null && launcher.odin.key(code, event) || super.onKeyDown(code, event);
+    }
+    @Override public boolean onKeyUp(int code, android.view.KeyEvent event) {
+        return launcher != null && launcher.odin.key(code, event) || super.onKeyUp(code, event);
+    }
+    @Override public boolean onGenericMotionEvent(android.view.MotionEvent event) {
+        return launcher != null && launcher.odin.motion(event) || super.onGenericMotionEvent(event);
+    }
     void pickGame() {
         if (busy || runningGame()) return;
         startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)

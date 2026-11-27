@@ -34,6 +34,7 @@ Everything, including every part the fork used to have of its own:
 | save backup and restore to `Download/NVForever-backups/<date>/` | `SaveBackup.java`, `OdinLauncher` | saves live where no file app can reach them and uninstalling deletes them; upstream's own doc says to export them and gives no way to |
 | Export debug log, Copy debug summary, and the line about a run that ended unexpectedly | `DebugReport.java`, `OdinLauncher`, `odin::last_run_note` | without it a tester needs `adb` to send anything at all |
 | a Load save list | `odin::saves`, `odin::chosen_save`, `OdinLauncher` | upstream has Continue and a preview card but no way to pick an older save |
+| a gamepad that works the whole launcher | `OdinLauncher` | upstream's launcher has no `KeyEvent`, `onKeyDown` or focus handling: it is touch only |
 | the device gyro with a controller in hand | `engine/nvf-play/src/odin/controller_gyro.rs` | upstream's gyro is a touch feature that a selected controller cancels, so on a handheld with sticks it does nothing (the owner, 2026-11-26) |
 | the memory diagnostics | `engine/nvforever/src/odin/{proc_mem,alloc,mem_log}.rs` | the owner's 2026-11-24 run died on a 67,600-byte allocation with 10 GB free; nothing upstream has can see a mapping-count ceiling |
 | a debug variant beside the release one | `android/app/build.gradle` (`applicationIdSuffix '.debug'`) | a test build with its own saves |
@@ -78,8 +79,8 @@ The hooks, in full, as of this stack:
 | `crates/nvf-settings-layout/src/lib.rs` | 3 | `odin-controller-gyro-v1` in two sections and in `NEEDS` |
 | `crates/nvf-launcher/src/lib.rs` | 1 | `pub mod odin;` |
 | `crates/nvf-launcher/src/mobile.rs` | 4 blocks | `odin::adopt(home)` at the top of `request`; three fork fields in `State`; `Request::Odin` and its arm; `odin::chosen_save` in `Start` |
-| `android/.../MobileLauncher.java` | 11 words, 6 lines | `OdinFork.home`; upstream's builders, palette and pages stop being `private`; the `odin` field; one call per page |
-| `android/.../LauncherActivity.java` | 3 blocks | `OdinFork.home` twice, `OdinStorage.promptIfNeeded`, the export result, the save a start loads |
+| `android/.../MobileLauncher.java` | 11 words, 9 lines | `OdinFork.home`; upstream's builders, palette and pages stop being `private`; the `odin` field; one call per page, the focus ring and the two render hooks |
+| `android/.../LauncherActivity.java` | 4 blocks | `OdinFork.home` twice, `OdinStorage.promptIfNeeded`, the three key and motion overrides, the export result, the save a start loads |
 | `crates/nvf-launcher/src/news.rs` | 1 | `RELEASES` is `odin::RELEASES` |
 | `android/app/build.gradle` | 4 blocks | the application id property, the debug suffix, the `-odin.<n>` revision |
 | `android/app/src/main/AndroidManifest.xml` | 3 | the storage permissions |
