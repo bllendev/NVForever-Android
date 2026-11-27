@@ -210,6 +210,12 @@ fn place(
     (streamer, cells): (Option<Res<Streamer>>, Query<&Transform, With<CellEntity>>),
     shapes: Query<DrawnShape>,
 ) {
+    // The fork's crash test (`odin::crash_tests`, "No decals"): no decal is placed, so none
+    // is drawn. The shots and their impacts are unchanged.
+    if crate::odin::crash_tests::no_decals() {
+        landed.clear();
+        return;
+    }
     let (Some(sfx), Ok((world_root, root_place))) = (sfx, root.single()) else {
         landed.clear();
         return;

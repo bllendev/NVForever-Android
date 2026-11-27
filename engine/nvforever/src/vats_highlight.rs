@@ -193,6 +193,13 @@ pub struct VatsHighlightPlugin;
 
 impl Plugin for VatsHighlightPlugin {
     fn build(&self, app: &mut App) {
+        // The fork's crash test (`odin::crash_tests`, "No V.A.T.S. target outline"): the
+        // plugin registers nothing, so there is no mask camera and no mask picture at all.
+        // Choosing targets and the V.A.T.S. menu are unchanged.
+        if crate::odin::crash_tests::no_vats_outline() {
+            info!("vats highlight: off (crash test no-vats-outline)");
+            return;
+        }
         bevy::asset::embedded_asset!(app, "vats_mask.wesl");
         app.add_plugins(bevy::ui_render::UiMaterialPlugin::<PartMaskMaterial>::default())
             .init_resource::<Glow>()

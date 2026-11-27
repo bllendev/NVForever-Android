@@ -1717,7 +1717,13 @@ impl ModelCtx<'_> {
             // over the shapes' full 160 units, the blood mist puffed a few units off a
             // body drew at a few percent and no hit on an actor showed its spray
             // (#1074; nif.md §6 "Soft intersections of particles").
-            if material.extension.soft.x > 0.0 {
+            // The Android fork's crash test (`nif_material::no_soft_particles`): a particle
+            // is given no soft distance, so it has a hard edge where it passes into a
+            // surface and its material's key reads the depth prepass nowhere.
+            if crate::nif_material::no_soft_particles() {
+                material.extension.soft.x = 0.0;
+                def.soft = 0.0;
+            } else if material.extension.soft.x > 0.0 {
                 // A keyed radius as it starts, or the field's own if that is larger.
                 let v = def.emitter.values(0.0);
                 // In the system node's units, as drawn (`system_scale`).

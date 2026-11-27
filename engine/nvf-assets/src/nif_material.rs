@@ -847,11 +847,30 @@ impl NifSurfaceKey {
             pipboy_screen: surface.pipboy_screen,
             anti_tiling: surface.anti_tiling && crate::terrain_sampling::repeat_valid(surface.terrain_repeat),
             terrain_layer: crate::terrain_sampling::repeat_valid(surface.terrain_repeat),
-            soft: surface.soft.x > 0.0,
+            // The Android fork's crash test ([`no_soft_particles`]) takes the soft-intersection
+            // path, and with it the main pass's one read of the depth prepass, out of every
+            // material. Off (every ordinary run) this is `surface.soft.x > 0.0` as before.
+            soft: surface.soft.x > 0.0 && !no_soft_particles(),
             hdr,
         }
     }
 }
+
+/// `NVF_NO_SOFT_PARTICLES`, the Android fork's crash test ("No soft particles",
+/// `nvforever::odin::crash_tests`). On, no material fades where it meets the surface behind
+/// it: a particle has a hard edge where it passes into a wall, no `NVF_SOFT_FADE` pipeline is
+/// built, and the one read the main pass takes of the view's depth prepass is gone with it.
+/// Read once.
+///
+/// The fork's switch table cannot be reached from this crate, so the variable's name is here
+/// and the table carries the same spelling (a test of the fork's keeps the two the same).
+pub fn no_soft_particles() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var(NO_SOFT_PARTICLES_ENV).is_ok_and(|v| !matches!(v.trim(), "" | "0" | "false")))
+}
+
+/// See [`no_soft_particles`].
+pub const NO_SOFT_PARTICLES_ENV: &str = "NVF_NO_SOFT_PARTICLES";
 
 /// The main-pass fragment definition of a landscape material (module notes, "Landscape
 /// layers"). The blended layers are in no prepass and cast no shadows; an opaque base is
