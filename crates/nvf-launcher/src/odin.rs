@@ -69,6 +69,10 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// The masters an enabled plugin names and the load order does not load, which is what a
+/// start is refused for (`mobile::Request::Start`).
+pub mod masters;
+
 /// The file naming the game folder to read in place, beside the engine home in the app's
 /// private files directory. Keep the name the same as `OdinFork.DATA_PATH`.
 pub const DATA_PATH_FILE: &str = "data-path.txt";
@@ -359,6 +363,11 @@ pub enum Ask {
     LookAgain,
     /// The saves, newest first, for the Load save list.
     Saves,
+    /// The enabled plugins whose masters are not all loaded, for the Mods page
+    /// ([`masters`]).
+    Masters,
+    /// Turn off every plugin with a missing master, which is the launcher's one tap.
+    TurnOffMissing,
 }
 
 /// Answers an [`Ask`]. Errors are what the launcher shows the player, so they are sentences.
@@ -370,6 +379,8 @@ pub fn handle(home: &Path, ask: Ask) -> Result<Value, String> {
             Ok(Value::Null)
         }
         Ask::Saves => Ok(saves(home)),
+        Ask::Masters => Ok(masters::as_json(home)),
+        Ask::TurnOffMissing => masters::turn_off(home).map(|off| json!({"turnedOff": off})),
     }
 }
 
@@ -450,13 +461,23 @@ pub fn chosen_save(home: &Path, name: Option<&str>) -> Result<Option<PathBuf>, S
 /// report having been written.
 pub fn last_run_note(home: &Path) -> Option<String> {
     let logs = fnv_install::EngineHome::new(home).logs();
-    let mut names: Vec<String> = std::fs::read_dir(&logs)
+    let all: Vec<String> = std::fs::read_dir(&logs)
         .ok()?
         .flatten()
         .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    let mut names: Vec<String> = all
+        .iter()
         .filter(|n| n.starts_with("nvforever-") && n.ends_with(".log"))
+        .cloned()
         .collect();
     names.sort();
+    // A start the engine refused returns before it opens a run log, and leaves only what it
+    // printed (`nvforever::odin::start_log`). That is the newest thing that happened, so it
+    // is what Home says.
+    if let Some(note) = refused_start_note(&logs, &all, names.last().map(String::as_str)) {
+        return Some(note);
+    }
     let newest = names.pop()?;
     let text = read_tail(&logs.join(&newest), 256 * 1024)?;
     if !ended_abnormally(&text) {
@@ -465,6 +486,53 @@ pub fn last_run_note(home: &Path) -> Option<String> {
     Some(format!(
         "The last run ({newest}) did not end normally. Export debug log keeps that log, so it can be sent before it is rotated away."
     ))
+}
+
+/// What a start log is named, which is `nvforever::odin::start_log`'s own name for it.
+const START_LOG: (&str, &str) = ("start-", ".txt");
+
+/// The note for a start that ended before the engine opened a run log: the start log is
+/// newer than the newest run log (or there is no run log at all) and says the start failed.
+/// `None` when the newest start log belongs to the newest run, which is the ordinary case.
+fn refused_start_note(logs: &Path, names: &[String], newest_run: Option<&str>) -> Option<String> {
+    let mut starts: Vec<&String> = names
+        .iter()
+        .filter(|n| n.starts_with(START_LOG.0) && n.ends_with(START_LOG.1))
+        .collect();
+    starts.sort();
+    let newest = starts.pop()?;
+    if let Some(run) = newest_run {
+        // The time stamp alone: the rest of each name is its process and its extension,
+        // which say nothing about which came first.
+        let (start_at, run_at) = (stamp_of(newest, START_LOG.0)?, stamp_of(run, "nvforever-")?);
+        if start_at <= run_at {
+            return None;
+        }
+    }
+    let text = read_tail(&logs.join(newest), 64 * 1024)?;
+    if !start_failed(&text) {
+        return None;
+    }
+    Some(format!(
+        "The last start ({newest}) ended before the game opened a run log. Export debug log keeps what it printed, which is what says why."
+    ))
+}
+
+/// The `YYYYMMDD-HHMMSS` a log's name carries after `prefix` (`crash::stamp`), which is what
+/// says which of two logs is the later.
+fn stamp_of<'a>(name: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = name.strip_prefix(prefix)?;
+    (rest.len() >= 15).then(|| &rest[..15])
+}
+
+/// Whether a start log's text shows a start the engine refused. The engine's own words: the
+/// `error:` every early return prints, the Android startup failure, and a panic before the
+/// panic hook has a log to write to.
+fn start_failed(text: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with("error: ") || line.starts_with("Android startup failed") || line.contains("panicked at")
+    })
 }
 
 /// Whether a run log's text shows a run that did not end normally. The three marks are
@@ -737,6 +805,36 @@ mod tests {
         // Only the newest log is the last run.
         std::fs::write(logs.join("nvforever-20261127-130000-43.log"), "started\n").unwrap();
         assert!(last_run_note(&home).is_some_and(|n| n.contains("130000-43")));
+        let _ = std::fs::remove_dir_all(&files);
+    }
+
+    /// A start the engine refused never opens a run log, so the only thing it leaves is the
+    /// start log; Home says so, and points at the row that sends it.
+    #[test]
+    fn home_says_when_a_start_ended_before_the_run_log() {
+        let files = temp("refused-start");
+        let home = files.join("NVForever");
+        let logs = home.join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+
+        // A start log on its own, from a start that was refused.
+        std::fs::write(logs.join("start-20261127-120000-42.txt"), "NVForever start log\nerror: no game folder\n").unwrap();
+        let note = last_run_note(&home).expect("a refused start is worth saying");
+        assert!(note.contains("start-20261127-120000-42.txt"), "{note}");
+        assert!(note.contains("Export debug log"), "it points at the row that sends it: {note}");
+
+        // The same start log beside the run log of that run: an ordinary run, nothing to say.
+        std::fs::write(logs.join("nvforever-20261127-120000-42.log"), "started\nrun log: the game exited normally\n").unwrap();
+        assert_eq!(last_run_note(&home), None);
+
+        // A later start that was refused, after a run that ended well.
+        std::fs::write(logs.join("start-20261127-130000-43.txt"), "NVForever start log\nerror: FalloutNV.esm is missing\n").unwrap();
+        assert!(last_run_note(&home).is_some_and(|n| n.contains("130000-43")));
+
+        // A later start that printed nothing wrong is not a refusal: the game may still be
+        // running, and the run log is what says how it ended.
+        std::fs::write(logs.join("start-20261127-130000-43.txt"), "NVForever start log\nsetup: game text read as cp1252\n").unwrap();
+        assert_eq!(last_run_note(&home), None);
         let _ = std::fs::remove_dir_all(&files);
     }
 }

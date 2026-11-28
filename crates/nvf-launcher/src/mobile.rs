@@ -95,6 +95,9 @@ fn handle(home: &EngineHome, req: Request, get: &mut impl FnMut(&str) -> Result<
             if !launch::folder_known(game.is_some(), false, None) {
                 return Err(IMPORT_FIRST.into());
             }
+            // A load order whose masters are not all loaded dies in the load, so the fork
+            // refuses the start and says which plugin wants what (crate::odin::masters).
+            crate::odin::masters::refuse_start(&home.root)?;
             // The fork's Load save list starts on a save it names (crate::odin).
             let start = if let Some(path) = crate::odin::chosen_save(&home.root, save.as_deref())? {
                 launch::Start::Load(path)
