@@ -51,6 +51,11 @@ pub fn prepare() -> Result<Vec<String>, String> {
     // The crash-test switches the launcher's Advanced page wrote, as the variables the
     // engine's gates read (`odin::crash_tests`). Nothing when the file names none of them.
     crate::odin::crash_tests::apply(&home);
+    // A Vulkan driver the player installed themselves, opened before the renderer exists and
+    // skipped when the last start on it did not survive (`odin::gpu_driver`). Nothing at all
+    // when the launcher selected none; after `crash_tests::apply`, whose validation switch it
+    // reads.
+    let _ = crate::odin::gpu_driver::start(&files);
     std::env::set_var("NVF_REPORTS", "0");
     std::env::set_var("WGPU_BACKEND", "vulkan");
     std::env::set_var(
@@ -74,6 +79,9 @@ pub fn prepare() -> Result<Vec<String>, String> {
 
 /// Restart the separate game process through the Android launcher, never an executable.
 pub fn restart(args: &[String]) -> Result<(), String> {
+    // This run is well enough to ask for another one, so its start marker says nothing about
+    // the driver and must not make the next start fall back (`odin::gpu_driver`).
+    crate::odin::gpu_driver::restarting();
     let json = serde_json::to_string(args).map_err(|e| e.to_string())?;
     let result = activity_string("restartEngine", Some(&json))?;
     if result.is_empty() {

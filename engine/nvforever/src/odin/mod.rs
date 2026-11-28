@@ -16,6 +16,8 @@
 //! | `main.rs` | just before `App::run` | [`before_run`] |
 //! | `android.rs` | the home folder's name | [`home::DIR`] |
 //! | `android.rs` | the launcher's crash-test switches | [`crash_tests::apply`] |
+//! | `android.rs` | the player's own Vulkan driver, before the renderer | [`gpu_driver::start`] |
+//! | `android.rs` | a restart the run asked for | [`gpu_driver::restarting`] |
 //! | `crash.rs` | the allocator `SaysWhenEmpty` wraps | [`alloc::BACKEND`] |
 //! | `crash.rs` | one dump when an allocation fails | [`proc_mem::dump_once`] |
 //! | `touch/gyro.rs` | the settings row, and three terms of `poll` | [`controller_gyro`] |
@@ -36,6 +38,9 @@ pub mod alloc;
 pub use nvf_play::odin::controller_gyro;
 /// The crash-test switches the launcher's Advanced page offers: one table, one reader.
 pub mod crash_tests;
+/// A Vulkan driver the player supplied (Mesa Turnip through libadrenotools), and the marker
+/// that sends the next start back to the system driver when one does not survive.
+pub mod gpu_driver;
 /// The Android home folder's name, which the fork keeps as earlier builds left it.
 pub mod home;
 /// What this process's own memory is doing, and the dump on a failed allocation.
@@ -106,4 +111,8 @@ pub fn before_run(app: &mut App) {
     // The Vulkan validation layer's crash-test switch: one startup line when it is on,
     // nothing at all when it is off (vulkan_validation.rs).
     app.add_plugins(vulkan_validation::VulkanValidationPlugin);
+    // Which Vulkan driver this run asked for against what the adapter turned out to be, and
+    // the start marker that sends the next start back to the system driver (gpu_driver.rs).
+    // Nothing at all unless `gpu_driver::start` set its variables.
+    app.add_plugins(gpu_driver::GpuDriverPlugin);
 }
