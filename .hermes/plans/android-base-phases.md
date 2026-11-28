@@ -99,9 +99,27 @@ device still loses its graphics device on upstream's base.
 - Cost measured on desktop, 2026-11-21, one pair of runs: 9.2 ms a frame with breadcrumbs
   against 8.5 ms without. An order of magnitude, not a measurement.
 
-### 3.2 Turnip through libadrenotools (L)
+### 3.2 Turnip through libadrenotools (L): done 2026-11-27
 
-- Port from: `fc5c580bc` (the engine side: the private linker namespace, handing wgpu-hal the
+Ported onto upstream's base as four commits on `odin/turnip-2`. What changed in the port, and
+what is left:
+
+- the whole engine side is one fork-owned file, `engine/nvforever/src/odin/gpu_driver.rs`:
+  upstream's `nvf-android` is a thin `cdylib` with no `paths` or `validation` module of its
+  own, so the driver opening moved into `nvforever` beside the plugin and is called from
+  `android::prepare` (one line) with `android::restart` clearing a marker of a run that asked
+  for a restart (upstream has no `paths::restart_requested`).
+- the launcher row is a card on upstream's Settings page, Graphics tab, built from
+  `OdinLauncher.settingsRows` (one hook line in `MobileLauncher.settingsPage`), one focusable
+  row per choice rather than a dialog; `GpuDrivers.java` is plain Java over a `File`, so its
+  checks run in the fork's controls job (`android/tests/GpuDriversTest.java`).
+- the Gradle side is Groovy, as planned: `android/app/build.gradle` configures the CMake build
+  only when the sources are there.
+- **Not proven: everything NDK.** No Android SDK, NDK or Gradle on the owner's PC, so the
+  CMake build of libadrenotools, its packaging and the APK checks are exercised only in CI,
+  and no Turnip build has been opened on the device yet (docs/odin-drivers.md).
+
+- Ported from: `fc5c580bc` (the engine side: the private linker namespace, handing wgpu-hal the
   driver's own `vkGetInstanceProcAddr`, the `renderer_starting` marker that falls back to the
   system driver after a start that dies), `3a690cc29` (Gradle and CI build `libadrenotools.so`
   and its four hook libraries from pinned commits, hash-checked, neither source tree

@@ -184,6 +184,20 @@ repository: the fork's APK workflow downloads it from a pinned
 checks the release asset and the library against pinned SHA-256 hashes, and packages that
 one library unchanged. Its licence text travels with the Khronos release it came from.
 
+The Android fork's APK also carries `libadrenotools.so` and its four hook libraries, which let
+the game open a Vulkan driver the player installed themselves
+([docs/odin-drivers.md](docs/odin-drivers.md)).
+[libadrenotools](https://github.com/bylaws/libadrenotools) and its
+[liblinkernsbypass](https://github.com/bylaws/liblinkernsbypass) submodule are **BSD-2-Clause,
+copyright their authors**, are no part of NVForever and are never committed to this repository:
+the fork's APK workflow fetches both at pinned commits, checks each archive against a pinned
+SHA-256 hash, and builds them unmodified. Their licence texts travel with the APK as
+`LICENSE.libadrenotools.txt` and `LICENSE.liblinkernsbypass.txt`.
+
+**NVForever ships no GPU driver.** A Mesa Turnip build, or any other driver, is one the player
+supplies: nothing of it is hosted, mirrored or bundled by this project, and the APK carries
+only the loader above.
+
 The capture plugin `nvf_capture` is a separate program that runs inside the original
 game. It is under the same licence with an additional permission under GPLv3 section 7
 to be combined with the game and the xNVSE script extender

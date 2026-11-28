@@ -214,9 +214,16 @@ chains the older `VkValidationFeaturesEXT` for it too.
 6. Only then **Vulkan validation**, and only then its two deeper rows. They are the slowest
    thing here and a load may not finish with GPU-assisted validation on.
 
-## What is not here
+## A Vulkan driver of your own
 
-Turnip through libadrenotools (a Vulkan driver of your own) is phase 3.2 of
-`.hermes/plans/android-base-phases.md` and is not on this branch. Validation and a custom
-driver were deliberately mutually exclusive on the old stack, so whichever lands second has to
-say so again.
+Running the same build on a Mesa Turnip driver the player installed is the one suspect the
+switches above cannot rule out, and it has a page of its own:
+[docs/odin-drivers.md](odin-drivers.md). In short: Settings, then Graphics, then **Graphics
+driver**; a start that does not reach 300 drawn frames puts the next one back on the system
+driver and says why.
+
+Validation and a driver of your own are mutually exclusive on purpose. Whenever the Vulkan
+validation switch is on, the next start runs on the **system** driver whatever the launcher's
+Graphics driver row says, and the launcher shows that as the reason the start fell back: the
+layer chain under libadrenotools' private namespace is not something this port has checked,
+and a crash test that cannot be trusted is worse than none.
