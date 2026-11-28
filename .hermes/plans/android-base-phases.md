@@ -116,10 +116,50 @@ device still loses its graphics device on upstream's base.
 
 ## Phase 4: the rest of the old fork (about 50 to 80 hours)
 
-### 4.1 Data profiles (M/L)
+### 4.1 Data profiles (M/L): **partly redundant** after upstream's named mod profiles
+
+Checked against upstream `6b7015970` on the 2026-11-27 rebase, which brought a mod manager and
+named mod profiles (`crates/nvf-launcher/src/{app,modlist}.rs`, about 8,200 new lines).
+
+What upstream's profiles are: a folder `<home>/profiles/<name>/` holding `modlist.txt`,
+`plugins.txt`, `loadorder.txt`, a locks side file, archive names and a note; Add profile,
+Load, Save, Delete and a right-click menu; the last one used is remembered and restored on the
+next run (`restore_remembered_profile`), a profile outside the home can be pointed at from
+settings (`profiles_dir_from_settings`), and two of them can be compared
+(`modlist::profile_comparison`). Loading one "only puts the lists on the page. It does not
+link or copy mod files" (`load_chosen_profile`).
+
+So, of the three things the fork's data profiles were for:
+
+- **the mod list and the load order per profile: redundant.** Upstream's is better than the
+  fork's planned version (history, locks, comparison, a remembered pick) and there is no case
+  for a second mechanism over the same `plugins.txt`.
+- **a Data folder per profile: still needed, and untouched.** Upstream's profile holds no game
+  folder at all. One `[Game] Path` is still the only one, so a player with vanilla in one
+  folder and a TTW install in another still cannot keep both ready. That is the half the owner
+  asked for and the half this fork's `data-path.txt` already half-answers.
+- **saves, `NVForever.ini`, `logs/` and `cache/` per profile: still needed.** Upstream's
+  profiles all live *inside* one home and share every one of those. Saves in particular are
+  what makes a modded playthrough and a vanilla one separable.
+
+And one thing that is new: **none of it is on Android.** Upstream's profiles are drawn by the
+desktop egui launcher (`app.rs`); `crates/nvf-launcher/src/mobile.rs` has not one mention of a
+profile, and neither has upstream's Java launcher. On the device the feature does not exist
+yet.
+
+**Verdict: partly redundant. Keep 4.1, cut it down, and re-scope it.** Drop the mod-list and
+load-order half entirely. What is left is a smaller job than the M/L this was sized at: a
+profile is a **name, a Data folder and a home folder**, and the plumbing is
+`odin::adopt` taking a chosen home instead of the one constant, plus rows in `OdinLauncher`.
+Build it so a profile's home is where upstream's `profiles/` folder then lives, so upstream's
+mod profiles nest inside the fork's data profiles rather than competing with them; if upstream
+ever brings its profile rows to `mobile.rs`, that nesting is what keeps both working.
+Re-sizing: S/M, from M/L. Still not offerable upstream (it is a design argument, not a patch),
+and now additionally overlapping a feature they have chosen a different shape for.
 
 - Port from: `d0dc75f38` (the engine side: `NVFOREVER_HOME` per profile, `share_settings`,
-  `profile.txt`, `profiles.txt`), `75f85cc20` (the launcher side).
+  `profile.txt`, `profiles.txt`), `75f85cc20` (the launcher side). Read both for the home
+  switching only; their mod-list screens are superseded.
 - A profile is a name, a Data folder and a home folder; everything else falls out of the home.
   The first profile is always Vanilla and keeps `files/NVForever`, so nothing moves. Saves are
   per profile on purpose. `NVForever.ini` is shared by copying the newest one before a start,
