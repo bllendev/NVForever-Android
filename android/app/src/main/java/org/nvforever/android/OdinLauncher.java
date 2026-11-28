@@ -979,7 +979,7 @@ final class OdinLauncher {
     /** Remember what has the focus, because a redraw builds every view again. */
     void beforeRender() {
         View focused = ui.root == null ? null : ui.root.findFocus();
-        focusOn = focused instanceof TextView ? ((TextView) focused).getText().toString() : null;
+        focusOn = focused == null ? null : focusLabel(focused);
         compact = measure();
         columns = null;
         columnNext = 0;
@@ -1009,9 +1009,22 @@ final class OdinLauncher {
         });
     }
 
+    /**
+     * What names a row for the focus to find again after a redraw: the words a screen reader
+     * would say where there are any, else the row's own text. The reorder arrows of every
+     * plugin carry the same glyph and differ only in what they say, so moving a plugin with a
+     * gamepad leaves the focus on that plugin's arrow rather than on the first one.
+     */
+    private static String focusLabel(View view) {
+        CharSequence said = view.getContentDescription();
+        if (said != null && said.length() > 0) {
+            return "said:" + said;
+        }
+        return view instanceof TextView ? "text:" + ((TextView) view).getText() : null;
+    }
+
     private static boolean refocus(View view, String label) {
-        if (view instanceof TextView && view.isFocusable() && view.isEnabled()
-            && label.contentEquals(((TextView) view).getText())) {
+        if (view.isFocusable() && view.isEnabled() && label.equals(focusLabel(view))) {
             return view.requestFocus();
         }
         if (view instanceof ViewGroup) {
