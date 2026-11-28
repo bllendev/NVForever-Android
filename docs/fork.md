@@ -49,6 +49,9 @@ Everything, including every part the fork used to have of its own:
 | the live glance at the Pip-Boy | `engine/nvf-play/src/wrist_{arm,hud,live,local,page}.rs`, `engine/nvforever/src/wrist_screen.rs` (its `framing` module holds the arms view, the drop and the side) | the owner's live wrist map: the device raised on the arm with the game still running, which is what he plays with on the Odin |
 | Quick Loot scrolled with the D-pad | `engine/nvf-play/src/quick_loot_dpad.rs` | on a controller the list could only be scrolled with the look stick |
 | Hide HUD Key: Keep Quick Loot | the `tweak-hide-hud-quick-loot` row | "just the HUD gone but Quick Loot to stay" |
+| the compact density on a handheld | `OdinCompact.java`, `OdinLauncher` (the card columns, the slim plugin rows) | upstream draws for a phone held upright: four rows fill the Odin's screen and everything else is under the fold ("the menu is too bulky and shows very little", 2026-11-27) |
+| missing masters, and the one tap that clears them | `crates/nvf-launcher/src/odin/masters.rs`, `OdinLauncher` | a plugin whose master is not loaded takes the game down in the load, which is what the owner's mods did; the start is refused instead |
+| the start log | `engine/nvforever/src/odin/start_log.rs`, `DebugReport.java` | a start the engine refuses returns before the run log is open, so Export debug log had nothing at all to export |
 
 Phases 2 to 4, with the old stack's commits to port from, are in
 `.hermes/plans/android-base-phases.md`.
@@ -78,6 +81,8 @@ one of them is a line a rebase can conflict on. So:
   `android/.../OdinFork.java`, `android/.../OdinStorage.java`, `android/.../OdinLauncher.java`,
   `android/.../OdinFolderPicker.java`, `android/.../SaveBackup.java`, `android/.../DebugReport.java`,
   `android/.../OdinCrashTests.java`, `android/.../OdinAdvanced.java`, `android/.../GpuDrivers.java`,
+  `android/.../OdinCompact.java`, `crates/nvf-launcher/src/odin/masters.rs`,
+  `engine/nvforever/src/odin/start_log.rs`,
   `android/app/src/main/cpp/CMakeLists.txt`, `android/tests/*Test.java` (the fork's),
   `tools/android/tests/test_fork.py`, `.github/workflows/fork-android.yml`;
 - an upstream file gets a **hook**: one or two lines that call into those files;
@@ -91,7 +96,7 @@ conflicts on.
 | upstream file | lines | the hook |
 | --- | :-: | --- |
 | `engine/nvforever/src/main.rs` | 3 | `pub mod odin;`, `odin::mem_log::MemoryLogPlugin` in the Android plugin list, and `odin::wrist_screen::WristScreenPlugin` in the play branch's |
-| `engine/nvforever/src/android.rs` | 1 block, 1 line | `NVFOREVER_HOME` joins `odin::home::DIR`, `odin::crash_tests::apply` on the same home and `odin::gpu_driver::start` on the files folder; `odin::gpu_driver::restarting` in `restart` |
+| `engine/nvforever/src/android.rs` | 1 block, 1 line | `NVFOREVER_HOME` joins `odin::home::DIR`, `odin::start_log::capture` on the same home, `odin::crash_tests::apply` and `odin::gpu_driver::start` on the files folder; `odin::gpu_driver::restarting` in `restart` |
 | `engine/nvforever/src/crash.rs` | 6 blocks | `SaysWhenEmpty` wraps `odin::alloc::BACKEND`; `odin::proc_mem::dump_once` on a failed allocation; `odin::gpu_recorder`'s `note_lost`, `log_dump_once` and `report_section` on the two lost-device paths |
 | `engine/nvforever/src/dlss/mod.rs` | 1 | the renderer's instance flags go through `odin::vulkan_validation::instance_flags` |
 | `engine/nvforever/src/reports/mod.rs` | 1 block | `odin::vulkan_validation::log_directives` joins the run log's filter |
@@ -110,8 +115,8 @@ conflicts on.
 | `engine/nvf-play/src/tweaks.rs` | 4 blocks | `hide_hud_keeps_quick_loot`: the field, its default, its `switch!` row and the `HudHidden` term it feeds |
 | `engine/nvf-android/Cargo.toml` | 1 block | the `odin-mimalloc` feature passed through to `nvforever` |
 | `crates/nvf-launcher/src/lib.rs` | 1 | `pub mod odin;` |
-| `crates/nvf-launcher/src/mobile.rs` | 6 blocks | `odin::adopt(home)` at the top of `request`; three fork fields in `State`; `Request::Odin` and its arm; `Request::Start`'s `save` field and `odin::chosen_save`; `REPO_DOWNLOADS` is `odin::DOWNLOADS`; `odin::apk_for_this_app` in the asset filter |
-| `android/.../MobileLauncher.java` | 11 words, 9 lines | `OdinFork.home`; upstream's builders, palette and pages stop being `private`; the `odin` field; one call per page, the focus ring, the two render hooks and `OdinAdvanced.attach` on the build line |
+| `crates/nvf-launcher/src/mobile.rs` | 7 blocks | `odin::adopt(home)` at the top of `request`; three fork fields in `State`; `Request::Odin` and its arm; `Request::Start`'s `save` field and `odin::chosen_save`; `odin::masters::refuse_start` in the same arm; `REPO_DOWNLOADS` is `odin::DOWNLOADS`; `odin::apk_for_this_app` in the asset filter |
+| `android/.../MobileLauncher.java` | 12 words, 18 lines | `OdinFork.home`; upstream's builders, palette and pages stop being `private`; the `odin` field; one call per page, the focus ring, the two render hooks and `OdinAdvanced.attach` on the build line; every size in `label`, `tap`, `space`, `add`, `addBar`, `card`, the header and the save preview goes through `OdinCompact`; `card` adds into `odin.cardParent`, a settings heading into `odin.heading`; the plugin loop and the start refusal are one call each |
 | `android/.../LauncherActivity.java` | 4 blocks | `OdinFork.home` twice, `OdinStorage.promptIfNeeded`, the three key and motion overrides, the export and driver-zip results, the save a start loads |
 | `crates/nvf-launcher/src/news.rs` | 1 | `RELEASES` is `odin::RELEASES` |
 | `android/app/build.gradle` | 5 blocks | the application id property, the debug suffix, the `-odin.<n>` revision, and libadrenotools' CMake build when its sources are there |
