@@ -77,6 +77,7 @@ jobs:
             android/app/src/main/java/org/nvforever/android/SaveBackup.java \
             android/app/src/main/java/org/nvforever/android/DebugReport.java \
             android/app/src/main/java/org/nvforever/android/OdinCrashTests.java \
+            android/app/src/main/java/org/nvforever/android/GpuDrivers.java \
             android/app/src/main/java/org/nvforever/android/HandoffCoordinator.java \
             android/app/src/main/java/org/nvforever/android/LoadingState.java \
             android/app/src/main/java/org/nvforever/android/GyroMotion.java \
@@ -85,11 +86,12 @@ jobs:
             android/app/src/main/java/org/nvforever/android/UpdatePolicy.java \
             android/app/src/test/java/org/nvforever/android/InstallConfigTest.java \
             android/tests/OdinForkTest.java android/tests/SaveBackupTest.java android/tests/OdinCrashTestsTest.java \
+            android/tests/GpuDriversTest.java \
             android/tests/DebugReportTest.java android/tests/HandoffCoordinatorTest.java \
             android/tests/GyroMotionTest.java android/tests/AndroidPerformanceTest.java \
             android/tests/MarkdownParserTest.java android/tests/UpdatePolicyTest.java
           for control in InstallConfigTest OdinForkTest SaveBackupTest DebugReportTest OdinCrashTestsTest \
-                         HandoffCoordinatorTest GyroMotionTest \
+                         GpuDriversTest HandoffCoordinatorTest GyroMotionTest \
                          AndroidPerformanceTest MarkdownParserTest UpdatePolicyTest; do
             "$JAVA_HOME/bin/java" -cp "$tests" "org.nvforever.android.$control"
           done
@@ -130,6 +132,9 @@ jobs:
     env:
       NDK_VERSION: '28.2.13676358'
       BUILD_TOOLS: '35.0.1'
+      # The CMake the SDK ships, for libadrenotools (android/app/src/main/cpp/CMakeLists.txt);
+      # android/app/build.gradle asks for this same version.
+      CMAKE_VERSION: '3.22.1'
       CARGO_TERM_COLOR: always
       # The owner's installed build is versionCode 36; an APK that does not raise it cannot
       # be installed over it, so the build refuses to publish one.
@@ -176,7 +181,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "JAVA_HOME=$JAVA_HOME_17_X64" >> "$GITHUB_ENV"
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' "build-tools;$BUILD_TOOLS" "ndk;$NDK_VERSION"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' "build-tools;$BUILD_TOOLS" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: Verified Gradle 8.11.1
@@ -213,6 +218,45 @@ jobs:
           mkdir -p "$out"
           unzip -o -j "$zip" "android-binaries-${LAYER_TAG#vulkan-sdk-}/arm64-v8a/libVkLayer_khronos_validation.so" -d "$out"
           echo "$LAYER_LIB_SHA256  $out/libVkLayer_khronos_validation.so" | sha256sum --check
+
+      - name: The libadrenotools this APK carries
+        shell: bash
+        env:
+          # libadrenotools (BSD-2-Clause, bylaws/libadrenotools) and its liblinkernsbypass
+          # submodule (BSD-2-Clause, bylaws/liblinkernsbypass), for the launcher's optional
+          # Graphics driver choice: a Mesa Turnip build the player installs themselves
+          # (docs/odin-drivers.md). No driver is downloaded, shipped or mirrored by this
+          # project, only this loader. Neither source tree is committed: both are fetched at a
+          # pinned commit, checked against a pinned hash, and built by Gradle's CMake
+          # (android/app/src/main/cpp/CMakeLists.txt).
+          ADRENOTOOLS_COMMIT: 8fae8ce254dfc1344527e05301e43f37dea2df80
+          ADRENOTOOLS_SHA256: ceffce971676d4cfdf348a082df06fc92a1dca6d95bea892a480d63f200961cb
+          LINKERNSBYPASS_COMMIT: aa3975893d83ef1bc84c321ec60c65fbf1287887
+          LINKERNSBYPASS_SHA256: da1128c8aa771c4d24766b53a47822d0717baa5c536ca8491220402942b80638
+        run: |
+          set -euo pipefail
+          src=android/app/src/main/cpp/libadrenotools
+          rm -rf "$src"
+          mkdir -p "$src/lib/linkernsbypass"
+          curl --fail --location --retry 3 \
+            "https://codeload.github.com/bylaws/libadrenotools/tar.gz/$ADRENOTOOLS_COMMIT" \
+            --output "$RUNNER_TEMP/adrenotools.tar.gz"
+          echo "$ADRENOTOOLS_SHA256  $RUNNER_TEMP/adrenotools.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/adrenotools.tar.gz" -C "$src" --strip-components=1
+          curl --fail --location --retry 3 \
+            "https://codeload.github.com/bylaws/liblinkernsbypass/tar.gz/$LINKERNSBYPASS_COMMIT" \
+            --output "$RUNNER_TEMP/linkernsbypass.tar.gz"
+          echo "$LINKERNSBYPASS_SHA256  $RUNNER_TEMP/linkernsbypass.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/linkernsbypass.tar.gz" -C "$src/lib/linkernsbypass" --strip-components=1
+          test -f "$src/CMakeLists.txt"
+          test -f "$src/lib/linkernsbypass/CMakeLists.txt"
+          # BSD-2-Clause asks that the notice travel with a binary distribution, so both go
+          # beside the APK in the artifact and in the release (LEGAL.md).
+          mkdir -p dist
+          cp "$src/LICENSE" dist/LICENSE.libadrenotools.txt
+          cp "$src/lib/linkernsbypass/LICENSE" dist/LICENSE.liblinkernsbypass.txt
+          test -s dist/LICENSE.libadrenotools.txt
+          test -s dist/LICENSE.liblinkernsbypass.txt
 
       - name: Build both variants with an optimised native library
         shell: bash
@@ -312,6 +356,20 @@ jobs:
             # as a file in the app's library folder, which is also why extractNativeLibs is
             # checked above (docs/odin-debug.md).
             test -f "$libs/libVkLayer_khronos_validation.so"
+            # libadrenotools and all four of its hook libraries must reach the APK as files,
+            # or the launcher's Graphics driver choice silently has nothing to load
+            # (docs/odin-drivers.md). The loop above already checked their alignment.
+            for so in libadrenotools.so libhook_impl.so libmain_hook.so libfile_redirect_hook.so libgsl_alloc_hook.so; do
+              test -f "$libs/$so"
+            done
+            # A driver the player supplied only works if nothing pulls the system Vulkan
+            # loader into the process first, so the engine must not link it: wgpu loads it at
+            # run time, and on Android it may instead be handed the driver's own entry point
+            # (engine/nvforever/src/odin/gpu_driver.rs).
+            if readelf -dW "$libs/libnvf_android.so" | grep -q 'NEEDED.*libvulkan'; then
+              echo 'libnvf_android.so links libvulkan.so; a driver the player supplied cannot be used' >&2
+              exit 1
+            fi
           done
 
       - name: Stage the licence notices this APK carries
@@ -380,4 +438,5 @@ jobs:
             SHA256SUMS.txt signer.txt package.txt \
             LICENSE.txt LEGAL.txt THIRD-PARTY-LICENSES.txt \
             NDK-NOTICE.txt NDK-NOTICE.toolchain.txt SOURCE.txt \
+            LICENSE.libadrenotools.txt LICENSE.liblinkernsbypass.txt \
             "${args[@]}" --notes-file notes.md

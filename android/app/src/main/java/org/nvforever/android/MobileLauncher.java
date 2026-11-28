@@ -876,6 +876,8 @@ final class MobileLauncher {
             }
         }
         if (!any && "Mobile".equals(tab)) add(content, label("The first normal Play or Continue publishes this build’s Mobile settings. Touch practice and layout editing open only in the game.", 16, weak));
+        // The fork's Graphics driver choice, on the Graphics tab only (OdinLauncher).
+        odin.settingsRows(tab);
     }
 
     private void slider(String title, String key, double value, JSONObject control) {

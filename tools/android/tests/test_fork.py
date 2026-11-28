@@ -99,5 +99,59 @@ class CrashTestSwitchTests(unittest.TestCase):
         self.assertIn("home.join(FILE)", self.rust)
 
 
+class GpuDriverTests(unittest.TestCase):
+    """The launcher writes the driver choice and the engine opens it (docs/odin-drivers.md).
+
+    One folder and three field names in two languages. A disagreement here means the player
+    chooses a driver, the launcher says so, and every start quietly runs on the system one.
+    """
+
+    def setUp(self):
+        self.java = text("android/app/src/main/java/org/nvforever/android/GpuDrivers.java")
+        self.rust = text("engine/nvforever/src/odin/gpu_driver.rs")
+
+    def test_both_sides_use_the_same_folder_in_private_storage(self):
+        rust = re.search(r'pub const DIR: &str = "([^"]*)"', self.rust).group(1)
+        self.assertEqual(java_constant(self.java, "DIR"), rust)
+        # Private app storage: dlopen refuses a library any other app could rewrite.
+        self.assertIn("new File(filesDir, DIR)", self.java)
+        self.assertIn("files.join(DIR)", self.rust)
+
+    def test_both_sides_agree_on_the_selected_file(self):
+        for name in ("folder", "library", "label"):
+            self.assertIn(f'"{name} " +', self.java, name)
+            self.assertIn(f'"{name}" =>', self.rust, name)
+        for java, rust in (("SELECTED", "SELECTED"), ("MARKER", "MARKER"),
+                           ("LAST_FALLBACK", "LAST_FALLBACK"), ("NATIVE_LIB_DIR", "NATIVE_LIB_DIR")):
+            value = re.search(rf'const {rust}: &str = "([^"]*)"', self.rust).group(1)
+            self.assertEqual(java_constant(self.java, java), value, java)
+
+    def test_the_engine_opens_the_driver_before_the_renderer(self):
+        android = text("engine/nvforever/src/android.rs")
+        # In prepare, after the crash-test switches (whose validation row it reads) and
+        # before any Vulkan instance exists.
+        self.assertIn("crate::odin::gpu_driver::start(&files)", android)
+        self.assertLess(android.index("crash_tests::apply"), android.index("gpu_driver::start"))
+        # A run that asks for a restart was alive, so its marker says nothing about the driver.
+        self.assertIn("crate::odin::gpu_driver::restarting()", android)
+
+    def test_the_loader_is_built_from_pinned_sources_and_never_committed(self):
+        workflow = text(".github/workflows/fork-android.yml")
+        self.assertIn("ADRENOTOOLS_COMMIT: 8fae8ce254dfc1344527e05301e43f37dea2df80", workflow)
+        self.assertIn("LINKERNSBYPASS_COMMIT: aa3975893d83ef1bc84c321ec60c65fbf1287887", workflow)
+        # Both archives are hash-checked, and both licence texts travel with the APK.
+        self.assertIn("ADRENOTOOLS_SHA256:", workflow)
+        self.assertIn("LINKERNSBYPASS_SHA256:", workflow)
+        self.assertIn("dist/LICENSE.libadrenotools.txt", workflow)
+        self.assertIn("dist/LICENSE.liblinkernsbypass.txt", workflow)
+        # Neither source tree is in the repository, and nothing may commit one.
+        self.assertIn("/android/app/src/main/cpp/libadrenotools/", text(".gitignore"))
+        self.assertFalse((ROOT / "android/app/src/main/cpp/libadrenotools").exists())
+        # Gradle builds it only when the sources are there, so a local build works without them.
+        gradle = text("android/app/build.gradle")
+        self.assertIn("def adrenotoolsPresent = file('src/main/cpp/libadrenotools/CMakeLists.txt').exists()", gradle)
+        self.assertIn("if (adrenotoolsPresent) {", gradle)
+
+
 if __name__ == "__main__":
     unittest.main()

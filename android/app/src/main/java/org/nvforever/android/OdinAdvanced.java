@@ -81,6 +81,17 @@ final class OdinAdvanced {
         why.setTextSize(14);
         why.setTextColor(WEAK);
         list.addView(why);
+        if (GpuDrivers.mode(activity.getFilesDir()) != null) {
+            // Validation and a driver the player supplied are mutually exclusive: the layer
+            // chain under libadrenotools' private namespace is not something this port has
+            // checked, so the engine stays on the system driver whenever validation is on
+            // (odin::gpu_driver, docs/odin-drivers.md).
+            TextView driver = new TextView(activity);
+            driver.setText("A graphics driver of your own is chosen in Settings. While Vulkan validation is on, the next start uses the system driver instead and says so in the launcher.");
+            driver.setTextSize(14);
+            driver.setTextColor(AMBER);
+            list.addView(driver);
+        }
         // Every row is rebuilt whenever one changes, because a row may need another switch and
         // is greyed until that one is on.
         Runnable[] rebuild = new Runnable[1];

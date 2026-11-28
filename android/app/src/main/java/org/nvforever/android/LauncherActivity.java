@@ -23,6 +23,7 @@ public final class LauncherActivity extends Activity {
     private static final int REQUEST_UNKNOWN_SOURCES = 2;
     /** The fork's Export debug log, through the system document picker (OdinLauncher). */
     static final int ODIN_EXPORT_LOG = 3;
+    static final int ODIN_INSTALL_DRIVER = 4;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -130,6 +131,10 @@ public final class LauncherActivity extends Activity {
         }
         if (request == ODIN_EXPORT_LOG) {
             launcher.odin.exportTo(result == RESULT_OK && data != null ? data.getData() : null);
+            return;
+        }
+        if (request == ODIN_INSTALL_DRIVER) {
+            launcher.odin.installDriver(result == RESULT_OK && data != null ? data.getData() : null);
             return;
         }
         if (request != PICK_GAME || result != RESULT_OK || data == null || data.getData() == null) return;

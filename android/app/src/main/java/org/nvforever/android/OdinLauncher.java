@@ -16,10 +16,12 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.StringWriter;
@@ -50,6 +52,9 @@ import org.json.JSONObject;
  *       last run ended unexpectedly ({@link DebugReport}, {@code crate::odin::last_run_note}).
  *   <li><b>Load save</b>, a page of the saves newest first, which starts the game on the one
  *       the player picks through upstream's own one-start request.
+ *   <li><b>Graphics driver</b> on upstream's Settings page: Automatic, System, each driver the
+ *       player installed, and a zip picker that installs another ({@link GpuDrivers},
+ *       {@code nvforever::odin::gpu_driver}).
  *   <li><b>A gamepad that works the whole launcher.</b> Upstream's has no {@code KeyEvent},
  *       {@code onKeyDown} or focus handling at all: it is touch only, which on a device with
  *       buttons is a daily annoyance. Touch behaviour is unchanged; nothing here is focusable
@@ -185,6 +190,12 @@ final class OdinLauncher {
             ui.add(box, ui.tap("Export debug log", true, ui.editable(), this::exportLog));
             ui.add(box, ui.tap("Copy debug summary", false, ui.editable(), this::copySummary));
         }
+        String fellBack = GpuDrivers.lastStartFellBack(activity.getFilesDir());
+        if (fellBack != null) {
+            LinearLayout driver = ui.card("Graphics driver");
+            ui.add(driver, ui.label("The last start used the system graphics driver: " + fellBack, 15, ui.text));
+            ui.add(driver, ui.label("The choice is in Settings, under Graphics.", 14, ui.weak));
+        }
         LinearLayout saves = ui.card("Saves");
         ui.add(saves, ui.label("Saves live in this app's own storage, which no file app can reach and which uninstalling deletes. A backup is a plain folder of save files in Download, so it can be copied off the device with anything.", 15, ui.weak));
         ui.add(saves, ui.tap("Back up saves to Download", false, ui.editable(), this::backUpSaves));
@@ -199,6 +210,102 @@ final class OdinLauncher {
         if (controllerPresent()) {
             ui.add(about, ui.label("Controller: A select, B back, LB and RB change page, Start plays, D-pad or left stick moves.", 14, ui.weak));
         }
+    }
+
+    // ---- the Graphics driver choice --------------------------------------------------
+
+    /**
+     * The fork's card on upstream's Settings page: which Vulkan driver the next start uses
+     * ({@link GpuDrivers}, docs/odin-drivers.md). One row per choice rather than a dialog, so
+     * every one of them is a focusable row a gamepad reaches like any other.
+     */
+    void settingsRows(String tab) {
+        if (!"Graphics".equals(tab)) {
+            return;
+        }
+        File files = activity.getFilesDir();
+        LinearLayout box = ui.card("Graphics driver");
+        ui.add(box, ui.label("The game can run on a Vulkan driver you install yourself: a Mesa Turnip build for Adreno, which may be newer than the one in this phone's system image. NVForever ships none, and a driver whose first seconds do not survive is dropped by itself at the next start.", 15, ui.weak));
+        String why = GpuDrivers.lastStartFellBack(files);
+        if (why != null) {
+            ui.add(box, ui.label("The last start used the system driver: " + why, 15, ui.text));
+        }
+        if (OdinCrashTests.settled(OdinCrashTests.read(home())).contains("vulkan-validation")) {
+            ui.add(box, ui.label("The Vulkan validation crash test is on, and it runs on the system driver, so the next start uses that whatever is chosen here.", 15, ui.text));
+        }
+        String mode = GpuDrivers.mode(files);
+        List<String[]> drivers = GpuDrivers.installed(files);
+        driverChoice(box, "Automatic", GpuDrivers.AUTOMATIC.equals(mode), GpuDrivers.AUTOMATIC, null);
+        driverChoice(box, "System", mode == null, null, null);
+        for (String[] driver : drivers) {
+            driverChoice(box, driver[1], driver[0].equals(mode), driver[0], driver[0]);
+        }
+        ui.add(box, ui.label(drivers.isEmpty()
+            ? "No driver of your own is installed, so Automatic is the system driver. A driver zip is one you supply: a single 64-bit ARM .so, with meta.json if it has one."
+            : "Hold a driver to remove it.", 14, ui.weak));
+        ui.add(box, ui.tap("Install driver zip...", false, ui.editable(), this::pickDriverZip));
+    }
+
+    /** One row of the choice: tapped it becomes the next start's driver, held it is removed. */
+    private void driverChoice(LinearLayout box, String label, boolean chosen, String id, String removable) {
+        Button row = ui.tap(label, chosen, ui.editable(), () -> {
+            GpuDrivers.select(activity.getFilesDir(), id);
+            ui.refresh(false, false, "The next start uses " + label + ".");
+        });
+        if (removable != null) {
+            row.setLongClickable(true);
+            row.setOnLongClickListener(v -> {
+                confirmRemoveDriver(removable, label);
+                return true;
+            });
+        }
+        ui.add(box, row);
+    }
+
+    private void pickDriverZip() {
+        Intent open = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("*/*")
+            .putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "application/zip", "application/octet-stream" });
+        try {
+            activity.startActivityForResult(open, LauncherActivity.ODIN_INSTALL_DRIVER);
+        } catch (android.content.ActivityNotFoundException e) {
+            ui.message("This device has no document picker, so a driver zip cannot be chosen here.");
+        }
+    }
+
+    /** The document picker came back. A null URI means the player left it. */
+    void installDriver(Uri uri) {
+        if (uri == null) {
+            return;
+        }
+        File files = activity.getFilesDir();
+        String id;
+        try (InputStream zip = activity.getContentResolver().openInputStream(uri)) {
+            if (zip == null) {
+                throw new IOException("that file could not be opened");
+            }
+            id = GpuDrivers.install(files, zip);
+        } catch (IOException | RuntimeException e) {
+            ui.message(said(e, "That driver could not be installed."));
+            return;
+        }
+        String label = GpuDrivers.label(new File(GpuDrivers.root(files), id));
+        ui.refresh(false, false, GpuDrivers.AUTOMATIC.equals(GpuDrivers.mode(files))
+            ? label + " is installed, and Automatic now uses it."
+            : label + " is installed. Choose it under Graphics driver to use it.");
+    }
+
+    private void confirmRemoveDriver(String id, String label) {
+        new AlertDialog.Builder(activity)
+            .setTitle("Remove " + label)
+            .setMessage("Delete this driver from the app's own storage. Your saves and your game folder are untouched, and the system driver is always there.")
+            .setPositiveButton("Remove", (dialog, which) -> {
+                GpuDrivers.delete(activity.getFilesDir(), id);
+                ui.refresh(false, false, label + " is removed.");
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
     }
 
     // ---- the Load save page ----------------------------------------------------------
