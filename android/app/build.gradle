@@ -14,6 +14,8 @@ def explicitVersionCode = providers.environmentVariable('NVF_ANDROID_VERSION_COD
 // upstream's (docs/fork.md).
 def resolvedApplicationId = providers.gradleProperty('nvfApplicationId')
     .getOrElse('org.nvforever.android')
+// Whether the libadrenotools sources are in place (see the externalNativeBuild block below).
+def adrenotoolsPresent = file('src/main/cpp/libadrenotools/CMakeLists.txt').exists()
 def deriveVersionCode = { String name ->
     // `-odin.<n>`, `-test.<n>` and `-rc.<n>` are the fork's revisions and count exactly as
     // upstream's `-android-r<n>`. A plain `x.y.z` release sorts after every revision of its
@@ -45,6 +47,38 @@ android {
         versionCode resolvedVersionCode
         versionName resolvedVersionName
         ndk { abiFilters 'arm64-v8a' }
+    }
+    // libadrenotools and its hook libraries, for the launcher's optional Graphics driver
+    // choice (src/main/cpp/CMakeLists.txt, docs/odin-drivers.md). Its sources are never
+    // committed: the fork's workflow downloads them at pinned commits into
+    // src/main/cpp/libadrenotools/ before this build runs. Without them there is no native
+    // build at all, so a local `gradle assembleDebug` works exactly as it did and the APK
+    // simply carries no libadrenotools.
+    if (adrenotoolsPresent) {
+        // The NDK AGP builds the C/C++ with. Without this AGP wants its own default version,
+        // which is not the one CI installs (NDK_VERSION in .github/workflows/fork-android.yml).
+        // It matters only here: with no native build AGP never looks for an NDK at all.
+        def pinnedNdk = providers.environmentVariable('NDK_VERSION').orNull
+        if (pinnedNdk != null) ndkVersion = pinnedNdk
+        externalNativeBuild {
+            cmake {
+                path file('src/main/cpp/CMakeLists.txt')
+                version '3.22.1'
+            }
+        }
+        defaultConfig {
+            externalNativeBuild {
+                cmake {
+                    // The NDK's default for CMake, named rather than assumed: libadrenotools
+                    // and its hook library each carry their own copy, which is what the
+                    // private linker namespace the hooks live in needs. And 16 KB pages, as
+                    // the engine's own library already is and as the workflow checks every
+                    // packaged library for; NDK 28 does this anyway, asked for by name so the
+                    // build does not depend on that staying the default.
+                    arguments '-DANDROID_STL=c++_static', '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
+                }
+            }
+        }
     }
     // Only this repository's runtime data and Classic casing artwork. No game data.
     sourceSets.main.assets.srcDirs = ['../../runtime-assets']

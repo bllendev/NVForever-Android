@@ -46,6 +46,9 @@ nvf-screenshot-*.png
 /android/.gradle/
 /android/**/build/
 /android/local.properties
+# libadrenotools (BSD-2-Clause) and its liblinkernsbypass submodule, downloaded at pinned
+# commits by the fork's workflow and never committed: android/app/src/main/cpp/CMakeLists.txt.
+/android/app/src/main/cpp/libadrenotools/
 /runtime-assets/
 /native-libs/
 *.apk
