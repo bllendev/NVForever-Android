@@ -211,7 +211,7 @@ jobs:
           # to the folder rather than emptying it, so the layer put here survives the build.
           out=native-libs/arm64-v8a
           mkdir -p "$out"
-          unzip -o -j "$zip" 'arm64-v8a/libVkLayer_khronos_validation.so' -d "$out"
+          unzip -o -j "$zip" "android-binaries-${LAYER_TAG#vulkan-sdk-}/arm64-v8a/libVkLayer_khronos_validation.so" -d "$out"
           echo "$LAYER_LIB_SHA256  $out/libVkLayer_khronos_validation.so" | sha256sum --check
 
       - name: Build both variants with an optimised native library
