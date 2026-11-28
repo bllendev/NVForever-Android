@@ -69,6 +69,8 @@ use crate::idles::{IdleSlot, PlayerIdles};
 use crate::sky::{Sun, ARMS_LAYER, BODY_LAYER, SHADOW_LAYER};
 use crate::world::WorldRoot;
 use crate::view_sway::{SwayInput, SwayPose, ViewSway};
+// The glance's framing, fork-owned (docs/fork.md).
+use crate::odin::wrist_screen::framing;
 use crate::weapon_lower::{LowerInput, WeaponLower};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::light::CascadeShadowConfigBuilder;
@@ -125,39 +127,8 @@ const PIPBOY_BLEND: f32 = 8.0 / 30.0;
 /// `Fallout.ini` the same].
 pub const PIPBOY_FOV: f32 = 47.0;
 
-/// The field of view the arm is drawn with for the live wrist map's glance
-/// (`crate::odin::wrist_screen`), degrees as [`PIPBOY_FOV`] counts them. The menus' 47 fills the
-/// picture with the device, which is what a menu wants; a glance keeps the road ahead in
-/// view, so the whole Pip-Boy sits in the lower left instead. The lens draws the rig
-/// across the view about the eye, so a narrow arms view throws what is off the eye's axis
-/// off the picture as well: at the menus' 47 the hand fills the screen and the device is
-/// past the left edge, at 85 the device is still cut by it, at 110 it is whole and the
-/// road ahead stays clear [design: fitted on the desktop against the vanilla Pip-Boy 3000
-/// at Goodsprings, 2026-11-21, spikes/001-live-wrist-world].
-const WRIST_FOV: f32 = 110.0;
-
-/// How far below the eye the glance holds the arm, game units: a menu puts the device in
-/// the middle of the view, a glance keeps it under the road ahead [design: fitted on the
-/// desktop at Goodsprings, 2026-11-21, spikes/001-live-wrist-world]. `NVF_WRIST_DROP`
-/// overrides it while it is being fitted.
-const WRIST_DROP: f32 = 3.0;
-
-fn wrist_drop() -> f32 {
-    std::env::var("NVF_WRIST_DROP").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(WRIST_DROP)
-}
-
-/// How far left of the eye the glance holds the arm, game units, at the Glance position
-/// row's Lower left (`nvf_play::wrist_arm::Position`, the default): the owner's first
-/// Odin photo had the device in the middle right of a 16:9 picture, over the way ahead,
-/// where the reference framing keeps it low on the left with the world clear beside it
-/// [design: the owner, 2026-11-21]. Centre is 0. `NVF_WRIST_SIDE` overrides it while it
-/// is being fitted. Fitted on the desktop at Goodsprings, 1920 × 1080: at 26 the device
-/// ran off the left edge, at 14 it sits whole in the lower left with the road ahead clear.
-const WRIST_SIDE: f32 = 14.0;
-
-fn wrist_side() -> f32 {
-    std::env::var("NVF_WRIST_SIDE").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(WRIST_SIDE)
-}
+// The glance's framing (the arms view, the drop and the side) is fork-owned:
+// `crate::odin::wrist_screen::framing` (docs/fork.md's fork-owned module rule).
 
 /// The field of view the first-person arms and weapon are drawn with otherwise, degrees
 /// as [`PIPBOY_FOV`] [documented: `Fallout_default.ini` `fDefault1stPersonFOV=55`,
@@ -3230,7 +3201,7 @@ fn keep_sights_facing(a: &mut Animator, spine: usize) -> f32 {
 /// `drop` and `side` move where the rig *appears*: moving the lens node by `d` across the
 /// view leaves the rig `(1 − k) · d` from where it was, so with the glance's wider arms
 /// view (`k` under 1) a drop puts the device lower in the picture and a positive `side`
-/// further right. The glance alone uses them (`wrist_drop`, `wrist_side`); the menus'
+/// further right. The glance alone uses them (`crate::odin::wrist_screen::framing`); the menus'
 /// raise and ordinary play pass 0 and are untouched.
 ///
 /// `view` is the view's own frame ([`view_frame`]), not any rotation that merely points
@@ -4318,7 +4289,7 @@ fn drive_body(
             (false, Some(v)) => {
                 let normal = arms_magnification(v, first_fov);
                 match pipboy {
-                    Some(t) => normal + (arms_magnification(v, WRIST_FOV) - normal) * pipboy_ease(t),
+                    Some(t) => normal + (arms_magnification(v, framing::WRIST_FOV) - normal) * pipboy_ease(t),
                     None => normal,
                 }
             }
@@ -4329,9 +4300,9 @@ fn drive_body(
         let view = view_frame(player.heading, player.pitch);
         // The glance holds the arm lower than a menu would and, unless the player asked
         // for Centre, over to the left, so the way ahead is read beside the device
-        // (`WRIST_DROP`, `WRIST_SIDE`, `wrist_arm::Position`).
+        // (`crate::odin::wrist_screen::framing`, `wrist_arm::Position`).
         let centred = wrist.as_deref().is_some_and(|w| w.centred());
-        let (drop, side) = (wrist_drop() * glance, if centred { 0.0 } else { -wrist_side() * glance });
+        let (drop, side) = (framing::drop() * glance, if centred { 0.0 } else { -framing::side() * glance });
         place_lens(f, eye, view, k, drop, side, &mut transforms);
         lens_k = k;
     }
@@ -4558,7 +4529,7 @@ mod tests {
     #[test]
     fn the_glances_device_keeps_its_place_in_the_picture_through_a_full_turn() {
         let eye = Vec3::new(120.0, -40.0, 96.0);
-        let (drop, side) = (WRIST_DROP, -WRIST_SIDE);
+        let (drop, side) = (framing::drop(), -framing::side());
         for pitch in [-0.6, 0.0, 0.6] {
             let mut was: Option<Vec3> = None;
             for i in 0..=360 {

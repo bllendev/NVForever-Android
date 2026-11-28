@@ -55,6 +55,45 @@ use nvf_play::wrist_arm::{WristBody, WristLive};
 use nvf_play::wrist_live::{window, LocalPic, Mark, MarkKind, Window};
 use nvf_play::wrist_page::{Page, Row};
 
+/// How the glance frames the arm: the view it is drawn with, how far below the eye it
+/// holds the device and how far to the side. Fork-owned, so `player_body::drive_body`
+/// keeps two call sites and none of this (docs/fork.md).
+pub mod framing {
+    /// The field of view the arm is drawn with for the live wrist map's glance
+    /// (`crate::odin::wrist_screen`), degrees as [`crate::player_body::PIPBOY_FOV`] counts
+    /// them. The menus' 47 fills the picture with the device, which is what a menu wants; a
+    /// glance keeps the road ahead in view, so the whole Pip-Boy sits in the lower left instead. The lens draws the rig
+    /// across the view about the eye, so a narrow arms view throws what is off the eye's axis
+    /// off the picture as well: at the menus' 47 the hand fills the screen and the device is
+    /// past the left edge, at 85 the device is still cut by it, at 110 it is whole and the
+    /// road ahead stays clear [design: fitted on the desktop against the vanilla Pip-Boy 3000
+    /// at Goodsprings, 2026-11-21, spikes/001-live-wrist-world].
+    pub const WRIST_FOV: f32 = 110.0;
+
+    /// How far below the eye the glance holds the arm, game units: a menu puts the device in
+    /// the middle of the view, a glance keeps it under the road ahead [design: fitted on the
+    /// desktop at Goodsprings, 2026-11-21, spikes/001-live-wrist-world]. `NVF_WRIST_DROP`
+    /// overrides it while it is being fitted.
+    const WRIST_DROP: f32 = 3.0;
+
+    pub fn drop() -> f32 {
+        std::env::var("NVF_WRIST_DROP").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(WRIST_DROP)
+    }
+
+    /// How far left of the eye the glance holds the arm, game units, at the Glance position
+    /// row's Lower left (`nvf_play::wrist_arm::Position`, the default): the owner's first
+    /// Odin photo had the device in the middle right of a 16:9 picture, over the way ahead,
+    /// where the reference framing keeps it low on the left with the world clear beside it
+    /// [design: the owner, 2026-11-21]. Centre is 0. `NVF_WRIST_SIDE` overrides it while it
+    /// is being fitted. Fitted on the desktop at Goodsprings, 1920 × 1080: at 26 the device
+    /// ran off the left edge, at 14 it sits whole in the lower left with the road ahead clear.
+    const WRIST_SIDE: f32 = 14.0;
+
+    pub fn side() -> f32 {
+        std::env::var("NVF_WRIST_SIDE").ok().and_then(|v| v.parse().ok()).filter(|v: &f32| v.is_finite()).unwrap_or(WRIST_SIDE)
+    }
+}
+
 pub struct WristScreenPlugin;
 
 impl Plugin for WristScreenPlugin {

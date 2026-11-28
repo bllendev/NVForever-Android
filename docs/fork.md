@@ -45,7 +45,7 @@ Everything, including every part the fork used to have of its own:
 | 16 KB ELF load alignment | `tools/android/verify_apk.py` | upstream's check accepts 4 KB, which does not load on a 16 KB-page device (Android 15) |
 | the updater pointed at this repository | `crates/nvf-launcher/src/odin.rs` | upstream's fails closed on a different package name and signer, which is exactly what this fork is |
 | the rebase workflows | `.github/workflows/upstream-{sync,promote}.yml` | the stack is replayed, so it needs replaying every day and promoting by hand |
-| the live glance at the Pip-Boy | `engine/nvf-play/src/wrist_{arm,hud,live,local,page}.rs`, `engine/nvforever/src/wrist_screen.rs` | the owner's live wrist map: the device raised on the arm with the game still running, which is what he plays with on the Odin |
+| the live glance at the Pip-Boy | `engine/nvf-play/src/wrist_{arm,hud,live,local,page}.rs`, `engine/nvforever/src/wrist_screen.rs` (its `framing` module holds the arms view, the drop and the side) | the owner's live wrist map: the device raised on the arm with the game still running, which is what he plays with on the Odin |
 | Quick Loot scrolled with the D-pad | `engine/nvf-play/src/quick_loot_dpad.rs` | on a controller the list could only be scrolled with the look stick |
 | Hide HUD Key: Keep Quick Loot | the `tweak-hide-hud-quick-loot` row | "just the HUD gone but Quick Loot to stay" |
 
@@ -66,8 +66,11 @@ The cost of carrying this fork is the number of **upstream lines** it changes, b
 one of them is a line a rebase can conflict on. So:
 
 - the fork's code lives in files of its own: `engine/nvforever/src/odin/`,
-  `engine/nvf-play/src/odin/`, `engine/nvforever/src/gpu_recorder/` (declared from `odin/mod.rs`,
-  kept by that name because its log lines and docs use it), `crates/nvf-launcher/src/odin.rs`,
+  `engine/nvf-play/src/odin/`, `engine/nvforever/src/gpu_recorder/` and
+  `engine/nvforever/src/wrist_screen.rs` (both declared from `odin/mod.rs` with a `#[path]`,
+  kept by those names because their log lines and docs use them),
+  `engine/nvf-play/src/wrist_{arm,hud,live,local,page}.rs`,
+  `engine/nvf-play/src/quick_loot_dpad.rs`, `crates/nvf-launcher/src/odin.rs`,
   `android/.../OdinFork.java`, `android/.../OdinStorage.java`, `android/.../OdinLauncher.java`,
   `android/.../OdinFolderPicker.java`, `android/.../SaveBackup.java`, `android/.../DebugReport.java`,
   `android/.../OdinCrashTests.java`, `android/.../OdinAdvanced.java`, `android/tests/*Test.java` (the fork's),
@@ -75,7 +78,10 @@ one of them is a line a rebase can conflict on. So:
 - an upstream file gets a **hook**: one or two lines that call into those files;
 - a hook that grows a body is moved back into a fork-owned file, leaving the call behind.
 
-The hooks, in full, as of this stack:
+The hooks, in full, as of this stack (rebased onto upstream `6b7015970`, 2026-11-27). "lines"
+counts production lines only: where the fork also added tests to an upstream file's own
+`mod tests`, the row says so, because those lines are ours and are never what a rebase
+conflicts on.
 
 | upstream file | lines | the hook |
 | --- | :-: | --- |
@@ -87,15 +93,18 @@ The hooks, in full, as of this stack:
 | `vats_highlight.rs`, `particles.rs`, `effect_particles.rs`, `decals.rs`, `heat_haze.rs`, `pipboy_arm.rs` | 1 gate each | `odin::crash_tests` |
 | `particles.rs`, `effect_particles.rs`, `decals.rs` | 1 call each | `odin::gpu_recorder::transparent_chunks::tag` |
 | `cloud_shadows.rs`, `minimap_render.rs`, `reflection.rs`, `ssao.rs`, `sun_heightfield.rs`, `terrain_shadows.rs`, `vats_highlight.rs` | 1 `mark` each (2 in `ssao.rs` and `terrain_shadows.rs`) | `odin::gpu_recorder::mark` |
-| `engine/nvf-assets/src/{lib,nif_material,particles}.rs` | 3 blocks | `nif_material::no_soft_particles`, the crash test `nvf_assets` cannot reach `odin` for |
+| `engine/nvf-assets/src/{lib,nif_material,particles}.rs` | 3 blocks | `nif_material::no_soft_particles`, the crash test `nvf_assets` cannot reach `odin` for; in `lib.rs` two names added to upstream's one-line `pub use nif_material::{…}`, which is why that line conflicts on every upstream addition to it |
 | the vendored `bevy_render` | 6 blocks | the breadcrumbs, the upload and readback counters and the readback label (`engine/vendor/README.md`) |
 | `engine/nvforever/Cargo.toml` | 2 blocks | `libc` and the optional `mimalloc` on Android, the `odin-mimalloc` feature |
 | `engine/nvforever/src/touch/gyro.rs` | 4 blocks | `odin::controller_gyro::install`, its `poll` parameter, and three terms of `poll` |
 | `engine/nvf-play/src/lib.rs` | 1 | `pub mod odin;` |
 | `engine/nvf-play/src/player.rs` | 2 | `odin::controller_gyro::look_allows` in the look route's device gate |
-| `crates/nvf-settings-layout/src/lib.rs` | 3 | `odin-controller-gyro-v1` in two sections and in `NEEDS` |
+| `crates/nvf-settings-layout/src/lib.rs` | 3 | `odin-controller-gyro-v1` in two sections and in `NEEDS`, and the glance's eight `wrist-*` rows |
+| `engine/nvf-play/src/settings_layout.rs` | 8 rows | the glance's rows in `KNOWN`, and `hide-hud-quick-loot` in the tweak-order string |
+| `engine/nvf-play/src/tweaks.rs` | 4 blocks | `hide_hud_keeps_quick_loot`: the field, its default, its `switch!` row and the `HudHidden` term it feeds |
+| `engine/nvf-android/Cargo.toml` | 1 block | the `odin-mimalloc` feature passed through to `nvforever` |
 | `crates/nvf-launcher/src/lib.rs` | 1 | `pub mod odin;` |
-| `crates/nvf-launcher/src/mobile.rs` | 4 blocks | `odin::adopt(home)` at the top of `request`; three fork fields in `State`; `Request::Odin` and its arm; `odin::chosen_save` in `Start` |
+| `crates/nvf-launcher/src/mobile.rs` | 6 blocks | `odin::adopt(home)` at the top of `request`; three fork fields in `State`; `Request::Odin` and its arm; `Request::Start`'s `save` field and `odin::chosen_save`; `REPO_DOWNLOADS` is `odin::DOWNLOADS`; `odin::apk_for_this_app` in the asset filter |
 | `android/.../MobileLauncher.java` | 11 words, 9 lines | `OdinFork.home`; upstream's builders, palette and pages stop being `private`; the `odin` field; one call per page, the focus ring, the two render hooks and `OdinAdvanced.attach` on the build line |
 | `android/.../LauncherActivity.java` | 4 blocks | `OdinFork.home` twice, `OdinStorage.promptIfNeeded`, the three key and motion overrides, the export result, the save a start loads |
 | `crates/nvf-launcher/src/news.rs` | 1 | `RELEASES` is `odin::RELEASES` |
@@ -103,15 +112,15 @@ The hooks, in full, as of this stack:
 | `android/app/src/main/AndroidManifest.xml` | 3 | the storage permissions |
 | `tools/android/build.py` | 2 blocks | `--profile` and `--variant` |
 | `tools/android/verify_apk.py` | 2 blocks | the 16 KB alignment |
-| `engine/nvforever/src/player_body.rs` | 4 blocks | the glance's arms view, drop and side; `place_lens` takes the view's own frame; `drive_body` reads `wrist_arm::WristLive` |
-| `engine/nvforever/src/view_sway.rs` | 1 block | `faded`, the pose held rigidly while the glance is up |
+| `engine/nvforever/src/player_body.rs` | 3 blocks, 1 use, + 53 test lines | `use crate::odin::wrist_screen::framing` and two calls on it (the arms view, the drop and the side; the numbers themselves are fork-owned since 2026-11-27); `place_lens` takes the view's own frame; `drive_body` reads `wrist_arm::WristLive` out of its last parameter tuple |
+| `engine/nvforever/src/view_sway.rs` | 1 fn, + 26 test lines | `faded`, the pose held rigidly while the glance is up. Kept here, not moved: eight lines of code on upstream's own `SwayPose`, tested beside upstream's sway tests with their `busy` helper |
 | `engine/nvforever/src/pipboy_controls.rs` | 1 block | the tab knob follows the glance's page |
 | `engine/nvf-play/src/lib.rs` | 2 blocks | the `wrist_*` and `quick_loot_dpad` modules, and the three glance plugins |
-| `engine/nvf-play/src/bindings.rs` | 4 blocks | `Control::GlancePipBoy`, `held` and `bound` for the glance, `pressed_with_pad` for the list's D-pad |
-| `engine/nvf-play/src/flashlight.rs` | 2 blocks | `MenuKeyHold` hands a hold past the glance's moment to the glance |
-| `engine/nvf-play/src/hud.rs` | 3 blocks | the `Meter` markers the glance's HUD row hides by, `HudHidden::quick_loot` and `hides_quick_loot` |
-| `engine/nvf-play/src/quick_loot.rs` | 1 field, 6 lines | `owns_vertical_dpad`, the calls into `quick_loot_dpad`, and `hides_quick_loot` in `follow` and `draw` |
-| `engine/nvf-play/src/weapon_wheel.rs` | 2 | one resource and `quick_loot_dpad::binds` round the hotkeys' presses |
+| `engine/nvf-play/src/bindings.rs` | 4 blocks | `Control::GlancePipBoy` and its label, one row in `GAME_CONTROLS` (whose length is in its own type, so the count changes with it), `held` and `bound` for the glance, `pressed_with_pad` for the list's D-pad |
+| `engine/nvf-play/src/flashlight.rs` | 2 blocks, + 40 test lines | `MenuKeyHold` hands a hold past the glance's moment to the glance |
+| `engine/nvf-play/src/hud.rs` | 3 blocks, + 7 test lines | the `Meter` markers the glance's HUD row hides by, `HudHidden::quick_loot` and `hides_quick_loot` |
+| `engine/nvf-play/src/quick_loot.rs` | 1 field, 6 lines, + 200 test lines | `owns_vertical_dpad`, the calls into `quick_loot_dpad`, and `hides_quick_loot` in `follow` and `draw` |
+| `engine/nvf-play/src/weapon_wheel.rs` | 2, + 64 test lines | one term in upstream's `Extras` type alias and its destructure, and `quick_loot_dpad::binds` round the hotkeys' presses |
 | `engine/nvf-play/src/pipboy/data{,/model,/outline}.rs` | 4 blocks | `outline::cast` shared with `wrist_local`, `MapPicture` for `WorldMap`, two visibility widenings |
 | `engine/nvf-play/src/reticle.rs` | 1 | the crosshair goes while the glance is up |
 | `engine/nvf-play/src/interface.rs` | 1 | `own_texture` is public, for the glance's map picture |
@@ -121,25 +130,54 @@ of those grows, move its body into a fork-owned file and leave the hook.
 
 ## Conflict hotspots
 
-By how much of an upstream file the fork touches, likeliest first:
+Ranked by what actually conflicts, from the rebases run so far. The 2026-11-27 rebase of this
+stack across 612 upstream commits (upstream `43a17d451` to `6b7015970`, which carried a mod
+manager, named mod profiles, a Co-op page and report deletion) hit **five** conflicts, all of
+them in the top class below, and none in `android/`:
 
-1. `android/app/build.gradle` and `android/gradle.properties`. Upstream edits these whenever
-   the port's SDK, assets or version scheme change. Small, but they conflict often. Resolve in
-   upstream's favour and re-add the application id property, the debug suffix and the
-   `-odin.<n>` revision.
-2. `engine/nvforever/src/crash.rs`. The allocator block is upstream's code with the backing
+1. **A one-line list or a counted array an upstream file keeps in one place.** This is the
+   whole class that conflicted, and it will keep conflicting, because both sides add to the
+   same line:
+   - `engine/nvf-assets/src/lib.rs`, the single-line `pub use nif_material::{…}` re-export;
+   - `engine/nvf-play/src/weapon_wheel.rs`, the `Extras<'w>` type alias and its destructure
+     (upstream turned four loose parameters into that alias, so the fork's parameter became a
+     term of it);
+   - `engine/nvforever/src/player_body.rs`, `drive_body`'s last parameter tuple, which both
+     sides append to because a Bevy system takes at most 16 parameters;
+   - `engine/nvf-play/src/bindings.rs`, `GAME_CONTROLS`, whose length is written into its type:
+     resolving the doc comment in upstream's favour and keeping upstream's count is the trap,
+     and it fails to compile rather than silently, so take upstream's prose and add 1.
+   Resolve each by taking upstream's line and adding the fork's term to the end of it.
+2. **A doc comment that lists every row or feature.** `engine/nvf-play/src/settings_layout.rs`
+   `KNOWN`'s comment and `bindings.rs`'s `GAME_CONTROLS` comment. Keep upstream's sentence and
+   append the fork's clause; never drop upstream's additions to it.
+3. `engine/nvforever/src/crash.rs`. The allocator block is upstream's code with the backing
    allocator swapped; if upstream rewrites `SaysWhenEmpty`, keep upstream's version and put
-   `BACKEND` and the `dump_once` line back into it.
-3. `engine/nvforever/src/main.rs`. Two lines, and the Android plugin tuple is a line upstream
-   edits whenever it adds a plugin. Keep upstream's tuple and add ours back at the end.
-4. `crates/nvf-launcher/src/mobile.rs` and `news.rs`. One line each; `mobile.rs` is churned a
-   lot, so expect to re-place rather than re-apply.
-5. `tools/android/{build.py,verify_apk.py}`. Upstream's own tooling. The alignment constant and
+   `BACKEND` and the `dump_once` line back into it. It did not conflict this time.
+4. `android/app/build.gradle` and `android/gradle.properties`. Upstream edits these whenever
+   the port's SDK, assets or version scheme change, and the fork rewrites the version
+   derivation. Resolve in upstream's favour and re-add the application id property, the debug
+   suffix and the `-odin.<n>` revision. Quiet since 2026-11-25.
+5. `android/.../MobileLauncher.java` and `LauncherActivity.java`. The fork's largest hook by
+   word count, and so far the luckiest: upstream's 2026-11 launcher work was all in the
+   **desktop** launcher (`crates/nvf-launcher/src/{app,fomod,modlist}.rs`, 8,200 lines) and
+   touched neither Java file nor `mobile.rs`. When it does touch them, the hook to re-place is
+   one call per page in `render()`, the two render hooks, the three key and motion overrides
+   and the widened visibility of upstream's builders and palette; everything behind them is in
+   `OdinLauncher`.
+6. `crates/nvf-launcher/src/mobile.rs` and `news.rs`. One line each; expect to re-place rather
+   than re-apply.
+7. `tools/android/{build.py,verify_apk.py}`. Upstream's own tooling. The alignment constant and
    the two build options are worth offering upstream (see below), which would remove them from
    this list.
-6. `engine/Cargo.lock`. Never merge it: take upstream's and build once, which adds `mimalloc`
+8. `engine/Cargo.lock`. Never merge it: take upstream's and build once, which adds `mimalloc`
    back.
-7. `engine/nvforever/src/android.rs`. One line, rarely touched.
+9. `engine/nvforever/src/android.rs`. One line, rarely touched.
+
+What does **not** conflict, and is worth keeping that way: every one of the fork's own files,
+the vendored `bevy_render` patches (upstream vendors the same tree and edits other parts of
+it), and the fork's tests inside upstream files' `mod tests`, which sit at the end of the file
+where upstream adds tests of its own without meeting them.
 
 ## Identity, saves and the game folder
 
