@@ -105,12 +105,12 @@ final class MobileLauncher {
         icon.setImageResource(R.mipmap.ic_launcher);
         icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         icon.setContentDescription("NVForever");
-        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(36), dp(36));
-        iconLp.rightMargin = dp(10);
+        LinearLayout.LayoutParams iconLp = new LinearLayout.LayoutParams(dp(odin.scale(36)), dp(odin.scale(36)));
+        iconLp.rightMargin = dp(odin.pad(10));
         header.addView(icon, iconLp);
         TextView title = label("NVForever", 22, gold); title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         title.setSingleLine(true); title.setEllipsize(TextUtils.TruncateAt.END);
-        header.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1)); title.setGravity(Gravity.CENTER_VERTICAL);
+        header.addView(title, new LinearLayout.LayoutParams(0, dp(odin.scale(44)), 1)); title.setGravity(Gravity.CENTER_VERTICAL);
         countdownBadge = column();
         countdownBadge.setGravity(Gravity.END);
         countdownBadge.setVisibility(View.GONE);
@@ -162,12 +162,13 @@ final class MobileLauncher {
 
     private static int color(JSONObject colors, String key) throws JSONException { return (int) colors.getLong(key); }
     int dp(float dp) { return Math.round(dp * activity.getResources().getDisplayMetrics().density); }
-    private void space(View view, int x, int y) { view.setPadding(dp(x), dp(y), dp(x), dp(y)); }
+    // The fork's compact density on a handheld: every size below goes through it (OdinCompact).
+    private void space(View view, int x, int y) { view.setPadding(dp(odin.pad(x)), dp(odin.pad(y)), dp(odin.pad(x)), dp(odin.pad(y))); }
     LinearLayout column() { LinearLayout v = new LinearLayout(activity); v.setOrientation(LinearLayout.VERTICAL); return v; }
-    private LinearLayout row() { return new LinearLayout(activity); }
+    LinearLayout row() { return new LinearLayout(activity); }
     TextView label(String value, int size, int color) {
         TextView v = new TextView(activity);
-        v.setText(value); v.setTextSize(size); v.setTextColor(color); v.setLineSpacing(dp(2), 1f);
+        v.setText(value); v.setTextSize(odin.text(size)); v.setTextColor(color); v.setLineSpacing(dp(odin.pad(2)), 1f);
         return v;
     }
     private HorizontalScrollView horizontal(LinearLayout bar) {
@@ -177,8 +178,9 @@ final class MobileLauncher {
     }
     Button tap(String value, boolean primary, boolean enabled, Runnable click) {
         Button view = new Button(activity);
-        view.setAllCaps(false); view.setText(value); view.setTextSize(15);
-        view.setMinimumHeight(dp(48)); view.setMinHeight(dp(48)); view.setMinimumWidth(dp(48)); space(view, 12, 4);
+        view.setAllCaps(false); view.setText(value); view.setTextSize(odin.text(15));
+        int tall = dp(odin.rowHeight());
+        view.setMinimumHeight(tall); view.setMinHeight(tall); view.setMinimumWidth(tall); space(view, 12, 4);
         view.setTextColor(primary && enabled ? onGold : enabled ? text : weak);
         GradientDrawable fill = new GradientDrawable(); fill.setColor(primary && enabled ? gold : button); fill.setCornerRadius(dp(8));
         view.setBackground(new RippleDrawable(ColorStateList.valueOf(0x40ffffff), fill, null));
@@ -188,16 +190,17 @@ final class MobileLauncher {
     }
     void add(LinearLayout parent, View view) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.bottomMargin = dp(8); parent.addView(view, lp);
+        lp.bottomMargin = dp(odin.gap()); parent.addView(view, lp);
     }
     private void addBar(LinearLayout bar, View view, boolean evenly) {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(evenly ? 0 : -2, -2, evenly ? 1 : 0);
-        lp.setMargins(dp(4), dp(2), dp(4), dp(2)); bar.addView(view, lp);
+        lp.setMargins(dp(odin.pad(4)), dp(odin.pad(2)), dp(odin.pad(4)), dp(odin.pad(2))); bar.addView(view, lp);
     }
     LinearLayout card(String title) {
         LinearLayout box = column(); space(box, 12, 10);
-        GradientDrawable fill = new GradientDrawable(); fill.setColor(card); fill.setCornerRadius(dp(10));
-        box.setBackground(fill); add(content, box);
+        GradientDrawable fill = new GradientDrawable(); fill.setColor(card); fill.setCornerRadius(dp(odin.pad(10)));
+        // Compact, the cards are dealt into columns rather than stacked (OdinLauncher).
+        box.setBackground(fill); add(odin.cardParent(content), box);
         if (!title.isEmpty()) add(box, label(title, 19, gold));
         return box;
     }
@@ -243,6 +246,9 @@ final class MobileLauncher {
         return args.toString();
     }
     void startRefused(String error) {
+        // A load order with missing masters is refused with a dialog that can clear it
+        // (OdinLauncher, crate::odin::masters).
+        if (odin.startRefused(error)) return;
         refresh(false, false, error);
         if (state.isNull("folder")) showGameFolder(error);
     }
@@ -312,8 +318,8 @@ final class MobileLauncher {
                     ImageView thumb = new ImageView(activity);
                     thumb.setImageBitmap(bmp);
                     thumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                    LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(84), dp(48));
-                    tlp.rightMargin = dp(8);
+                    LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(dp(odin.scale(84)), dp(odin.scale(48)));
+                    tlp.rightMargin = dp(odin.pad(8));
                     box.addView(thumb, tlp);
                 }
             } catch (IllegalArgumentException ignored) {
@@ -838,7 +844,7 @@ final class MobileLauncher {
             if (!tab.equals(r.getString("tab"))) continue;
             any = true;
             String group = r.isNull("heading") ? "" : r.getString("heading");
-            if (!group.equals(heading) && !group.isEmpty()) add(content, label(group, 17, gold));
+            if (!group.equals(heading) && !group.isEmpty()) odin.heading(content, label(group, 17, gold));
             heading = group;
             LinearLayout box = card(r.getString("label"));
             String note = r.getString("note"); if (!note.isEmpty()) add(box, label(note, 14, weak));
@@ -942,21 +948,12 @@ final class MobileLauncher {
         JSONArray items = model.getJSONArray("entries");
         boolean haveGame = !state.isNull("folder");
         if (!haveGame) add(plugins, label("Import your game folder to manage its plugins.", 15, weak));
-        for (int i = 0; i < items.length(); i++) {
-            JSONObject item = items.getJSONObject(i); String name = item.getString("name");
-            boolean base = "FalloutNV.esm".equalsIgnoreCase(name);
-            CheckBox check = new CheckBox(activity); check.setText(name); check.setMinimumHeight(dp(48));
-            check.setChecked(base || item.getBoolean("active")); check.setEnabled(haveGame && !base); add(plugins, check);
-            check.setOnClickListener(v -> changePlugin(name, "toggle"));
-            if (base) continue;
-            LinearLayout move = row(); add(plugins, move);
-            boolean up = i > 0 && !"FalloutNV.esm".equalsIgnoreCase(items.getJSONObject(i - 1).getString("name"));
-            boolean down = i + 1 < items.length() && !"FalloutNV.esm".equalsIgnoreCase(items.getJSONObject(i + 1).getString("name"));
-            addBar(move, tap("Move up", false, haveGame && up, () -> changePlugin(name, "up")), true);
-            addBar(move, tap("Move down", false, haveGame && down, () -> changePlugin(name, "down")), true);
-        }
+        // One slim row per plugin, the masters it is missing, and the load order first on a
+        // handheld (OdinLauncher, crate::odin::masters).
+        odin.pluginRows(plugins, items, haveGame);
+        odin.afterMods(content);
     }
-    private void changePlugin(String name, String change) { act(() -> { send("plugin", "name", name, "change", change); renderHere(); }); }
+    void changePlugin(String name, String change) { act(() -> { send("plugin", "name", name, "change", change); renderHere(); }); }
     private interface Action { void run() throws IOException, JSONException; }
     private void act(Action action) {
         try { action.run(); }

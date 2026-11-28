@@ -74,6 +74,7 @@ jobs:
           "$JAVA_HOME/bin/javac" -encoding UTF-8 -d "$tests" \
             android/app/src/main/java/org/nvforever/android/InstallConfig.java \
             android/app/src/main/java/org/nvforever/android/OdinFork.java \
+            android/app/src/main/java/org/nvforever/android/OdinCompact.java \
             android/app/src/main/java/org/nvforever/android/SaveBackup.java \
             android/app/src/main/java/org/nvforever/android/DebugReport.java \
             android/app/src/main/java/org/nvforever/android/OdinCrashTests.java \
@@ -86,12 +87,12 @@ jobs:
             android/app/src/main/java/org/nvforever/android/UpdatePolicy.java \
             android/app/src/test/java/org/nvforever/android/InstallConfigTest.java \
             android/tests/OdinForkTest.java android/tests/SaveBackupTest.java android/tests/OdinCrashTestsTest.java \
-            android/tests/GpuDriversTest.java \
+            android/tests/GpuDriversTest.java android/tests/OdinCompactTest.java \
             android/tests/DebugReportTest.java android/tests/HandoffCoordinatorTest.java \
             android/tests/GyroMotionTest.java android/tests/AndroidPerformanceTest.java \
             android/tests/MarkdownParserTest.java android/tests/UpdatePolicyTest.java
           for control in InstallConfigTest OdinForkTest SaveBackupTest DebugReportTest OdinCrashTestsTest \
-                         GpuDriversTest HandoffCoordinatorTest GyroMotionTest \
+                         GpuDriversTest OdinCompactTest HandoffCoordinatorTest GyroMotionTest \
                          AndroidPerformanceTest MarkdownParserTest UpdatePolicyTest; do
             "$JAVA_HOME/bin/java" -cp "$tests" "org.nvforever.android.$control"
           done
