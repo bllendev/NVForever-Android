@@ -30,6 +30,7 @@ public final class DebugReportTest {
             for (String excluded : new String[]{"OLD CRASH", "OLD RUN", "STALE SAME PID", "PRIVATE CONFIG"}) {
                 check(!report.contains(excluded), "exclude " + excluded);
             }
+            testStartLogs(Files.createDirectory(dir.resolve("starts")));
             testReferencedPriorRun(Files.createDirectory(dir.resolve("prior")));
             testRejectedReferences(Files.createDirectory(dir.resolve("rejected")));
             testTruncatedReference(Files.createDirectory(dir.resolve("truncated")));
@@ -41,6 +42,32 @@ public final class DebugReportTest {
             }
         }
         System.out.println("DebugReport tests passed");
+    }
+
+    /**
+     * The fork's start log (odin/start_log.rs): what the engine printed before the run log
+     * was open. A start that is refused leaves only that, which is exactly the case the
+     * export used to come back empty for.
+     */
+    private static void testStartLogs(Path dir) throws Exception {
+        Files.writeString(dir.resolve("start-20261127-120000-42.txt"),
+                "NVForever start log\nerror: no game folder\n");
+        String report = export(dir);
+        check(report.contains("No engine run log"), "says there is no run log");
+        check(report.contains("error: no game folder"), "a refused start still exports what it printed");
+
+        // A run that opened a run log exports the start log its own process wrote.
+        Files.writeString(dir.resolve("nvforever-20261127-130000-43.log"), "THE RUN\n");
+        Files.writeString(dir.resolve("start-20261127-130000-43.txt"), "THIS RUN'S START\n");
+        report = export(dir);
+        check(report.contains("THE RUN") && report.contains("THIS RUN'S START"), "both halves of one run");
+        check(!report.contains("error: no game folder"), "and not an older start log");
+
+        // A start after the newest run log is one that never got a run log of its own.
+        Files.writeString(dir.resolve("start-20261127-140000-44.txt"), "THE REFUSED START\n");
+        report = export(dir);
+        check(report.contains("THE REFUSED START"), "the newest start log is exported when it is newer than the run");
+        check(report.contains("THE RUN"), "and the newest run log is still there");
     }
 
     private static void testReferencedPriorRun(Path dir) throws Exception {

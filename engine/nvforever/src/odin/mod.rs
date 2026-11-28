@@ -15,6 +15,7 @@
 //! | `reports/mod.rs` | the run log's filter | [`vulkan_validation::log_directives`] |
 //! | `main.rs` | just before `App::run` | [`before_run`] |
 //! | `android.rs` | the home folder's name | [`home::DIR`] |
+//! | `android.rs` | the home folder, before anything can refuse the start | [`start_log::capture`] |
 //! | `android.rs` | the launcher's crash-test switches | [`crash_tests::apply`] |
 //! | `android.rs` | the player's own Vulkan driver, before the renderer | [`gpu_driver::start`] |
 //! | `android.rs` | a restart the run asked for | [`gpu_driver::restarting`] |
@@ -51,6 +52,9 @@ pub mod proc_mem;
 /// all one list.
 #[path = "../wrist_screen.rs"]
 pub mod wrist_screen;
+/// The engine's own output from before the run log is open, which is all a start that was
+/// refused ever leaves behind.
+pub mod start_log;
 /// The Khronos Vulkan validation layer, the slowest of the crash tests.
 pub mod vulkan_validation;
 

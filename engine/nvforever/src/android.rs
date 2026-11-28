@@ -48,6 +48,11 @@ pub fn prepare() -> Result<Vec<String>, String> {
     // already keeps its saves there.
     let home = files.join(crate::odin::home::DIR);
     std::env::set_var("NVFOREVER_HOME", &home);
+    // Everything this process prints, from here until the run log opens, into a file beside
+    // the run logs: a start that is refused (no game folder, a plugin list that cannot load)
+    // returns long before `crash::install`, and its words would otherwise be lost
+    // (`odin::start_log`).
+    crate::odin::start_log::capture(&home);
     // The crash-test switches the launcher's Advanced page wrote, as the variables the
     // engine's gates read (`odin::crash_tests`). Nothing when the file names none of them.
     crate::odin::crash_tests::apply(&home);

@@ -32,6 +32,8 @@ import java.util.regex.Pattern;
 final class DebugReport {
     private static final Pattern RUN = Pattern.compile("nvforever-(\\d{8}-\\d{6})-(\\d+)\\.log");
     private static final Pattern CRASH = Pattern.compile("crash-(\\d{8}-\\d{6})-(\\d+)\\.txt");
+    /** The fork's start log: everything the engine printed before the run log was open. */
+    private static final Pattern START = Pattern.compile("start-(\\d{8}-\\d{6})-(\\d+)\\.txt");
     // The file-layer warning emitted by crash::report_start, not a generic mention of a log.
     private static final Pattern PREVIOUS = Pattern.compile(
             "(?m)^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z +WARN nvforever::crash: "
@@ -55,11 +57,18 @@ final class DebugReport {
         }
         if (latest == null) {
             out.write("\nNo engine run log yet.\n");
+            // A start that was refused (no game folder, a load order that cannot work) returns
+            // before the engine opens a run log, and the only thing it leaves is this
+            // (odin/start_log.rs). Without it the export would be the header alone.
+            File start = newestStart(files, null);
+            if (start != null) append(start, out, false);
             return;
         }
         String reference = append(latest, out, true);
         Matcher run = RUN.matcher(latest.getName());
         if (!run.matches()) return;
+        File start = newestStart(files, run);
+        if (start != null) append(start, out, false);
         File crash = null;
         for (File file : files) {
             Matcher m = CRASH.matcher(file.getName());
@@ -69,6 +78,29 @@ final class DebugReport {
         }
         if (crash != null) append(crash, out, false);
         if (reference != null) appendPrevious(directory, reference, run.group(1), out);
+    }
+
+    /**
+     * The start log to export beside a run log: the one the same process wrote, so the two
+     * halves of one run are together. With no run log, or when the newest start log is newer
+     * than the newest run log, that newest one is taken instead: it is the start that never
+     * got as far as a run log, which is the whole reason this file exists.
+     */
+    private static File newestStart(File[] files, Matcher run) {
+        File newest = null;
+        File sameRun = null;
+        for (File file : files) {
+            Matcher start = START.matcher(file.getName());
+            if (!file.isFile() || !start.matches()) continue;
+            if (newest == null || file.getName().compareTo(newest.getName()) > 0) newest = file;
+            if (run != null && start.group(2).equals(run.group(2))
+                    && start.group(1).compareTo(run.group(1)) <= 0) sameRun = file;
+        }
+        if (run == null || newest == null) return newest;
+        Matcher start = START.matcher(newest.getName());
+        // A start newer than the newest run log never opened one, so it is the one to send.
+        if (start.matches() && start.group(1).compareTo(run.group(1)) > 0) return newest;
+        return sameRun;
     }
 
     private static void appendPrevious(File directory, String reference, String latestStamp, Writer out)
